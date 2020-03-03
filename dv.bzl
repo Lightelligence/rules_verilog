@@ -250,13 +250,14 @@ def _dv_unit_test_impl(ctx):
         template = ctx.file._ut_sim_template,
         output = ctx.outputs.out,
         substitutions = {
+            "{DEFAULT_SIM_OPTS}": "-f {}".format(ctx.file.default_sim_opts.short_path),
             "{FLISTS}": " ".join(["-f {}".format(f.short_path) for f in flists_list]),
             "{SIM_ARGS}": " ".join(ctx.attr.sim_args),
         },
         is_executable = True,
     )
 
-    runfiles = ctx.runfiles(files = flists_list + srcs_list + [ctx.file._default_sim_opts])
+    runfiles = ctx.runfiles(files = flists_list + srcs_list + [ctx.file.default_sim_opts])
     return [DefaultInfo(
         runfiles = runfiles,
         executable = ctx.outputs.out,
@@ -277,7 +278,7 @@ dv_unit_test = rule(
             allow_single_file = True,
             default = Label("//:ut_sim_template.sh"),
         ),
-        "_default_sim_opts": attr.label(
+        "default_sim_opts": attr.label(
             allow_single_file = True,
             default = "//:default_sim_opts.f",
         ),

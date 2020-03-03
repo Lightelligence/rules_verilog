@@ -7,7 +7,7 @@ xrun \
     -vtimescale 100fs/100fs \
     -define TIMESCALE_STEP_FS=100 \
     -define TIMESCALE_PREC_FS=100 \
-    -f digital/dv/scripts/default_sim_opts.f \
+    {DEFAULT_SIM_OPTS} \
     {FLISTS} \
     {SIM_ARGS} \
     $@
