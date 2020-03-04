@@ -16,7 +16,8 @@ def create_flist_content(ctx, gumi_path, allow_library_discovery, no_synth=False
     if not no_synth:
         if allow_library_discovery:
             for d in libdir:
-                flist_content.append("-y {}".format(d))
+                if d != "":
+                    flist_content.append("-y {}".format(d))
         else:
             flist_content += [f.short_path for f in ctx.files.modules]
 
