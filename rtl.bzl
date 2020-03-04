@@ -16,8 +16,9 @@ def create_flist_content(ctx, gumi_path, allow_library_discovery, no_synth=False
     if not no_synth:
         if allow_library_discovery:
             for d in libdir:
-                if d != "":
-                    flist_content.append("-y {}".format(d))
+                if d == "":
+                    d = "."
+                flist_content.append("-y {}".format(d))
         else:
             flist_content += [f.short_path for f in ctx.files.modules]
 
@@ -338,7 +339,7 @@ rtl_ut = rule(
         "out": attr.output(),
         "_ut_sim_template": attr.label(
             allow_single_file = True,
-            default = Label("//:ut_sim_template.sh"),
+            default = Label("//:rtl_ut_sim_template.sh"),
         ),
     },
     executable = True,
