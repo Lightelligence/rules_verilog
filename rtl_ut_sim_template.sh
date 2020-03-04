@@ -4,6 +4,6 @@
 xrun \
     -define TBV \
     -disable_sem2009 \
-    +libext+.sv \
+    +libext+.v+.sv \
     {FLISTS} \
     $@
