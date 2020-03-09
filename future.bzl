@@ -37,7 +37,7 @@ def _hal_lint_impl(ctx):
     flists_list = flists.to_list()
 
     script = "\n".join(
-        ['xrun -hal -halargs "-top {}" {}'.format(ctx.attr.top, " ".join(["-f {}".format(f.short_path) for f in flists_list]))],
+        ['runmod -t xrun -- -hal -halargs "-top {}" {}'.format(ctx.attr.top, " ".join(["-f {}".format(f.short_path) for f in flists_list]))],
     )
 
     ctx.actions.write(

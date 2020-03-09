@@ -350,7 +350,7 @@ def _rtl_lint_impl(ctx):
     trans_flists = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogLibFiles, "transitive_flists", allow_other_outputs = False)
 
     content = ["#!/usr/bin/bash",
-               "xrun \\",
+               "runmod -t xrun -- \\",
                "  -define LINT \\",
                "  -sv \\",
                "  -hal  \\",
@@ -441,7 +441,7 @@ def _rtl_cdc_test_impl(ctx):
     executable_content = [
         "#!/usr/bin/bash",
         "set -e",
-        "jg \\",
+        "runmod -t jg -- \\",
         "  -cdc \\",
         "  -no_gui \\",
         "  -proj `calc_simresults_location.py`/jg_cdc_{}\\".format(ctx.attr.top),
@@ -546,7 +546,7 @@ def _rtl_cdc_gui_impl(ctx):
     # The run script is pretty dumb, the tcl command file has the interesting stuff
     executable_content = [
         "#!/usr/bin/bash",
-        "jg \\",
+        "runmod -t jg -- \\",
         "  -cdc \\",
         "  -proj `calc_simresults_location.py`/jg_cdc_{}\\".format(ctx.attr.top),
         "  {} \\".format(ctx.outputs.cdc_preamble_cmds.short_path),
