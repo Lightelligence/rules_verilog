@@ -57,6 +57,17 @@ def _dv_test_cfg_impl(ctx):
             sim_opts = sim_opts_str,
         ),
     )
+
+    for socket_name, socket_command in ctx.attr.sockets.items():
+        if "{socket_file}" not in socket_command:
+            fail("socket {} did not have {{socket_file}} in socket_command".format(socket_name))
+
+    dynamic_args = {'sockets' : ctx.attr.sockets}
+    out = ctx.outputs.dynamic_args
+    ctx.actions.write(
+        output = out,
+        content = str(dynamic_args),
+    )
     return [DVTestCfg(**provider_args)]
 
 dv_test_cfg = rule(
@@ -69,9 +80,20 @@ dv_test_cfg = rule(
         "vcomp": attr.label(doc = "Must point to a 'dv_tb' target for how to build this testbench."),
         "sim_opts": attr.string_dict(doc = "Additional simopts flags to throw"),
         "no_run" : attr.bool(default = False, doc = "Set to True to skip running this test."),
+        "sockets" : attr.string_dict(
+            doc = "\n".join([
+                "Dictionary mapping of socket_name to socket_command.",
+                "For each entry in the list, simmer will create a separate process and pass a unique temporary file path to both the simulator and the socket_command.",
+                "The socket name is a short identifier that will be passed as \"+SOCKET__<socket_name>=<socket_file>\" to the simulator.",
+                "The socket_file is just a filepath to a temporary file in the simulation results directory (for uniqueness)",
+                "The socket_command is a bash command that must use a python string formatter of \"{socket_file}\" somewhere in the command.",
+                "The socket_command will be run from the root of the project tree.",
+            ]),
+        ),
     },
     outputs = {
         "sim_args": "%{name}_sim_args.f",
+        "dynamic_args" : "%{name}_dynamic_args.py",
     },
 )
 
@@ -96,7 +118,7 @@ def _dv_lib_impl(ctx):
     all_sos = []
     for dpi in ctx.attr.dpi:
         sos = []
-        for gfile in dpi[DefaultInfo].files:
+        for gfile in dpi[DefaultInfo].files.to_list():
             if gfile.path.endswith(".so"):
                 sos.append(gfile)
         if len(sos) != 1:
