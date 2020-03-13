@@ -113,7 +113,13 @@ def _dv_lib_impl(ctx):
     else:
         in_flist = ctx.files.srcs
 
-    content = "\n".join(["+incdir+{}".format(d) for d in directories]) + "\n" + "\n".join([f.short_path for f in in_flist])
+    content = []
+    for d in directories:
+        if d == "":
+            d = "."
+        content.append("+incdir+{}".format(d))
+    for f in in_flist:
+        content.append(f.short_path)
 
     all_sos = []
     for dpi in ctx.attr.dpi:
@@ -128,17 +134,19 @@ def _dv_lib_impl(ctx):
     out = ctx.outputs.out
     ctx.actions.write(
         output = out,
-        content = content,
+        content = "\n".join(content),
     )
 
     trans_srcs = get_transitive_srcs(ctx.files.srcs, ctx.attr.deps + ctx.attr.dpi, VerilogLibFiles, "transitive_sources", allow_other_outputs = True)
     trans_flists = get_transitive_srcs([out], ctx.attr.deps, VerilogLibFiles, "transitive_flists", allow_other_outputs = False)
     trans_dpi = get_transitive_srcs(all_sos, ctx.attr.deps, VerilogLibFiles, "transitive_dpi", allow_other_outputs = False)
 
+    all_files = depset(trans_srcs.to_list() + trans_flists.to_list())
+
     return [
         VerilogLibFiles(transitive_sources = trans_srcs, transitive_flists = trans_flists, transitive_dpi = trans_dpi),
         DefaultInfo(
-            files = trans_srcs + trans_flists,
+            files = all_files,
             runfiles = ctx.runfiles(files = trans_srcs.to_list() + trans_flists.to_list()),
         ),
     ]
@@ -273,6 +281,7 @@ def _dv_unit_test_impl(ctx):
         output = ctx.outputs.out,
         substitutions = {
             "{DEFAULT_SIM_OPTS}": "-f {}".format(ctx.file.default_sim_opts.short_path),
+            "{DPI_LIBS}": flists_to_arguments(ctx.attr.deps, VerilogLibFiles, "transitive_dpi", "-sv_lib"),
             "{FLISTS}": " ".join(["-f {}".format(f.short_path) for f in flists_list]),
             "{SIM_ARGS}": " ".join(ctx.attr.sim_args),
         },
@@ -306,7 +315,7 @@ dv_unit_test = rule(
         ),
         "sim_args": attr.string_list(doc = "Additional simulation arguments to passed to command line"),
     },
-    outputs = {"out": "run.sh"},
+    outputs = {"out": "%{name}_run.sh"},
     test = True,
 )
 
