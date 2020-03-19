@@ -367,13 +367,14 @@ def _rtl_lint_impl(ctx):
     for key, value in gather_shell_defines(ctx.attr.shells).items():
         content.append("  -define {}{} \\".format(key, value))
 
-    for f in trans_flists:
+    for f in trans_flists.to_list():
         content.append("  -f {} \\".format(f.short_path))
     for dep in ctx.attr.deps:
         if VerilogLibFiles in dep and dep[VerilogLibFiles].last_module:
             content.append("  {} \\".format(dep[VerilogLibFiles].last_module.short_path))
 
     design_info_arg = ""
+    # design_info_arg = " -design_info {}".format(ctx.files._design_info_common.short_path)
     for design_info in ctx.files.design_info:
         design_info_arg += " -design_info {}".format(design_info.short_path)
 
@@ -453,7 +454,10 @@ def _rtl_cdc_test_impl(ctx):
         "",
     ]
 
-    flists = " ".join(["-f {}".format(f.short_path) for f in trans_flists])
+    executable_content.append("  $@")
+    executable_content.append("")
+
+    flists = " ".join(["-f {}".format(f.short_path) for f in trans_flists.to_list()])
     defines = ["+{}".format(define) for define in ctx.attr.defines]
     for key, value in gather_shell_defines(ctx.attr.shells).items():
         defines.append("+{}{}".format(key, value))

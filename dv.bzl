@@ -57,6 +57,17 @@ def _dv_test_cfg_impl(ctx):
             sim_opts = sim_opts_str,
         ),
     )
+
+    for socket_name, socket_command in ctx.attr.sockets.items():
+        if "{socket_file}" not in socket_command:
+            fail("socket {} did not have {{socket_file}} in socket_command".format(socket_name))
+
+    dynamic_args = {'sockets' : ctx.attr.sockets}
+    out = ctx.outputs.dynamic_args
+    ctx.actions.write(
+        output = out,
+        content = str(dynamic_args),
+    )
     return [DVTestCfg(**provider_args)]
 
 dv_test_cfg = rule(
@@ -69,9 +80,20 @@ dv_test_cfg = rule(
         "vcomp": attr.label(doc = "Must point to a 'dv_tb' target for how to build this testbench."),
         "sim_opts": attr.string_dict(doc = "Additional simopts flags to throw"),
         "no_run" : attr.bool(default = False, doc = "Set to True to skip running this test."),
+        "sockets" : attr.string_dict(
+            doc = "\n".join([
+                "Dictionary mapping of socket_name to socket_command.",
+                "For each entry in the list, simmer will create a separate process and pass a unique temporary file path to both the simulator and the socket_command.",
+                "The socket name is a short identifier that will be passed as \"+SOCKET__<socket_name>=<socket_file>\" to the simulator.",
+                "The socket_file is just a filepath to a temporary file in the simulation results directory (for uniqueness)",
+                "The socket_command is a bash command that must use a python string formatter of \"{socket_file}\" somewhere in the command.",
+                "The socket_command will be run from the root of the project tree.",
+            ]),
+        ),
     },
     outputs = {
         "sim_args": "%{name}_sim_args.f",
+        "dynamic_args" : "%{name}_dynamic_args.py",
     },
 )
 
@@ -91,12 +113,18 @@ def _dv_lib_impl(ctx):
     else:
         in_flist = ctx.files.srcs
 
-    content = "\n".join(["+incdir+{}".format(d) for d in directories]) + "\n" + "\n".join([f.short_path for f in in_flist])
+    content = []
+    for d in directories:
+        if d == "":
+            d = "."
+        content.append("+incdir+{}".format(d))
+    for f in in_flist:
+        content.append(f.short_path)
 
     all_sos = []
     for dpi in ctx.attr.dpi:
         sos = []
-        for gfile in dpi[DefaultInfo].files:
+        for gfile in dpi[DefaultInfo].files.to_list():
             if gfile.path.endswith(".so"):
                 sos.append(gfile)
         if len(sos) != 1:
@@ -106,17 +134,19 @@ def _dv_lib_impl(ctx):
     out = ctx.outputs.out
     ctx.actions.write(
         output = out,
-        content = content,
+        content = "\n".join(content),
     )
 
     trans_srcs = get_transitive_srcs(ctx.files.srcs, ctx.attr.deps + ctx.attr.dpi, VerilogLibFiles, "transitive_sources", allow_other_outputs = True)
     trans_flists = get_transitive_srcs([out], ctx.attr.deps, VerilogLibFiles, "transitive_flists", allow_other_outputs = False)
     trans_dpi = get_transitive_srcs(all_sos, ctx.attr.deps, VerilogLibFiles, "transitive_dpi", allow_other_outputs = False)
 
+    all_files = depset(trans_srcs.to_list() + trans_flists.to_list())
+
     return [
         VerilogLibFiles(transitive_sources = trans_srcs, transitive_flists = trans_flists, transitive_dpi = trans_dpi),
         DefaultInfo(
-            files = trans_srcs + trans_flists,
+            files = all_files,
             runfiles = ctx.runfiles(files = trans_srcs.to_list() + trans_flists.to_list()),
         ),
     ]
@@ -251,6 +281,7 @@ def _dv_unit_test_impl(ctx):
         output = ctx.outputs.out,
         substitutions = {
             "{DEFAULT_SIM_OPTS}": "-f {}".format(ctx.file.default_sim_opts.short_path),
+            "{DPI_LIBS}": flists_to_arguments(ctx.attr.deps, VerilogLibFiles, "transitive_dpi", "-sv_lib"),
             "{FLISTS}": " ".join(["-f {}".format(f.short_path) for f in flists_list]),
             "{SIM_ARGS}": " ".join(ctx.attr.sim_args),
         },
@@ -284,7 +315,7 @@ dv_unit_test = rule(
         ),
         "sim_args": attr.string_list(doc = "Additional simulation arguments to passed to command line"),
     },
-    outputs = {"out": "run.sh"},
+    outputs = {"out": "%{name}_run.sh"},
     test = True,
 )
 
