@@ -382,7 +382,7 @@ def _rtl_lint_impl(ctx):
         fail("Only one rulefile allowed")
     rulefile = "".join([f.short_path for f in ctx.files.rulefile])
 
-    content.append("  -halargs \"-RULEFILE {rulefile} -inst_top {top} {design_info_arg}\" \\".format(rulefile = rulefile,
+    content.append("  -halargs '\"-RULEFILE {rulefile} -inst_top {top} {design_info_arg}\"' \\".format(rulefile = rulefile,
                                                                                                      top = ctx.attr.top,
                                                                                                      design_info_arg = design_info_arg,
                                                                                                  ))
