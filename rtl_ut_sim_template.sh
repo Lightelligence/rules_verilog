@@ -2,8 +2,13 @@
 # This is a template for the bazel rtl_ut rule
 # It is not intended to be run stand-alone
 runmod -t xrun -- \
+    -libext .sv \
+    -libext .svh \
+    -libext .v \
+    -libext .vams \
     -define TBV \
     -disable_sem2009 \
-    +libext+.v+.sv \
+    -enable_single_yvlib \
     {FLISTS} \
+    {TOP} \
     $@

@@ -317,11 +317,17 @@ def _rtl_ut_impl(ctx):
     flists = get_transitive_srcs([], ctx.attr.deps, VerilogLibFiles, "transitive_flists")
     flists_list = flists.to_list()
 
+    top = ""
+    for dep in ctx.attr.deps:
+        if VerilogLibFiles in dep and dep[VerilogLibFiles].last_module:
+            top = dep[VerilogLibFiles].last_module.short_path
+
     ctx.actions.expand_template(
         template = ctx.file._ut_sim_template,
         output = ctx.outputs.executable,
         substitutions = {
             "{FLISTS}": " ".join(["-f {}".format(f.short_path) for f in flists_list]),
+            "{TOP}": top,
         },
     )
 
