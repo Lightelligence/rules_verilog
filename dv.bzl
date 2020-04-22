@@ -211,9 +211,10 @@ def _dv_tb_impl(ctx):
 
     out_deps = depset([ctx.outputs.compile_args, ctx.outputs.runtime_args, ctx.outputs.compile_warning_waivers, ctx.outputs.executable])
 
+    all_files = depset([], transitive=[trans_srcs, trans_flists, out_deps])
     return [
         DefaultInfo(
-            files = trans_srcs + trans_flists + out_deps,
+            files = all_files,
             runfiles = ctx.runfiles(files = trans_srcs.to_list() + trans_flists.to_list() + out_deps.to_list() + ctx.files.ccf + ctx.files.extra_runfiles + [ctx.file._default_sim_opts]),
         ),
         DVTB(

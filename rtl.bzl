@@ -119,6 +119,8 @@ def _rtl_lib_impl(ctx):
     runfiles_list = trans_srcs.to_list() + trans_flists.to_list() + trans_dpi.to_list()
     runfiles = ctx.runfiles(files = runfiles_list)
 
+    all_files = depset(trans_srcs.to_list() + trans_flists.to_list())
+
     return [
         RTLLibProvider(
             is_pkg=ctx.attr.is_pkg,
@@ -132,7 +134,7 @@ def _rtl_lib_impl(ctx):
             last_module = last_module,
         ),
         DefaultInfo(
-            files = trans_srcs + trans_flists,
+            files = all_files,
             runfiles = runfiles,
         ),
     ]
