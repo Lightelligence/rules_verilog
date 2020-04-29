@@ -312,7 +312,7 @@ rtl_flist = rule(
     #output_to_genfiles = True,
 )
 
-def _rtl_ut_impl(ctx):
+def _rtl_unit_test_impl(ctx):
     # out = ctx.outputs.executable
     trans_srcs = get_transitive_srcs([], ctx.attr.deps, VerilogLibFiles, "transitive_sources")
     srcs_list = trans_srcs.to_list()
@@ -338,19 +338,19 @@ def _rtl_ut_impl(ctx):
         runfiles = runfiles,
     )]
 
-rtl_ut = rule(
+rtl_unit_test = rule(
     # FIXME, this should eventually just be a specific use case of verilog_test
     doc = "Compiles and runs a small RTL library. Additional sim options may be passed after --",
-    implementation = _rtl_ut_impl,
+    implementation = _rtl_unit_test_impl,
     attrs = {
         "deps": attr.label_list(mandatory = True),
         "out": attr.output(),
         "_ut_sim_template": attr.label(
             allow_single_file = True,
-            default = Label("//:rtl_ut_sim_template.sh"),
+            default = Label("//:rtl_unit_test_sim_template.sh"),
         ),
     },
-    executable = True,
+    test = True,
 )
 
 
