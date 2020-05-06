@@ -66,7 +66,10 @@ def _rtl_lib_impl(ctx):
     if ctx.attr.enable_gumi:
         gumi = ctx.actions.declare_file("gumi_{name}.vh".format(name = ctx.attr.name))
         gumi_content = []
-        gumi_guard = "__{}__".format(gumi.basename.upper().replace('.', '_'))
+        # Making this more unique than just gumi.basename.upper()
+        # To avoid case where multiple directories define the same name for a rtl_lib
+        gumi_guard_value = gumi.short_path.replace("/", "_").replace(".", "_")
+        gumi_guard = "__{}__".format(gumi_guard_value.upper())
         gumi_content.append("`ifndef {}".format(gumi_guard))
         gumi_content.append("  `define {}".format(gumi_guard))
         gumi_content.append("")
