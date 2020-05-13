@@ -84,9 +84,11 @@ def _verilog_test_impl(ctx):
             content.append(dep[VerilogLibFiles].last_module.short_path)
     content += ctx.attr.post_flist_args
 
+    content = ctx.expand_location(" ".join(content), targets=ctx.attr.data)
+
     ctx.actions.write(
         output = ctx.outputs.out,
-        content = " ".join(content),
+        content = content,
         is_executable = True,
     )
     
