@@ -328,7 +328,7 @@ def _rtl_unit_test_impl(ctx):
             top = dep[VerilogLibFiles].last_module.short_path
 
     ctx.actions.expand_template(
-        template = ctx.file._ut_sim_template,
+        template = ctx.file.ut_sim_template,
         output = ctx.outputs.executable,
         substitutions = {
             "{FLISTS}": " ".join(["-f {}".format(f.short_path) for f in flists_list]),
@@ -348,7 +348,7 @@ rtl_unit_test = rule(
     attrs = {
         "deps": attr.label_list(mandatory = True),
         "out": attr.output(),
-        "_ut_sim_template": attr.label(
+        "ut_sim_template": attr.label(
             allow_single_file = True,
             default = Label("//:rtl_unit_test_sim_template.sh"),
         ),
