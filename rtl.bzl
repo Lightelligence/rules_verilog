@@ -1,4 +1,4 @@
-load("//:verilog.bzl", "VerilogLibFiles", "RTLLibProvider", "flists_to_arguments", "get_transitive_srcs", "gather_shell_defines")
+load("//:verilog.bzl", "VerilogLibFiles", "RTLLibProvider", "flists_to_arguments", "get_transitive_srcs", "gather_shell_defines", "CUSTOM_SHELL")
 
 
 def create_flist_content(ctx, gumi_path, allow_library_discovery, no_synth=False):
@@ -50,13 +50,13 @@ def _rtl_lib_impl(ctx):
                 fail("Package files should not declared in a rtl_lib. Use a rtl_pkg instead. {} is declared in {}".format(src, ctx.label))
 
     if ctx.attr.is_shell_of:
-        if len(ctx.attr.modules) != 1:
+        if len(ctx.attr.modules) != 1 and not ctx.attr.is_shell_of == CUSTOM_SHELL:
             fail("Shells must specify exactly one module")
         # if len(ctx.attr.deps) != 0:
         #     fail("Shells may not specify deps")
     else:
         for dep in ctx.attr.deps:
-            if RTLLibProvider in dep and dep[RTLLibProvider].is_shell_of:
+            if RTLLibProvider in dep and dep[RTLLibProvider].is_shell_of and not dep[RTLLibProvider].is_shell_of == CUSTOM_SHELL:
                 fail("rtl_lib may not depend on shells. Shells should only be included at top-level builds")
         for src in srcs:
             if "_shell" in src.basename:
@@ -212,8 +212,10 @@ def rtl_shell_static(name,
                      module_to_shell_name,
                      shell_module_label,
                      deps = []):
-    """A prevously created RTL shell that is version controlled. Use when a shell needs to be hand-edited after generation"""
-    if not name.startswith(module_to_shell_name):
+    """A prevously created RTL shell that is version controlled. Use when a shell needs to be hand-edited after generation
+    If module_to_shell_name == 'custom', then all rules regarding shells are ignored and gumi shell defines are not thrown, allowing the user great power.
+    """
+    if not name.startswith(module_to_shell_name) and module_to_shell_name != CUSTOM_SHELL:
         fail("Shell name should start with the original module name: shell name='{}' original module='{}'".format(name, module_to_shell_name))
     rtl_lib(
         name = name,

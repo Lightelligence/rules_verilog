@@ -1,3 +1,5 @@
+CUSTOM_SHELL = "custom"
+
 VerilogLibFiles = provider(fields = {
     "transitive_sources": "Source files",
     "transitive_flists": "Generated or built flists",
@@ -18,6 +20,10 @@ def gather_shell_defines(shells):
             fail("Not a shell: {}".format(shell))
         if not shell[RTLLibProvider].is_shell_of:
             fail("Not a shell: {}".format(shell))
+        if shell[RTLLibProvider].is_shell_of == CUSTOM_SHELL:
+            # Don't create a shell define for this shell because it has custom setup
+            # Usually used when control over per instance shells is desired
+            continue
         # implied from label name. this could be more explicit
         defines["gumi_" + shell[RTLLibProvider].is_shell_of] = "={}".format(shell.label.name)
         defines["gumi_use_{}".format(shell.label.name)] = ""
