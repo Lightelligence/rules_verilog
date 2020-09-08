@@ -359,7 +359,7 @@ rtl_unit_test = rule(
 )
 
 
-def _rtl_lint_impl(ctx):
+def _rtl_lint_test_impl(ctx):
     trans_flists = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogLibFiles, "transitive_flists", allow_other_outputs = False)
 
     content = ["#!/usr/bin/bash",
@@ -380,6 +380,9 @@ def _rtl_lint_impl(ctx):
     for key, value in gather_shell_defines(ctx.attr.shells).items():
         content.append("  -define {}{} \\".format(key, value))
 
+    for key, value in ctx.attr.defines.items():
+        content.append("  -define {}{} \\".format(key, value))
+
     for f in trans_flists.to_list():
         content.append("  -f {} \\".format(f.short_path))
     for dep in ctx.attr.deps:
@@ -395,36 +398,32 @@ def _rtl_lint_impl(ctx):
         fail("Only one rulefile allowed")
     rulefile = "".join([f.short_path for f in ctx.files.rulefile])
 
-    content.append("  -halargs '\"-RULEFILE {rulefile} -inst_top {top} {design_info_arg}\"' \\".format(rulefile = rulefile,
-                                                                                                     top = ctx.attr.top,
-                                                                                                     design_info_arg = design_info_arg,
-                                                                                                 ))
+    content.append("  -halargs '\"-RULEFILE {rulefile} -inst_top {top} {design_info_arg} -XML xrun.log.xml\"' \\".format(rulefile = rulefile,
+                                                                                                                         top = ctx.attr.top,
+                                                                                                                         design_info_arg = design_info_arg,
+                                                                                                                     ))
+    content.append("  -logfile xrun.log \\")
     content.append("  $@")
-    content.append("")
 
-    ctx.actions.write(
-        output = ctx.outputs.run_lint,
-        content = "\n".join(content),
-    )
+    content.append("python external/verilog_tools/lint_parser.py")
 
-    # Dummy executable to create rundir
     ctx.actions.write(
         output = ctx.outputs.executable,
-        content = "echo `pwd`",
+        content = "\n".join(content),
     )
 
     trans_flists = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogLibFiles, "transitive_flists", allow_other_outputs = False)
     trans_srcs = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogLibFiles, "transitive_sources", allow_other_outputs = True)
 
-    runfiles = ctx.runfiles(files = trans_srcs.to_list() + trans_flists.to_list() + [ctx.outputs.run_lint] + ctx.files.design_info + ctx.files.rulefile)
+    runfiles = ctx.runfiles(files = trans_srcs.to_list() + trans_flists.to_list() + ctx.files.design_info + ctx.files.rulefile + ctx.files.lint_parser)
 
     return [
         DefaultInfo(runfiles = runfiles),
     ]
 
-rtl_lint = rule(
-    doc = "Create the lint script executable",
-    implementation = _rtl_lint_impl,
+rtl_lint_test = rule(
+    doc = "Run lint on target",
+    implementation = _rtl_lint_test_impl,
     attrs = {
         "deps": attr.label_list(mandatory = True),
         "rulefile" : attr.label(allow_single_file = True,
@@ -437,13 +436,15 @@ rtl_lint = rule(
         "design_info" : attr.label_list(allow_files = True,
                                         doc = "A design info file to add additional lint rule/waivers",
                                     ),
-        "defines" : attr.string_list(allow_empty = True,
-                                     default = [],
+        "defines" : attr.string_dict(allow_empty = True,
                                      doc = "List of `defines for this lint run",
                                      ),
+        "lint_parser" : attr.label(
+            allow_files = True,
+            default="@verilog_tools//:lint_parser.py",
+        )
     },
-    outputs = {"run_lint": "run_%{name}.sh"},
-    executable = True,
+    test = True,
 )
 
 def _rtl_cdc_test_impl(ctx):

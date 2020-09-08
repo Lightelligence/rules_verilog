@@ -6,4 +6,6 @@ exports_files([
     "ut_sim_template.sh",
     "rtl_unit_test_sim_template.sh",
     "default_sim_opts.f",
+    "lint_parser.py",
+    "cmn_logging.py",
 ])
