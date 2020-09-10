@@ -421,6 +421,38 @@ def _rtl_lint_test_impl(ctx):
         DefaultInfo(runfiles = runfiles),
     ]
 
+# FIXME when lint.py was a wrapper around bazel we could get more detailed help messages
+# It would be nice to be able to renable these features via some bazel flags
+# Below is this is from the old rtl README:
+#    ## Deprecated Help
+#    These items were deprecated when lint was moved to run under bazel. Its possible to revive them, but they do not currently work.
+#    
+#    You can view waived issues by using the show waived `--sw` flag.
+#    
+#    You can view the hal help documentation on issues by using the show help `--sh` flag.
+#    
+#    ```
+#    %W:lint: /home/wstucker/w/mosaic2/digital/rtl/vector_add/vector_add_int.sv:74:FFWASR  Flip-flop 'o_vec_out[0]' does not have any asynchronous set or reset.
+#             o_vec_out[_i]   <= i_vec_a[_i] + i_vec_b[_i];
+#    
+#             Flip-flops must have asynchronous set or reset. If a flip-flop
+#          does not have any asynchronous set or reset then it is not 
+#          controllable from primary inputs.
+#            
+#          The following example illustrates this problem:
+#            
+#          if(rst)
+#            port_a <= '0';
+#          elsif rising_edge(clk) then
+#            port_a <= var_a;
+#            port_b <= var_b;
+#          end if;
+#            
+#          In the above HDL code, the value of 'port_a' can be
+#          brought to '0' using asynchronous reset 'rst', while 
+#          this is not the case with 'port_b'. This may cause
+#          issues during simulation.
+#    ```
 rtl_lint_test = rule(
     doc = "Run lint on target",
     implementation = _rtl_lint_test_impl,
