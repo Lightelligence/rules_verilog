@@ -329,16 +329,28 @@ def _rtl_unit_test_impl(ctx):
         if VerilogLibFiles in dep and dep[VerilogLibFiles].last_module:
             top = dep[VerilogLibFiles].last_module.short_path
 
+    if len(ctx.attr.pre_flist_args):
+        pre_fa = "\n".join(["{} \\".format(pfa) for pfa in ctx.attr.pre_flist_args]) + "\n"
+    else:
+        pre_fa = ""
+
+    if len(ctx.attr.post_flist_args):
+        post_fa = "\n".join(["{} \\".format(pfa) for pfa in ctx.attr.post_flist_args]) + "\n"
+    else:
+        post_fa = ""
+
     ctx.actions.expand_template(
         template = ctx.file.ut_sim_template,
         output = ctx.outputs.executable,
         substitutions = {
             "{FLISTS}": " ".join(["-f {}".format(f.short_path) for f in flists_list]),
             "{TOP}": top,
+            "{PRE_FLIST_ARGS}" : pre_fa,
+            "{POST_FLIST_ARGS}" : post_fa,
         },
     )
 
-    runfiles = ctx.runfiles(files = flists_list + srcs_list)
+    runfiles = ctx.runfiles(files = flists_list + srcs_list + ctx.files.data)
     return [DefaultInfo(
         runfiles = runfiles,
     )]
@@ -354,6 +366,12 @@ rtl_unit_test = rule(
             allow_single_file = True,
             default = Label("//:rtl_unit_test_sim_template.sh"),
         ),
+        "data" : attr.label_list(
+            allow_files = True,
+            doc = "Non-verilog dependencies",
+        ),
+        "pre_flist_args" : attr.string_list(doc = "commands and arguments before flist arguments"),
+        "post_flist_args" : attr.string_list(doc = "commands and arguments after flist arguments"),
     },
     test = True,
 )

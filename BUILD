@@ -5,6 +5,7 @@ exports_files([
     "xrun_runtime_args_template.txt",
     "ut_sim_template.sh",
     "rtl_unit_test_sim_template.sh",
+    "rtl_svunit_test_template.sh",
     "default_sim_opts.f",
     "lint_parser.py",
     "cmn_logging.py",
