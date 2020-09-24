@@ -508,7 +508,7 @@ def _rtl_cdc_test_impl(ctx):
         "clear -all",
         "set elaborate_single_run_mode True",
         "analyze -sv09 +libext+.v+.sv {} +define+LINT+CDC+SKIP_PWR_GND{} {} {}".format(bbox_cmd, "".join(defines), flists, top_mod),
-        "elaborate {} -top alpha_mosaic_ams_top {}".format(bbox_cmd, bbox_a_cmd),
+        "elaborate {} -top {} {}".format(bbox_cmd, ctx.attr.top, bbox_a_cmd),
         "check_cdc -check -rule -set {{treat_boundaries_as_unclocked true}}",
     ]
 
@@ -593,7 +593,7 @@ def _rtl_cdc_gui_impl(ctx):
     executable_content.append("  $@")
     executable_content.append("")
 
-    flists = " ".join(["-f {}".format(f.short_path) for f in trans_flists])
+    flists = " ".join(["-f {}".format(f.short_path) for f in trans_flists.to_list()])
     defines = ["+{}".format(define) for define in ctx.attr.defines]
     for key, value in gather_shell_defines(ctx.attr.shells).items():
         defines.append("+{}{}".format(key, value))
@@ -612,7 +612,7 @@ def _rtl_cdc_gui_impl(ctx):
         "clear -all",
         "set elaborate_single_run_mode True",
         "analyze -sv09 +libext+.v+.sv {} +define+LINT+CDC+SKIP_PWR_GND{} {} {}".format(bbox_cmd, "".join(defines), flists, top_mod),
-        "elaborate {} -top alpha_mosaic_ams_top {}".format(bbox_cmd, bbox_a_cmd),
+        "elaborate {} -top {} {}".format(bbox_cmd, ctx.attr.top, bbox_a_cmd),
         "check_cdc -check -rule -set {{treat_boundaries_as_unclocked true}}",
     ]
 
