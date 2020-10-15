@@ -329,15 +329,18 @@ def _rtl_unit_test_impl(ctx):
         if VerilogLibFiles in dep and dep[VerilogLibFiles].last_module:
             top = dep[VerilogLibFiles].last_module.short_path
 
+    pre_fa = ["    \\"]
+    for key, value in gather_shell_defines(ctx.attr.shells).items():
+        pre_fa.append("  -define {}{} \\".format(key, value))
+
     if len(ctx.attr.pre_flist_args):
-        pre_fa = "\n".join(["{} \\".format(pfa) for pfa in ctx.attr.pre_flist_args]) + "\n"
-    else:
-        pre_fa = ""
+        pre_fa.extend(["{} \\".format(pfa) for pfa in ctx.attr.pre_flist_args])
+    pre_fa.append("   \\")
 
     if len(ctx.attr.post_flist_args):
         post_fa = "\n".join(["{} \\".format(pfa) for pfa in ctx.attr.post_flist_args]) + "\n"
     else:
-        post_fa = ""
+        post_fa = " \\"
 
     ctx.actions.expand_template(
         template = ctx.file.ut_sim_template,
@@ -345,12 +348,12 @@ def _rtl_unit_test_impl(ctx):
         substitutions = {
             "{FLISTS}": " ".join(["-f {}".format(f.short_path) for f in flists_list]),
             "{TOP}": top,
-            "{PRE_FLIST_ARGS}" : pre_fa,
+            "{PRE_FLIST_ARGS}" : "\n".join(pre_fa),
             "{POST_FLIST_ARGS}" : post_fa,
         },
     )
 
-    runfiles = ctx.runfiles(files = flists_list + srcs_list + ctx.files.data)
+    runfiles = ctx.runfiles(files = flists_list + srcs_list + ctx.files.data + ctx.files.shells)
     return [DefaultInfo(
         runfiles = runfiles,
     )]
@@ -370,6 +373,7 @@ rtl_unit_test = rule(
             allow_files = True,
             doc = "Non-verilog dependencies",
         ),
+        "shells" : attr.label_list(),
         "pre_flist_args" : attr.string_list(doc = "commands and arguments before flist arguments"),
         "post_flist_args" : attr.string_list(doc = "commands and arguments after flist arguments"),
     },
