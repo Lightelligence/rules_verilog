@@ -25,4 +25,4 @@ runmod xrun -- \
     {FLISTS} \
     {POST_FLIST_ARGS} \
     $@
-! grep -q "\[testrunner\]: FAILED" run.log
+grep -q "\[testrunner\]: PASSED" run.log
