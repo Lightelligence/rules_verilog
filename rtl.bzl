@@ -319,9 +319,9 @@ rtl_flist = rule(
 
 def _rtl_unit_test_impl(ctx):
     # out = ctx.outputs.executable
-    trans_srcs = get_transitive_srcs([], ctx.attr.deps, VerilogLibFiles, "transitive_sources")
+    trans_srcs = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogLibFiles, "transitive_sources")
     srcs_list = trans_srcs.to_list()
-    flists = get_transitive_srcs([], ctx.attr.deps, VerilogLibFiles, "transitive_flists")
+    flists = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogLibFiles, "transitive_flists")
     flists_list = flists.to_list()
 
     top = ""
