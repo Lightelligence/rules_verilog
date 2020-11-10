@@ -213,6 +213,7 @@ def rtl_shell_static(name,
                      shell_module_label,
                      deps = []):
     """A prevously created RTL shell that is version controlled. Use when a shell needs to be hand-edited after generation
+
     If module_to_shell_name == 'custom', then all rules regarding shells are ignored and gumi shell defines are not thrown, allowing the user great power.
     """
     if not name.startswith(module_to_shell_name) and module_to_shell_name != CUSTOM_SHELL:
