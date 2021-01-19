@@ -427,7 +427,7 @@ def _rtl_lint_test_impl(ctx):
     content.append("  -logfile xrun.log")
 
     content.append("")
-    content.append("python external/verilog_tools/lint_parser.py $@")
+    content.append("python external/verilog_tools/lint_parser.py $@ --waiver-hack \"{}\"".format(ctx.attr.waiver_hack))
 
     ctx.actions.write(
         output = ctx.outputs.executable,
@@ -464,7 +464,10 @@ rtl_lint_test = rule(
         "lint_parser" : attr.label(
             allow_files = True,
             default="@verilog_tools//:lint_parser.py",
-        )
+        ),
+        "waiver_hack" : attr.string(
+            doc = "Lint waiver regex to hack around cases when HAL has formatting errors in xrun.log.xml that cause problems for our lint parser"
+        ),
     },
     test = True,
 )
