@@ -128,7 +128,7 @@ def _dv_lib_impl(ctx):
             if gfile.path.endswith(".so"):
                 sos.append(gfile)
         if len(sos) != 1:
-            fail("could not find shared library for %s", dpi)
+            fail("Expected to find exactly one .so for dv_lib dpi argument '", dpi, "'. Found .so: ", sos)
         all_sos.extend(sos)
 
     out = ctx.outputs.out
