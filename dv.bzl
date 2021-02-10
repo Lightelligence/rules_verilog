@@ -322,7 +322,10 @@ dv_unit_test = rule(
 
 # Used by simmer to find test to tb/vcomp mappings
 def _test_to_vcomp_aspect_impl(target, ctx):
+    # buildifier: disable=print
     print("test_to_vcomp({}, {}, {})".format(target.label, target[DVTestInfo].vcomp.label, target[DVTestInfo].tags))
+
+    # buildifier: enable=print
     return []
 
 test_to_vcomp_aspect = aspect(
@@ -332,7 +335,10 @@ test_to_vcomp_aspect = aspect(
 
 # Used by simmer to find test to find ccf file
 def _dv_tb_ccf_aspect_impl(target, ctx):
+    # buildifier: disable=print
     print("dv_tb_ccf({})".format([f.path for f in target[DVTBInfo].ccf]))
+
+    # buildifier: enable=print
     return []
 
 dv_tb_ccf_aspect = aspect(
