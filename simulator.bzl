@@ -26,28 +26,27 @@ filegroup(
 
 DPI_HEADERS = ["svdpi.h", "svdpi_compatibility.h"]
 
-
 VARS = ["PROJ_DIR", "MODULEPATH"]
+
 def _xcelium_setup_impl(repository_ctx):
     if repository_ctx.attr.name != "xcelium":
         fail("Name xcelium_setup rule: 'xcelium'!")
-    result = repository_ctx.execute(["runmod", "xrun", "--", "printenv", "XCELIUMHOME"],
-                                    environment = repository_ctx.os.environ,
-                                    # working_directory="..",
+    result = repository_ctx.execute(
+        ["runmod", "xrun", "--", "printenv", "XCELIUMHOME"],
+        environment = repository_ctx.os.environ,
+        # working_directory="..",
     )
     if result.return_code:
-        print(result.stdout)
-        print(result.stderr)
-        fail("Failed running xcelium command")
+        fail("{}\n{}\nFailed running find xcelium command".format(result.stdout, result.stderr))
     xcelium_home = result.stdout.strip()
     include = "{}/tools.lnx86/include".format(xcelium_home)
-    for hdr in  DPI_HEADERS:
+    for hdr in DPI_HEADERS:
         hdr_path = "{}/{}".format(include, hdr)
         repository_ctx.symlink(hdr_path, hdr)
     repository_ctx.file("BUILD", XCELIUM_BUILD)
-  
+
 xcelium_setup = repository_rule(
-    implementation=_xcelium_setup_impl,
+    implementation = _xcelium_setup_impl,
     local = True,
     environ = VARS,
 )
