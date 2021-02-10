@@ -1,6 +1,6 @@
 """Rules to gather and compile RTL."""
 
-load("//:verilog.bzl", "CUSTOM_SHELL", "RTLLibProvider", "VerilogLibFiles", "gather_shell_defines", "get_transitive_srcs")
+load("//:verilog.bzl", "CUSTOM_SHELL", "ShellInfo", "VerilogInfo", "gather_shell_defines", "get_transitive_srcs")
 
 def create_flist_content(ctx, gumi_path, allow_library_discovery, no_synth = False):
     flist_content = []
@@ -43,7 +43,7 @@ def _rtl_lib_impl(ctx):
     if ctx.attr.is_pkg:
         # FIXME opu_tx_rx is failing this check
         # for dep in ctx.attr.deps:
-        #     if RTLLibProvider in dep and not dep[RTLLibProvider].is_pkg:
+        #     if ShellInfo in dep and not dep[ShellInfo].is_pkg:
         #         fail("rtl_pkg may only depend on other rtl_pkgs")
         pass
     else:
@@ -60,7 +60,7 @@ def _rtl_lib_impl(ctx):
 
     else:
         for dep in ctx.attr.deps:
-            if RTLLibProvider in dep and dep[RTLLibProvider].is_shell_of and not dep[RTLLibProvider].is_shell_of == CUSTOM_SHELL:
+            if ShellInfo in dep and dep[ShellInfo].is_shell_of and not dep[ShellInfo].is_shell_of == CUSTOM_SHELL:
                 fail("rtl_lib may not depend on shells. Shells should only be included at top-level builds")
         for src in srcs:
             if "_shell" in src.basename:
@@ -118,10 +118,10 @@ def _rtl_lib_impl(ctx):
         content = "\n".join(flist_content),
     )
 
-    trans_srcs = get_transitive_srcs(srcs, ctx.attr.deps, VerilogLibFiles, "transitive_sources", allow_other_outputs = True)
-    trans_flists = get_transitive_srcs([ctx.outputs.flist], ctx.attr.deps, VerilogLibFiles, "transitive_flists", allow_other_outputs = False)
+    trans_srcs = get_transitive_srcs(srcs, ctx.attr.deps, VerilogInfo, "transitive_sources", allow_other_outputs = True)
+    trans_flists = get_transitive_srcs([ctx.outputs.flist], ctx.attr.deps, VerilogInfo, "transitive_flists", allow_other_outputs = False)
 
-    trans_dpi = get_transitive_srcs([], ctx.attr.deps, VerilogLibFiles, "transitive_dpi", allow_other_outputs = False)
+    trans_dpi = get_transitive_srcs([], ctx.attr.deps, VerilogInfo, "transitive_dpi", allow_other_outputs = False)
 
     runfiles_list = trans_srcs.to_list() + trans_flists.to_list() + trans_dpi.to_list()
     runfiles = ctx.runfiles(files = runfiles_list)
@@ -129,12 +129,12 @@ def _rtl_lib_impl(ctx):
     all_files = depset(trans_srcs.to_list() + trans_flists.to_list())
 
     return [
-        RTLLibProvider(
+        ShellInfo(
             is_pkg = ctx.attr.is_pkg,
             is_shell_of = ctx.attr.is_shell_of,
             gumi_path = gumi_path,
         ),
-        VerilogLibFiles(
+        VerilogInfo(
             transitive_sources = trans_srcs,
             transitive_flists = trans_flists,
             transitive_dpi = trans_dpi,
@@ -266,15 +266,15 @@ def rtl_shell_dynamic(
 
 def _rtl_bin_impl(ctx):
     out = ctx.outputs.out
-    trans_flists = get_transitive_srcs([], ctx.attr.deps, VerilogLibFiles, "transitive_flists", allow_other_outputs = False)
+    trans_flists = get_transitive_srcs([], ctx.attr.deps, VerilogInfo, "transitive_flists", allow_other_outputs = False)
 
     ctx.actions.write(
         output = out,
         content = "\n".join([" -f {}".format(f.short_path) for f in trans_flists]),
     )
 
-    trans_flists = get_transitive_srcs([out], ctx.attr.deps, VerilogLibFiles, "transitive_flists", allow_other_outputs = False)
-    trans_srcs = get_transitive_srcs([], ctx.attr.deps, VerilogLibFiles, "transitive_sources", allow_other_outputs = True)
+    trans_flists = get_transitive_srcs([out], ctx.attr.deps, VerilogInfo, "transitive_flists", allow_other_outputs = False)
+    trans_srcs = get_transitive_srcs([], ctx.attr.deps, VerilogInfo, "transitive_sources", allow_other_outputs = True)
 
     second_out = ctx.outputs.executable
     script = "\n".join(
@@ -313,7 +313,7 @@ def _rtl_flist_impl(ctx):
     trans_flists = depset(ctx.files.srcs)
 
     return [
-        VerilogLibFiles(transitive_sources = trans_srcs, transitive_flists = trans_flists, transitive_dpi = depset()),
+        VerilogInfo(transitive_sources = trans_srcs, transitive_flists = trans_flists, transitive_dpi = depset()),
         DefaultInfo(files = trans_srcs + trans_flists),
     ]
 
@@ -331,15 +331,15 @@ rtl_flist = rule(
 
 def _rtl_unit_test_impl(ctx):
     # out = ctx.outputs.executable
-    trans_srcs = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogLibFiles, "transitive_sources")
+    trans_srcs = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_sources")
     srcs_list = trans_srcs.to_list()
-    flists = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogLibFiles, "transitive_flists")
+    flists = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_flists")
     flists_list = flists.to_list()
 
     top = ""
     for dep in ctx.attr.deps:
-        if VerilogLibFiles in dep and dep[VerilogLibFiles].last_module:
-            top = dep[VerilogLibFiles].last_module.short_path
+        if VerilogInfo in dep and dep[VerilogInfo].last_module:
+            top = dep[VerilogInfo].last_module.short_path
 
     pre_fa = ["    \\"]
     for key, value in gather_shell_defines(ctx.attr.shells).items():
@@ -393,7 +393,7 @@ rtl_unit_test = rule(
 )
 
 def _rtl_lint_test_impl(ctx):
-    trans_flists = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogLibFiles, "transitive_flists", allow_other_outputs = False)
+    trans_flists = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_flists", allow_other_outputs = False)
 
     content = [
         "#!/usr/bin/bash",
@@ -420,8 +420,8 @@ def _rtl_lint_test_impl(ctx):
     for f in trans_flists.to_list():
         content.append("  -f {} \\".format(f.short_path))
     for dep in ctx.attr.deps:
-        if VerilogLibFiles in dep and dep[VerilogLibFiles].last_module:
-            content.append("  {} \\".format(dep[VerilogLibFiles].last_module.short_path))
+        if VerilogInfo in dep and dep[VerilogInfo].last_module:
+            content.append("  {} \\".format(dep[VerilogInfo].last_module.short_path))
 
     design_info_arg = ""
 
@@ -448,8 +448,8 @@ def _rtl_lint_test_impl(ctx):
         content = "\n".join(content),
     )
 
-    trans_flists = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogLibFiles, "transitive_flists", allow_other_outputs = False)
-    trans_srcs = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogLibFiles, "transitive_sources", allow_other_outputs = True)
+    trans_flists = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_flists", allow_other_outputs = False)
+    trans_srcs = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_sources", allow_other_outputs = True)
 
     runfiles = ctx.runfiles(files = trans_srcs.to_list() + trans_flists.to_list() + ctx.files.design_info + ctx.files.rulefile + ctx.files.lint_parser)
 
@@ -491,8 +491,8 @@ rtl_lint_test = rule(
 )
 
 def _rtl_cdc_test_impl(ctx):
-    trans_flists = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogLibFiles, "transitive_flists", allow_other_outputs = False)
-    trans_srcs = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogLibFiles, "transitive_sources", allow_other_outputs = True)
+    trans_flists = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_flists", allow_other_outputs = False)
+    trans_srcs = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_sources", allow_other_outputs = True)
 
     # The run script is pretty dumb, the tcl command file has the interesting stuff
     executable_content = [
@@ -523,8 +523,8 @@ def _rtl_cdc_test_impl(ctx):
         bbox_cmd = "-bbox_m {" + "{}".format(" ".join(ctx.attr.bbox)) + "}"
 
     for dep in ctx.attr.deps:
-        if VerilogLibFiles in dep and dep[VerilogLibFiles].last_module:
-            top_mod = "  {}".format(dep[VerilogLibFiles].last_module.short_path)
+        if VerilogInfo in dep and dep[VerilogInfo].last_module:
+            top_mod = "  {}".format(dep[VerilogInfo].last_module.short_path)
 
     bbox_a_cmd = "-bbox_a 4096"
 
@@ -604,8 +604,8 @@ rtl_cdc_test = rule(
 )
 
 def _rtl_cdc_gui_impl(ctx):
-    trans_flists = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogLibFiles, "transitive_flists", allow_other_outputs = False)
-    trans_srcs = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogLibFiles, "transitive_sources", allow_other_outputs = True)
+    trans_flists = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_flists", allow_other_outputs = False)
+    trans_srcs = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_sources", allow_other_outputs = True)
 
     # The run script is pretty dumb, the tcl command file has the interesting stuff
     executable_content = [
@@ -631,8 +631,8 @@ def _rtl_cdc_gui_impl(ctx):
         bbox_cmd = "-bbox_m {" + "{}".format(" ".join(ctx.attr.bbox)) + "}"
 
     for dep in ctx.attr.deps:
-        if VerilogLibFiles in dep and dep[VerilogLibFiles].last_module:
-            top_mod = "  {}".format(dep[VerilogLibFiles].last_module.short_path)
+        if VerilogInfo in dep and dep[VerilogInfo].last_module:
+            top_mod = "  {}".format(dep[VerilogInfo].last_module.short_path)
 
     bbox_a_cmd = "-bbox_a 4096"
 

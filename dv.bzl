@@ -1,27 +1,27 @@
 """Rules for building DV infrastructure."""
 
-load("//:verilog.bzl", "VerilogLibFiles", "flists_to_arguments", "gather_shell_defines", "get_transitive_srcs")
+load("//:verilog.bzl", "VerilogInfo", "flists_to_arguments", "gather_shell_defines", "get_transitive_srcs")
 
-DVTestCfg = provider(fields = {
+DVTestInfo = provider(fields = {
     "sim_opts": "Simulation options",
     "uvm_testname": "UVM Test Name",
     "vcomp": "Label of type dv_tb",
     "tags": "Tags",
 })
 
-DVTB = provider(fields = {
+DVTBInfo = provider(fields = {
     "ccf": "Coverage config file",
 })
 
 def _dv_test_cfg_impl(ctx):
-    parent_uvm_testnames = [dep[DVTestCfg].uvm_testname for dep in reversed(ctx.attr.inherits) if hasattr(dep[DVTestCfg], "uvm_testname")]
-    parent_vcomps = [dep[DVTestCfg].vcomp for dep in reversed(ctx.attr.inherits) if hasattr(dep[DVTestCfg], "vcomp")]
+    parent_uvm_testnames = [dep[DVTestInfo].uvm_testname for dep in reversed(ctx.attr.inherits) if hasattr(dep[DVTestInfo], "uvm_testname")]
+    parent_vcomps = [dep[DVTestInfo].vcomp for dep in reversed(ctx.attr.inherits) if hasattr(dep[DVTestInfo], "vcomp")]
 
     sim_opts = {}
 
     # Each successive depdency may override previous deps
     for dep in ctx.attr.inherits:
-        sim_opts.update(dep[DVTestCfg].sim_opts)
+        sim_opts.update(dep[DVTestInfo].sim_opts)
 
     # This rule instance may override previous sim_opts
     sim_opts.update(ctx.attr.sim_opts)
@@ -68,7 +68,7 @@ def _dv_test_cfg_impl(ctx):
         output = out,
         content = str(dynamic_args),
     )
-    return [DVTestCfg(**provider_args)]
+    return [DVTestInfo(**provider_args)]
 
 dv_test_cfg = rule(
     doc = "A DV test configuration. This is not a executable target.",
@@ -105,7 +105,7 @@ def _dv_lib_impl(ctx):
         directories = []
 
     # # Add output files from direct dependencies (from genrules)
-    srcs = depset(ctx.files.srcs, transitive = [dep[DefaultInfo].files for dep in ctx.attr.deps if VerilogLibFiles not in dep])
+    srcs = depset(ctx.files.srcs, transitive = [dep[DefaultInfo].files for dep in ctx.attr.deps if VerilogInfo not in dep])
 
     if len(ctx.files.in_flist):
         in_flist = ctx.files.in_flist
@@ -136,14 +136,14 @@ def _dv_lib_impl(ctx):
         content = "\n".join(content),
     )
 
-    trans_srcs = get_transitive_srcs(ctx.files.srcs, ctx.attr.deps + ctx.attr.dpi, VerilogLibFiles, "transitive_sources", allow_other_outputs = True)
-    trans_flists = get_transitive_srcs([out], ctx.attr.deps, VerilogLibFiles, "transitive_flists", allow_other_outputs = False)
-    trans_dpi = get_transitive_srcs(all_sos, ctx.attr.deps, VerilogLibFiles, "transitive_dpi", allow_other_outputs = False)
+    trans_srcs = get_transitive_srcs(ctx.files.srcs, ctx.attr.deps + ctx.attr.dpi, VerilogInfo, "transitive_sources", allow_other_outputs = True)
+    trans_flists = get_transitive_srcs([out], ctx.attr.deps, VerilogInfo, "transitive_flists", allow_other_outputs = False)
+    trans_dpi = get_transitive_srcs(all_sos, ctx.attr.deps, VerilogInfo, "transitive_dpi", allow_other_outputs = False)
 
     all_files = depset(trans_srcs.to_list() + trans_flists.to_list())
 
     return [
-        VerilogLibFiles(transitive_sources = trans_srcs, transitive_flists = trans_flists, transitive_dpi = trans_dpi),
+        VerilogInfo(transitive_sources = trans_srcs, transitive_flists = trans_flists, transitive_dpi = trans_dpi),
         DefaultInfo(
             files = all_files,
             runfiles = ctx.runfiles(files = trans_srcs.to_list() + trans_flists.to_list()),
@@ -180,7 +180,7 @@ def _dv_tb_impl(ctx):
         substitutions = {
             "{COMPILE_ARGS}": ctx.expand_location("\n".join(ctx.attr.extra_compile_args), targets = ctx.attr.extra_runfiles),
             "{DEFINES}": "\n".join(["-define {}{}".format(key, value) for key, value in defines.items()]),
-            "{FLISTS}": flists_to_arguments(ctx.attr.shells + ctx.attr.deps, VerilogLibFiles, "transitive_flists", "\n-f"),
+            "{FLISTS}": flists_to_arguments(ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_flists", "\n-f"),
         },
     )
 
@@ -194,7 +194,7 @@ def _dv_tb_impl(ctx):
         output = ctx.outputs.runtime_args,
         substitutions = {
             "{RUNTIME_ARGS}": ctx.expand_location("\n".join(ctx.attr.extra_runtime_args), targets = ctx.attr.extra_runfiles),
-            "{DPI_LIBS}": flists_to_arguments(ctx.attr.shells + ctx.attr.deps, VerilogLibFiles, "transitive_dpi", "-sv_lib"),
+            "{DPI_LIBS}": flists_to_arguments(ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_dpi", "-sv_lib"),
         },
     )
 
@@ -204,8 +204,8 @@ def _dv_tb_impl(ctx):
         outputs = [ctx.outputs.executable],
     )
 
-    trans_srcs = get_transitive_srcs([], ctx.attr.deps + ctx.attr.shells, VerilogLibFiles, "transitive_sources", allow_other_outputs = True)
-    trans_flists = get_transitive_srcs([], ctx.attr.deps + ctx.attr.shells, VerilogLibFiles, "transitive_flists", allow_other_outputs = False)
+    trans_srcs = get_transitive_srcs([], ctx.attr.deps + ctx.attr.shells, VerilogInfo, "transitive_sources", allow_other_outputs = True)
+    trans_flists = get_transitive_srcs([], ctx.attr.deps + ctx.attr.shells, VerilogInfo, "transitive_flists", allow_other_outputs = False)
 
     out_deps = depset([ctx.outputs.compile_args, ctx.outputs.runtime_args, ctx.outputs.compile_warning_waivers, ctx.outputs.executable])
 
@@ -215,7 +215,7 @@ def _dv_tb_impl(ctx):
             files = all_files,
             runfiles = ctx.runfiles(files = trans_srcs.to_list() + trans_flists.to_list() + out_deps.to_list() + ctx.files.ccf + ctx.files.extra_runfiles + [ctx.file._default_sim_opts]),
         ),
-        DVTB(
+        DVTBInfo(
             ccf = ctx.files.ccf,
         ),
     ]
@@ -272,9 +272,9 @@ dv_tb = rule(
 )
 
 def _dv_unit_test_impl(ctx):
-    trans_srcs = get_transitive_srcs([], ctx.attr.deps, VerilogLibFiles, "transitive_sources")
+    trans_srcs = get_transitive_srcs([], ctx.attr.deps, VerilogInfo, "transitive_sources")
     srcs_list = trans_srcs.to_list()
-    flists = get_transitive_srcs([], ctx.attr.deps, VerilogLibFiles, "transitive_flists")
+    flists = get_transitive_srcs([], ctx.attr.deps, VerilogInfo, "transitive_flists")
     flists_list = flists.to_list()
 
     ctx.actions.expand_template(
@@ -282,7 +282,7 @@ def _dv_unit_test_impl(ctx):
         output = ctx.outputs.out,
         substitutions = {
             "{DEFAULT_SIM_OPTS}": "-f {}".format(ctx.file.default_sim_opts.short_path),
-            "{DPI_LIBS}": flists_to_arguments(ctx.attr.deps, VerilogLibFiles, "transitive_dpi", "-sv_lib"),
+            "{DPI_LIBS}": flists_to_arguments(ctx.attr.deps, VerilogInfo, "transitive_dpi", "-sv_lib"),
             "{FLISTS}": " ".join(["-f {}".format(f.short_path) for f in flists_list]),
             "{SIM_ARGS}": " ".join(ctx.attr.sim_args),
         },
@@ -322,7 +322,7 @@ dv_unit_test = rule(
 
 # Used by simmer to find test to tb/vcomp mappings
 def _test_to_vcomp_aspect_impl(target, ctx):
-    print("test_to_vcomp({}, {}, {})".format(target.label, target[DVTestCfg].vcomp.label, target[DVTestCfg].tags))
+    print("test_to_vcomp({}, {}, {})".format(target.label, target[DVTestInfo].vcomp.label, target[DVTestInfo].tags))
     return []
 
 test_to_vcomp_aspect = aspect(
@@ -332,7 +332,7 @@ test_to_vcomp_aspect = aspect(
 
 # Used by simmer to find test to find ccf file
 def _dv_tb_ccf_aspect_impl(target, ctx):
-    print("dv_tb_ccf({})".format([f.path for f in target[DVTB].ccf]))
+    print("dv_tb_ccf({})".format([f.path for f in target[DVTBInfo].ccf]))
     return []
 
 dv_tb_ccf_aspect = aspect(

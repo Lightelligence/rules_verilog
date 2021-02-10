@@ -2,14 +2,14 @@
 
 CUSTOM_SHELL = "custom"
 
-VerilogLibFiles = provider(fields = {
+VerilogInfo = provider(fields = {
     "transitive_sources": "Source files",
     "transitive_flists": "Generated or built flists",
     "transitive_dpi": "Shared libraries to link in via dpi",
     "last_module": "Last module specified is assumed top",
 })
 
-RTLLibProvider = provider(fields = {
+ShellInfo = provider(fields = {
     "is_pkg": "Indicates if this rtl_lib used the rtl_pkg rule",
     "is_shell_of": "Indicates if this rtl_lib represents a shell module",
     "gumi_path": "Short path to gumi file",
@@ -18,17 +18,17 @@ RTLLibProvider = provider(fields = {
 def gather_shell_defines(shells):
     defines = {}
     for shell in shells:
-        if RTLLibProvider not in shell:
+        if ShellInfo not in shell:
             fail("Not a shell: {}".format(shell))
-        if not shell[RTLLibProvider].is_shell_of:
+        if not shell[ShellInfo].is_shell_of:
             fail("Not a shell: {}".format(shell))
-        if shell[RTLLibProvider].is_shell_of == CUSTOM_SHELL:
+        if shell[ShellInfo].is_shell_of == CUSTOM_SHELL:
             # Don't create a shell define for this shell because it has custom setup
             # Usually used when control over per instance shells is desired
             continue
 
         # implied from label name. this could be more explicit
-        defines["gumi_" + shell[RTLLibProvider].is_shell_of] = "={}".format(shell.label.name)
+        defines["gumi_" + shell[ShellInfo].is_shell_of] = "={}".format(shell.label.name)
         defines["gumi_use_{}".format(shell.label.name)] = ""
     return defines
 
@@ -69,9 +69,9 @@ def flists_to_arguments(deps, provider, field, prefix, separator = ""):
     return separator.join([" {} {}".format(prefix, flist.short_path) for flist in trans])
 
 def _verilog_test_impl(ctx):
-    trans_srcs = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogLibFiles, "transitive_sources")
+    trans_srcs = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_sources")
     srcs_list = trans_srcs.to_list()
-    flists = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogLibFiles, "transitive_flists")
+    flists = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_flists")
     flists_list = flists.to_list()
 
     content = []
@@ -87,8 +87,8 @@ def _verilog_test_impl(ctx):
 
     content += flists_args
     for dep in ctx.attr.deps:
-        if VerilogLibFiles in dep and dep[VerilogLibFiles].last_module:
-            content.append(dep[VerilogLibFiles].last_module.short_path)
+        if VerilogInfo in dep and dep[VerilogInfo].last_module:
+            content.append(dep[VerilogInfo].last_module.short_path)
     content += ctx.attr.post_flist_args
 
     content = ctx.expand_location(" ".join(content), targets = ctx.attr.data)
