@@ -1,28 +1,28 @@
-"""
-Rules for building DV infrastructure.
-"""
+"""Rules for building DV infrastructure."""
 
-load("//:verilog.bzl", "VerilogLibFiles", "flists_to_arguments", "get_transitive_srcs", "gather_shell_defines")
+load("//:verilog.bzl", "VerilogInfo", "flists_to_arguments", "gather_shell_defines", "get_transitive_srcs")
 
-DVTestCfg = provider(fields = {
+DVTestInfo = provider(fields = {
     "sim_opts": "Simulation options",
     "uvm_testname": "UVM Test Name",
     "vcomp": "Label of type dv_tb",
-    "tags" : "Tags",
+    "tags": "Tags",
 })
 
-DVTB = provider(fields = {
-    "ccf" : "Coverage config file",
+DVTBInfo = provider(fields = {
+    "ccf": "Coverage config file",
 })
 
 def _dv_test_cfg_impl(ctx):
-    parent_uvm_testnames = [dep[DVTestCfg].uvm_testname for dep in reversed(ctx.attr.inherits) if hasattr(dep[DVTestCfg], "uvm_testname")]
-    parent_vcomps = [dep[DVTestCfg].vcomp for dep in reversed(ctx.attr.inherits) if hasattr(dep[DVTestCfg], "vcomp")]
+    parent_uvm_testnames = [dep[DVTestInfo].uvm_testname for dep in reversed(ctx.attr.inherits) if hasattr(dep[DVTestInfo], "uvm_testname")]
+    parent_vcomps = [dep[DVTestInfo].vcomp for dep in reversed(ctx.attr.inherits) if hasattr(dep[DVTestInfo], "vcomp")]
 
     sim_opts = {}
+
     # Each successive depdency may override previous deps
     for dep in ctx.attr.inherits:
-        sim_opts.update(dep[DVTestCfg].sim_opts)
+        sim_opts.update(dep[DVTestInfo].sim_opts)
+
     # This rule instance may override previous sim_opts
     sim_opts.update(ctx.attr.sim_opts)
 
@@ -62,13 +62,13 @@ def _dv_test_cfg_impl(ctx):
         if "{socket_file}" not in socket_command:
             fail("socket {} did not have {{socket_file}} in socket_command".format(socket_name))
 
-    dynamic_args = {'sockets' : ctx.attr.sockets}
+    dynamic_args = {"sockets": ctx.attr.sockets}
     out = ctx.outputs.dynamic_args
     ctx.actions.write(
         output = out,
         content = str(dynamic_args),
     )
-    return [DVTestCfg(**provider_args)]
+    return [DVTestInfo(**provider_args)]
 
 dv_test_cfg = rule(
     doc = "A DV test configuration. This is not a executable target.",
@@ -79,8 +79,8 @@ dv_test_cfg = rule(
         "uvm_testname": attr.string(doc = "UVM testname. If not set, finds from deps."),
         "vcomp": attr.label(doc = "Must point to a 'dv_tb' target for how to build this testbench."),
         "sim_opts": attr.string_dict(doc = "Additional simopts flags to throw"),
-        "no_run" : attr.bool(default = False, doc = "Set to True to skip running this test."),
-        "sockets" : attr.string_dict(
+        "no_run": attr.bool(default = False, doc = "Set to True to skip running this test."),
+        "sockets": attr.string_dict(
             doc = "\n".join([
                 "Dictionary mapping of socket_name to socket_command.",
                 "For each entry in the list, simmer will create a separate process and pass a unique temporary file path to both the simulator and the socket_command.",
@@ -93,20 +93,19 @@ dv_test_cfg = rule(
     },
     outputs = {
         "sim_args": "%{name}_sim_args.f",
-        "dynamic_args" : "%{name}_dynamic_args.py",
+        "dynamic_args": "%{name}_dynamic_args.py",
     },
 )
 
-
 def _dv_lib_impl(ctx):
     if ctx.attr.incdir:
-        # Using dirname may result in bazel-out included in path 
-        directories = depset([f.short_path[:-len(f.basename)-1] for f in ctx.files.srcs ]).to_list()
+        # Using dirname may result in bazel-out included in path
+        directories = depset([f.short_path[:-len(f.basename) - 1] for f in ctx.files.srcs]).to_list()
     else:
         directories = []
 
     # # Add output files from direct dependencies (from genrules)
-    srcs = depset(ctx.files.srcs, transitive = [dep[DefaultInfo].files for dep in ctx.attr.deps if VerilogLibFiles not in dep])
+    srcs = depset(ctx.files.srcs, transitive = [dep[DefaultInfo].files for dep in ctx.attr.deps if VerilogInfo not in dep])
 
     if len(ctx.files.in_flist):
         in_flist = ctx.files.in_flist
@@ -137,14 +136,14 @@ def _dv_lib_impl(ctx):
         content = "\n".join(content),
     )
 
-    trans_srcs = get_transitive_srcs(ctx.files.srcs, ctx.attr.deps + ctx.attr.dpi, VerilogLibFiles, "transitive_sources", allow_other_outputs = True)
-    trans_flists = get_transitive_srcs([out], ctx.attr.deps, VerilogLibFiles, "transitive_flists", allow_other_outputs = False)
-    trans_dpi = get_transitive_srcs(all_sos, ctx.attr.deps, VerilogLibFiles, "transitive_dpi", allow_other_outputs = False)
+    trans_srcs = get_transitive_srcs(ctx.files.srcs, ctx.attr.deps + ctx.attr.dpi, VerilogInfo, "transitive_sources", allow_other_outputs = True)
+    trans_flists = get_transitive_srcs([out], ctx.attr.deps, VerilogInfo, "transitive_flists", allow_other_outputs = False)
+    trans_dpi = get_transitive_srcs(all_sos, ctx.attr.deps, VerilogInfo, "transitive_dpi", allow_other_outputs = False)
 
     all_files = depset(trans_srcs.to_list() + trans_flists.to_list())
 
     return [
-        VerilogLibFiles(transitive_sources = trans_srcs, transitive_flists = trans_flists, transitive_dpi = trans_dpi),
+        VerilogInfo(transitive_sources = trans_srcs, transitive_flists = trans_flists, transitive_dpi = trans_dpi),
         DefaultInfo(
             files = all_files,
             runfiles = ctx.runfiles(files = trans_srcs.to_list() + trans_flists.to_list()),
@@ -162,7 +161,7 @@ dv_lib = rule(
             doc = "Files to be places in generated flist. Generally only the 'pkg' file and interfaces. If left blank, all srcs will be used.",
         ),
         "dpi": attr.label_list(doc = "cc_libraries to link in through dpi"),
-        "incdir" : attr.bool(default = True, doc = "Include an incdir to src file directories in generated flist."),
+        "incdir": attr.bool(default = True, doc = "Include an incdir to src file directories in generated flist."),
     },
     outputs = {"out": "%{name}.f"},
 )
@@ -171,7 +170,6 @@ _XRUN_COMPILE_ARGS_TEMPLATE = "//:xrun_compile_args_template.txt"
 _XRUN_RUNTIME_ARGS_TEMPLATE = "//:xrun_runtime_args_template.txt"
 
 def _dv_tb_impl(ctx):
-
     defines = {}
     defines.update(ctx.attr.defines)
     defines.update(gather_shell_defines(ctx.attr.shells))
@@ -180,9 +178,9 @@ def _dv_tb_impl(ctx):
         template = ctx.file._compile_args_template,
         output = ctx.outputs.compile_args,
         substitutions = {
-            "{COMPILE_ARGS}" : ctx.expand_location("\n".join(ctx.attr.extra_compile_args), targets=ctx.attr.extra_runfiles),
-            "{DEFINES}" : "\n".join(["-define {}{}".format(key, value) for key, value in defines.items()]),
-            "{FLISTS}": flists_to_arguments(ctx.attr.shells + ctx.attr.deps, VerilogLibFiles, "transitive_flists", "\n-f"),
+            "{COMPILE_ARGS}": ctx.expand_location("\n".join(ctx.attr.extra_compile_args), targets = ctx.attr.extra_runfiles),
+            "{DEFINES}": "\n".join(["-define {}{}".format(key, value) for key, value in defines.items()]),
+            "{FLISTS}": flists_to_arguments(ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_flists", "\n-f"),
         },
     )
 
@@ -195,8 +193,8 @@ def _dv_tb_impl(ctx):
         template = ctx.file._runtime_args_template,
         output = ctx.outputs.runtime_args,
         substitutions = {
-            "{RUNTIME_ARGS}" : ctx.expand_location("\n".join(ctx.attr.extra_runtime_args), targets=ctx.attr.extra_runfiles),
-            "{DPI_LIBS}": flists_to_arguments(ctx.attr.shells + ctx.attr.deps, VerilogLibFiles, "transitive_dpi", "-sv_lib"),
+            "{RUNTIME_ARGS}": ctx.expand_location("\n".join(ctx.attr.extra_runtime_args), targets = ctx.attr.extra_runfiles),
+            "{DPI_LIBS}": flists_to_arguments(ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_dpi", "-sv_lib"),
         },
     )
 
@@ -206,18 +204,18 @@ def _dv_tb_impl(ctx):
         outputs = [ctx.outputs.executable],
     )
 
-    trans_srcs = get_transitive_srcs([], ctx.attr.deps + ctx.attr.shells, VerilogLibFiles, "transitive_sources", allow_other_outputs = True)
-    trans_flists = get_transitive_srcs([], ctx.attr.deps + ctx.attr.shells, VerilogLibFiles, "transitive_flists", allow_other_outputs = False)
+    trans_srcs = get_transitive_srcs([], ctx.attr.deps + ctx.attr.shells, VerilogInfo, "transitive_sources", allow_other_outputs = True)
+    trans_flists = get_transitive_srcs([], ctx.attr.deps + ctx.attr.shells, VerilogInfo, "transitive_flists", allow_other_outputs = False)
 
     out_deps = depset([ctx.outputs.compile_args, ctx.outputs.runtime_args, ctx.outputs.compile_warning_waivers, ctx.outputs.executable])
 
-    all_files = depset([], transitive=[trans_srcs, trans_flists, out_deps])
+    all_files = depset([], transitive = [trans_srcs, trans_flists, out_deps])
     return [
         DefaultInfo(
             files = all_files,
             runfiles = ctx.runfiles(files = trans_srcs.to_list() + trans_flists.to_list() + out_deps.to_list() + ctx.files.ccf + ctx.files.extra_runfiles + [ctx.file._default_sim_opts]),
         ),
-        DVTB(
+        DVTBInfo(
             ccf = ctx.files.ccf,
         ),
     ]
@@ -228,25 +226,27 @@ dv_tb = rule(
     attrs = {
         "deps": attr.label_list(mandatory = True),
         "defines": attr.string_dict(doc = "Additional defines to throw for this testbench compile."),
-        "warning_waivers" : attr.string_list(doc = "Waive warnings in the compile. Converted to python regular expressions"),
-        "shells" : attr.label_list(doc =
-                                   "List of shells to use.\n" +
-                                   "Each shell thrown will create two defines:\n" + 
-                                   " `define gumi_<module> <module>_shell\n" +
-                                   " `define gumi_use_<module>_shell\n" +
-                                   "The shell module declaration must be guarded by the gumi_use_<module>_shell define:\n" +
-                                   " `ifdef gumi_use_<module>_shell\n" +
-                                   "    module <module>_shell(/*AUTOARGS*/);\n" +
-                                   "      ...\n" +
-                                   "    endmodule\n" +
-                                   " `endif\n"
-                               ),
-        "ccf" : attr.label_list(allow_files = True,
-                                doc = "Coverage configuration file",
-                            ),
-        "extra_compile_args" : attr.string_list(doc = "Additional flags to throw to compile"),
-        "extra_runtime_args" : attr.string_list(doc = "Additional flags to throw to simultation run"),
-        "extra_runfiles" : attr.label_list(
+        "warning_waivers": attr.string_list(doc = "Waive warnings in the compile. Converted to python regular expressions"),
+        "shells": attr.label_list(
+            doc =
+                "List of shells to use.\n" +
+                "Each shell thrown will create two defines:\n" +
+                " `define gumi_<module> <module>_shell\n" +
+                " `define gumi_use_<module>_shell\n" +
+                "The shell module declaration must be guarded by the gumi_use_<module>_shell define:\n" +
+                " `ifdef gumi_use_<module>_shell\n" +
+                "    module <module>_shell(/*AUTOARGS*/);\n" +
+                "      ...\n" +
+                "    endmodule\n" +
+                " `endif\n",
+        ),
+        "ccf": attr.label_list(
+            allow_files = True,
+            doc = "Coverage configuration file",
+        ),
+        "extra_compile_args": attr.string_list(doc = "Additional flags to throw to compile"),
+        "extra_runtime_args": attr.string_list(doc = "Additional flags to throw to simultation run"),
+        "extra_runfiles": attr.label_list(
             allow_files = True,
             doc = "Additional files that need to be passed as runfiles to bazel. The generally should only be things referred to by extra_compile_args or extra_runtime_args",
         ),
@@ -272,9 +272,9 @@ dv_tb = rule(
 )
 
 def _dv_unit_test_impl(ctx):
-    trans_srcs = get_transitive_srcs([], ctx.attr.deps, VerilogLibFiles, "transitive_sources")
+    trans_srcs = get_transitive_srcs([], ctx.attr.deps, VerilogInfo, "transitive_sources")
     srcs_list = trans_srcs.to_list()
-    flists = get_transitive_srcs([], ctx.attr.deps, VerilogLibFiles, "transitive_flists")
+    flists = get_transitive_srcs([], ctx.attr.deps, VerilogInfo, "transitive_flists")
     flists_list = flists.to_list()
 
     ctx.actions.expand_template(
@@ -282,7 +282,7 @@ def _dv_unit_test_impl(ctx):
         output = ctx.outputs.out,
         substitutions = {
             "{DEFAULT_SIM_OPTS}": "-f {}".format(ctx.file.default_sim_opts.short_path),
-            "{DPI_LIBS}": flists_to_arguments(ctx.attr.deps, VerilogLibFiles, "transitive_dpi", "-sv_lib"),
+            "{DPI_LIBS}": flists_to_arguments(ctx.attr.deps, VerilogInfo, "transitive_dpi", "-sv_lib"),
             "{FLISTS}": " ".join(["-f {}".format(f.short_path) for f in flists_list]),
             "{SIM_ARGS}": " ".join(ctx.attr.sim_args),
         },
@@ -320,23 +320,28 @@ dv_unit_test = rule(
     test = True,
 )
 
-
 # Used by simmer to find test to tb/vcomp mappings
 def _test_to_vcomp_aspect_impl(target, ctx):
-    print("test_to_vcomp({}, {}, {})".format(target.label, target[DVTestCfg].vcomp.label, target[DVTestCfg].tags))
+    # buildifier: disable=print
+    print("test_to_vcomp({}, {}, {})".format(target.label, target[DVTestInfo].vcomp.label, target[DVTestInfo].tags))
+
+    # buildifier: enable=print
     return []
 
 test_to_vcomp_aspect = aspect(
     implementation = _test_to_vcomp_aspect_impl,
-    attr_aspects = ['deps', 'tags'],
+    attr_aspects = ["deps", "tags"],
 )
 
 # Used by simmer to find test to find ccf file
 def _dv_tb_ccf_aspect_impl(target, ctx):
-    print("dv_tb_ccf({})".format([f.path for f in target[DVTB].ccf]))
+    # buildifier: disable=print
+    print("dv_tb_ccf({})".format([f.path for f in target[DVTBInfo].ccf]))
+
+    # buildifier: enable=print
     return []
 
 dv_tb_ccf_aspect = aspect(
     implementation = _dv_tb_ccf_aspect_impl,
-    attr_aspects = ['ccf'],
+    attr_aspects = ["ccf"],
 )

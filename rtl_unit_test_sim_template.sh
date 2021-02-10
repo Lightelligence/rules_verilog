@@ -1,5 +1,5 @@
 #!/usr/bin/bash
-# This is a template for the bazel rtl_ut rule
+# This is a template for the bazel rtl_unit_test rule
 # It is not intended to be run stand-alone
 runmod -t xrun -- \
     -define TBV \

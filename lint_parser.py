@@ -41,9 +41,7 @@ def parse_args(argv):
                         default=False,
                         action='store_true',
                         help='Set the verbosity of this tool to debug level.')
-    parser.add_argument("--bazel-target",
-                        default="lint_top",
-                        help="bazel target to use for lint")
+    parser.add_argument("--bazel-target", default="lint_top", help="bazel target to use for lint")
     parser.add_argument("--sw",
                         dest="show_waived",
                         default=False,

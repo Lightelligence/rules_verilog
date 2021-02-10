@@ -1,15 +1,18 @@
-load("//:verilog.bzl", "VerilogLibFiles", "RTLLibProvider", "flists_to_arguments", "get_transitive_srcs", "gather_shell_defines", "CUSTOM_SHELL")
+"""Rules to gather and compile RTL."""
 
+load("//:verilog.bzl", "CUSTOM_SHELL", "ShellInfo", "VerilogInfo", "gather_shell_defines", "get_transitive_srcs")
 
-def create_flist_content(ctx, gumi_path, allow_library_discovery, no_synth=False):
+def create_flist_content(ctx, gumi_path, allow_library_discovery, no_synth = False):
     flist_content = []
-    # Using dirname may result in bazel-out included in path 
-    incdir = depset([f.short_path[:-len(f.basename)-1] for f in ctx.files.headers]).to_list()
+
+    # Using dirname may result in bazel-out included in path
+    incdir = depset([f.short_path[:-len(f.basename) - 1] for f in ctx.files.headers]).to_list()
     for d in incdir:
         flist_content.append("+incdir+{}".format(d))
 
     # Using dirname may result in bazel-out included in path
-    libdir = depset([f.short_path[:-len(f.basename)-1] for f in ctx.files.modules]).to_list()
+    libdir = depset([f.short_path[:-len(f.basename) - 1] for f in ctx.files.modules]).to_list()
+
     #if len(libdir):
     flist_content.append(gumi_path)
 
@@ -34,14 +37,13 @@ def create_flist_content(ctx, gumi_path, allow_library_discovery, no_synth=False
     flist_content.append("")
     return flist_content
 
-
 def _rtl_lib_impl(ctx):
     srcs = ctx.files.headers + ctx.files.modules + ctx.files.lib_files + ctx.files.direct
-    
+
     if ctx.attr.is_pkg:
         # FIXME opu_tx_rx is failing this check
         # for dep in ctx.attr.deps:
-        #     if RTLLibProvider in dep and not dep[RTLLibProvider].is_pkg:
+        #     if ShellInfo in dep and not dep[ShellInfo].is_pkg:
         #         fail("rtl_pkg may only depend on other rtl_pkgs")
         pass
     else:
@@ -52,20 +54,23 @@ def _rtl_lib_impl(ctx):
     if ctx.attr.is_shell_of:
         if len(ctx.attr.modules) != 1 and not ctx.attr.is_shell_of == CUSTOM_SHELL:
             fail("Shells must specify exactly one module")
+
         # if len(ctx.attr.deps) != 0:
         #     fail("Shells may not specify deps")
+
     else:
         for dep in ctx.attr.deps:
-            if RTLLibProvider in dep and dep[RTLLibProvider].is_shell_of and not dep[RTLLibProvider].is_shell_of == CUSTOM_SHELL:
+            if ShellInfo in dep and dep[ShellInfo].is_shell_of and not dep[ShellInfo].is_shell_of == CUSTOM_SHELL:
                 fail("rtl_lib may not depend on shells. Shells should only be included at top-level builds")
         for src in srcs:
             if "_shell" in src.basename:
                 fail("Shell files should not be declared in an rtl_lib. Use a rtl_shell_static or rtl_shell_dynamic instead. {} is declared in {}".format(src, ctx.label))
-        
+
     gumi_path = ""
     if ctx.attr.enable_gumi:
         gumi = ctx.actions.declare_file("gumi_{name}.vh".format(name = ctx.attr.name))
         gumi_content = []
+
         # Making this more unique than just gumi.basename.upper()
         # To avoid case where multiple directories define the same name for a rtl_lib
         gumi_guard_value = gumi.short_path.replace("/", "_").replace(".", "_")
@@ -77,7 +82,7 @@ def _rtl_lib_impl(ctx):
         if ctx.attr.gumi_override:
             gumi_modules = ctx.attr.gumi_override
         else:
-            gumi_modules = [module.basename[:-len(module.extension)-1] for module in ctx.files.modules]
+            gumi_modules = [module.basename[:-len(module.extension) - 1] for module in ctx.files.modules]
         for module_name in gumi_modules:
             gumi_name = "gumi_{}".format(module_name)
             gumi_content.append("  `ifndef {}".format(gumi_name))
@@ -95,11 +100,10 @@ def _rtl_lib_impl(ctx):
 
         srcs = [gumi] + srcs
         gumi_path = gumi.short_path
-    else:
-        if not (ctx.attr.gumi_file_override == None):
-            gumi_path = ctx.file.gumi_file_override.short_path
+    elif not (ctx.attr.gumi_file_override == None):
+        gumi_path = ctx.file.gumi_file_override.short_path
 
-    flist_content = create_flist_content(ctx, gumi_path=gumi_path, allow_library_discovery=True)
+    flist_content = create_flist_content(ctx, gumi_path = gumi_path, allow_library_discovery = True)
 
     last_module = None
     for m in ctx.files.modules:
@@ -114,10 +118,10 @@ def _rtl_lib_impl(ctx):
         content = "\n".join(flist_content),
     )
 
-    trans_srcs   = get_transitive_srcs(srcs,  ctx.attr.deps, VerilogLibFiles, "transitive_sources", allow_other_outputs = True)
-    trans_flists = get_transitive_srcs([ctx.outputs.flist], ctx.attr.deps, VerilogLibFiles, "transitive_flists" , allow_other_outputs = False)
+    trans_srcs = get_transitive_srcs(srcs, ctx.attr.deps, VerilogInfo, "transitive_sources", allow_other_outputs = True)
+    trans_flists = get_transitive_srcs([ctx.outputs.flist], ctx.attr.deps, VerilogInfo, "transitive_flists", allow_other_outputs = False)
 
-    trans_dpi = get_transitive_srcs([], ctx.attr.deps, VerilogLibFiles, "transitive_dpi" , allow_other_outputs = False)
+    trans_dpi = get_transitive_srcs([], ctx.attr.deps, VerilogInfo, "transitive_dpi", allow_other_outputs = False)
 
     runfiles_list = trans_srcs.to_list() + trans_flists.to_list() + trans_dpi.to_list()
     runfiles = ctx.runfiles(files = runfiles_list)
@@ -125,12 +129,12 @@ def _rtl_lib_impl(ctx):
     all_files = depset(trans_srcs.to_list() + trans_flists.to_list())
 
     return [
-        RTLLibProvider(
-            is_pkg=ctx.attr.is_pkg,
-            is_shell_of=ctx.attr.is_shell_of,
+        ShellInfo(
+            is_pkg = ctx.attr.is_pkg,
+            is_shell_of = ctx.attr.is_shell_of,
             gumi_path = gumi_path,
         ),
-        VerilogLibFiles(
+        VerilogInfo(
             transitive_sources = trans_srcs,
             transitive_flists = trans_flists,
             transitive_dpi = trans_dpi,
@@ -146,24 +150,24 @@ rtl_lib = rule(
     doc = "An RTL Library. Creates a generated flist file from a list of source files.",
     implementation = _rtl_lib_impl,
     attrs = {
-        "headers" : attr.label_list(
+        "headers": attr.label_list(
             allow_files = True,
             doc = "Files that should nomally be `included into other files. (i.e. covered by +incdir)",
         ),
-        "modules" : attr.label_list(
+        "modules": attr.label_list(
             allow_files = True,
             doc = "Files containing single modules that may be found via library (i.e. covered by -y)",
         ),
-        "lib_files" : attr.label_list(
+        "lib_files": attr.label_list(
             allow_files = True,
             doc = "Verilog library files containing multiple modules (i.e. covered by -v)",
         ),
-        "direct" : attr.label_list(
+        "direct": attr.label_list(
             allow_files = True,
-            doc = "Verilog files that must be put directly onto the command line."
+            doc = "Verilog files that must be put directly onto the command line.",
         ),
         "deps": attr.label_list(
-            doc = "Other verilog libraries this target is dependent upon."
+            doc = "Other verilog libraries this target is dependent upon.",
         ),
         "no_synth": attr.bool(
             default = False,
@@ -173,47 +177,55 @@ rtl_lib = rule(
             default = False,
             doc = "Do not set directly in rule instances. Used for internal bookkeeping.",
         ),
-        "is_shell_of" : attr.string(
+        "is_shell_of": attr.string(
             default = "",
             doc = "Do not set directly in rule instances. Used for internal bookkeeping. If set, this library is a shell of another module.",
         ),
-        "enable_gumi" : attr.bool(
+        "enable_gumi": attr.bool(
             default = True,
             doc = "Do not set directly in rule instances. Used for internal bookkeeping.",
         ),
-        "gumi_file_override" : attr.label(
+        "gumi_file_override": attr.label(
             default = None,
             allow_single_file = True,
             doc = "Should only be set if enable_gumi=False",
         ),
-        "gumi_override" : attr.string_list(
+        "gumi_override": attr.string_list(
             doc = "A list of string of module names to create gumi defines. If empty, the modules variable is used instead.",
         ),
     },
     outputs = {
-        "flist" : "%{name}.f",
+        "flist": "%{name}.f",
     },
 )
 
-def rtl_pkg(name,
-            direct,
-            no_synth=False,
-            deps=[]):
+def rtl_pkg(
+        name,
+        direct,
+        no_synth = False,
+        deps = []):
     """A single rtl pkg file."""
-    rtl_lib(name = name,
-            direct = direct,
-            deps = deps,
-            is_pkg = True,
-            no_synth=no_synth,
-            enable_gumi = False,
+    rtl_lib(
+        name = name,
+        direct = direct,
+        deps = deps,
+        is_pkg = True,
+        no_synth = no_synth,
+        enable_gumi = False,
     )
 
-def rtl_shell_static(name,
-                     module_to_shell_name,
-                     shell_module_label,
-                     deps = []):
-    """A prevously created RTL shell that is version controlled. Use when a shell needs to be hand-edited after generation
-    If module_to_shell_name == 'custom', then all rules regarding shells are ignored and gumi shell defines are not thrown, allowing the user great power.
+def rtl_shell_static(
+        name,
+        module_to_shell_name,
+        shell_module_label,
+        deps = []):
+    """A prevously created RTL shell that is version controlled.
+
+    Use when a shell needs to be hand-edited after generation If
+    module_to_shell_name == 'custom', then all rules regarding shells are
+    ignored and gumi shell defines are not thrown, allowing the user great
+    power.
+
     """
     if not name.startswith(module_to_shell_name) and module_to_shell_name != CUSTOM_SHELL:
         fail("Shell name should start with the original module name: shell name='{}' original module='{}'".format(name, module_to_shell_name))
@@ -226,11 +238,12 @@ def rtl_shell_static(name,
         enable_gumi = False,
         deps = deps,
     )
-    
-def rtl_shell_dynamic(name,
-                      module_to_shell_name,
-                      shell_suffix="",
-                      deps=[]):
+
+def rtl_shell_dynamic(
+        name,
+        module_to_shell_name,
+        shell_suffix = "",
+        deps = []):
     """Create a shell on the fly."""
     # if module_to_shell_name + "_shell" + shell_suffix != name:
     #     fail("Shell name should be original module name plus shell and suffix")
@@ -251,18 +264,17 @@ def rtl_shell_dynamic(name,
         enable_gumi = False,
     )
 
-
 def _rtl_bin_impl(ctx):
     out = ctx.outputs.out
-    trans_flists = get_transitive_srcs([], ctx.attr.deps, VerilogLibFiles, "transitive_flists", allow_other_outputs = False)
+    trans_flists = get_transitive_srcs([], ctx.attr.deps, VerilogInfo, "transitive_flists", allow_other_outputs = False)
 
     ctx.actions.write(
         output = out,
         content = "\n".join([" -f {}".format(f.short_path) for f in trans_flists]),
     )
 
-    trans_flists = get_transitive_srcs([out], ctx.attr.deps, VerilogLibFiles, "transitive_flists", allow_other_outputs = False)
-    trans_srcs = get_transitive_srcs([], ctx.attr.deps, VerilogLibFiles, "transitive_sources", allow_other_outputs = True)
+    trans_flists = get_transitive_srcs([out], ctx.attr.deps, VerilogInfo, "transitive_flists", allow_other_outputs = False)
+    trans_srcs = get_transitive_srcs([], ctx.attr.deps, VerilogInfo, "transitive_sources", allow_other_outputs = True)
 
     second_out = ctx.outputs.executable
     script = "\n".join(
@@ -301,8 +313,8 @@ def _rtl_flist_impl(ctx):
     trans_flists = depset(ctx.files.srcs)
 
     return [
-        VerilogLibFiles(transitive_sources = trans_srcs, transitive_flists = trans_flists, transitive_dpi=depset()),
-        DefaultInfo(files = trans_srcs + trans_flists),
+        VerilogInfo(transitive_sources = trans_srcs, transitive_flists = trans_flists, transitive_dpi = depset()),
+        DefaultInfo(files = depset(trans_srcs.to_list() + trans_flists.to_list())),
     ]
 
 rtl_flist = rule(
@@ -319,15 +331,15 @@ rtl_flist = rule(
 
 def _rtl_unit_test_impl(ctx):
     # out = ctx.outputs.executable
-    trans_srcs = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogLibFiles, "transitive_sources")
+    trans_srcs = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_sources")
     srcs_list = trans_srcs.to_list()
-    flists = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogLibFiles, "transitive_flists")
+    flists = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_flists")
     flists_list = flists.to_list()
 
     top = ""
     for dep in ctx.attr.deps:
-        if VerilogLibFiles in dep and dep[VerilogLibFiles].last_module:
-            top = dep[VerilogLibFiles].last_module.short_path
+        if VerilogInfo in dep and dep[VerilogInfo].last_module:
+            top = dep[VerilogInfo].last_module.short_path
 
     pre_fa = ["    \\"]
     for key, value in gather_shell_defines(ctx.attr.shells).items():
@@ -348,8 +360,8 @@ def _rtl_unit_test_impl(ctx):
         substitutions = {
             "{FLISTS}": " ".join(["-f {}".format(f.short_path) for f in flists_list]),
             "{TOP}": top,
-            "{PRE_FLIST_ARGS}" : "\n".join(pre_fa),
-            "{POST_FLIST_ARGS}" : post_fa,
+            "{PRE_FLIST_ARGS}": "\n".join(pre_fa),
+            "{POST_FLIST_ARGS}": post_fa,
         },
     )
 
@@ -369,35 +381,35 @@ rtl_unit_test = rule(
             allow_single_file = True,
             default = Label("//:rtl_unit_test_sim_template.sh"),
         ),
-        "data" : attr.label_list(
+        "data": attr.label_list(
             allow_files = True,
             doc = "Non-verilog dependencies",
         ),
-        "shells" : attr.label_list(),
-        "pre_flist_args" : attr.string_list(doc = "commands and arguments before flist arguments"),
-        "post_flist_args" : attr.string_list(doc = "commands and arguments after flist arguments"),
+        "shells": attr.label_list(),
+        "pre_flist_args": attr.string_list(doc = "commands and arguments before flist arguments"),
+        "post_flist_args": attr.string_list(doc = "commands and arguments after flist arguments"),
     },
     test = True,
 )
 
-
 def _rtl_lint_test_impl(ctx):
-    trans_flists = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogLibFiles, "transitive_flists", allow_other_outputs = False)
+    trans_flists = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_flists", allow_other_outputs = False)
 
-    content = ["#!/usr/bin/bash",
-               "runmod -t xrun -- \\",
-               "  -define LINT \\",
-               "  -sv \\",
-               "  -hal  \\",
-               "  -sv \\",
-               "  -licqueue \\",
-               "  -libext .v \\",
-               "  -libext .sv \\",
-               "  -enable_single_yvlib \\",
-               # "  -nowarn SPDUSD \\",
-               # "  -nowarn LIBNOU \\",
-               "  -timescale 100fs/100fs \\",
-               ]
+    content = [
+        "#!/usr/bin/bash",
+        "runmod -t xrun -- \\",
+        "  -define LINT \\",
+        "  -sv \\",
+        "  -hal  \\",
+        "  -sv \\",
+        "  -licqueue \\",
+        "  -libext .v \\",
+        "  -libext .sv \\",
+        "  -enable_single_yvlib \\",
+        # "  -nowarn SPDUSD \\",
+        # "  -nowarn LIBNOU \\",
+        "  -timescale 100fs/100fs \\",
+    ]
 
     for key, value in gather_shell_defines(ctx.attr.shells).items():
         content.append("  -define {}{} \\".format(key, value))
@@ -408,10 +420,11 @@ def _rtl_lint_test_impl(ctx):
     for f in trans_flists.to_list():
         content.append("  -f {} \\".format(f.short_path))
     for dep in ctx.attr.deps:
-        if VerilogLibFiles in dep and dep[VerilogLibFiles].last_module:
-            content.append("  {} \\".format(dep[VerilogLibFiles].last_module.short_path))
+        if VerilogInfo in dep and dep[VerilogInfo].last_module:
+            content.append("  {} \\".format(dep[VerilogInfo].last_module.short_path))
 
     design_info_arg = ""
+
     # design_info_arg = " -design_info {}".format(ctx.files._design_info_common.short_path)
     for design_info in ctx.files.design_info:
         design_info_arg += " -design_info {}".format(design_info.short_path)
@@ -420,10 +433,11 @@ def _rtl_lint_test_impl(ctx):
         fail("Only one rulefile allowed")
     rulefile = "".join([f.short_path for f in ctx.files.rulefile])
 
-    content.append("  -halargs '\"-RULEFILE {rulefile} -inst_top {top} {design_info_arg} -XML xrun.log.xml\"' \\".format(rulefile = rulefile,
-                                                                                                                         top = ctx.attr.top,
-                                                                                                                         design_info_arg = design_info_arg,
-                                                                                                                     ))
+    content.append("  -halargs '\"-RULEFILE {rulefile} -inst_top {top} {design_info_arg} -XML xrun.log.xml\"' \\".format(
+        rulefile = rulefile,
+        top = ctx.attr.top,
+        design_info_arg = design_info_arg,
+    ))
     content.append("  -logfile xrun.log")
 
     content.append("")
@@ -434,8 +448,8 @@ def _rtl_lint_test_impl(ctx):
         content = "\n".join(content),
     )
 
-    trans_flists = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogLibFiles, "transitive_flists", allow_other_outputs = False)
-    trans_srcs = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogLibFiles, "transitive_sources", allow_other_outputs = True)
+    trans_flists = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_flists", allow_other_outputs = False)
+    trans_srcs = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_sources", allow_other_outputs = True)
 
     runfiles = ctx.runfiles(files = trans_srcs.to_list() + trans_flists.to_list() + ctx.files.design_info + ctx.files.rulefile + ctx.files.lint_parser)
 
@@ -448,34 +462,37 @@ rtl_lint_test = rule(
     implementation = _rtl_lint_test_impl,
     attrs = {
         "deps": attr.label_list(mandatory = True),
-        "rulefile" : attr.label(allow_single_file = True,
-                                mandatory = True,
-                            ),
-        "shells" : attr.label_list(),
-        "top" : attr.string(doc = "The name of the top module",
-                            mandatory = True,
-                        ),
-        "design_info" : attr.label_list(allow_files = True,
-                                        doc = "A design info file to add additional lint rule/waivers",
-                                    ),
-        "defines" : attr.string_dict(allow_empty = True,
-                                     doc = "List of `defines for this lint run",
-                                     ),
-        "lint_parser" : attr.label(
-            allow_files = True,
-            default="@verilog_tools//:lint_parser.py",
+        "rulefile": attr.label(
+            allow_single_file = True,
+            mandatory = True,
         ),
-        "waiver_hack" : attr.string(
-            doc = "Lint waiver regex to hack around cases when HAL has formatting errors in xrun.log.xml that cause problems for our lint parser"
+        "shells": attr.label_list(),
+        "top": attr.string(
+            doc = "The name of the top module",
+            mandatory = True,
+        ),
+        "design_info": attr.label_list(
+            allow_files = True,
+            doc = "A design info file to add additional lint rule/waivers",
+        ),
+        "defines": attr.string_dict(
+            allow_empty = True,
+            doc = "List of `defines for this lint run",
+        ),
+        "lint_parser": attr.label(
+            allow_files = True,
+            default = "@verilog_tools//:lint_parser.py",
+        ),
+        "waiver_hack": attr.string(
+            doc = "Lint waiver regex to hack around cases when HAL has formatting errors in xrun.log.xml that cause problems for our lint parser",
         ),
     },
     test = True,
 )
 
 def _rtl_cdc_test_impl(ctx):
-
-    trans_flists = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogLibFiles, "transitive_flists", allow_other_outputs = False)
-    trans_srcs = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogLibFiles, "transitive_sources", allow_other_outputs = True)
+    trans_flists = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_flists", allow_other_outputs = False)
+    trans_srcs = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_sources", allow_other_outputs = True)
 
     # The run script is pretty dumb, the tcl command file has the interesting stuff
     executable_content = [
@@ -505,9 +522,13 @@ def _rtl_cdc_test_impl(ctx):
     if ctx.attr.bbox:
         bbox_cmd = "-bbox_m {" + "{}".format(" ".join(ctx.attr.bbox)) + "}"
 
+    top_mod = ""
     for dep in ctx.attr.deps:
-        if VerilogLibFiles in dep and dep[VerilogLibFiles].last_module:
-            top_mod = "  {}".format(dep[VerilogLibFiles].last_module.short_path)
+        if VerilogInfo in dep and dep[VerilogInfo].last_module:
+            top_mod = "  {}".format(dep[VerilogInfo].last_module.short_path)
+
+    if top_mod == "":
+        fail("rtl_cdc_gui could not determine top_module from last_module variable")
 
     bbox_a_cmd = "-bbox_a 4096"
 
@@ -558,22 +579,26 @@ rtl_cdc_test = rule(
     implementation = _rtl_cdc_test_impl,
     attrs = {
         "deps": attr.label_list(mandatory = True),
-        "shells" : attr.label_list(),
-        "top" : attr.string(doc = "The name of the top module",
-                            mandatory = True,
-                        ),
-        "defines" : attr.string_list(allow_empty = True,
-                                     default = [],
-                                     doc = "List of `defines for this cdc run",
-                                     ),
-        "bbox" : attr.string_list(allow_empty = True,
-                                  default = [],
-                                  doc = "List of modules to black box",
-                              ),
-        "cmd_file" : attr.label(allow_files = True,
-                                doc = "tcl commands to run in JG",
-                                 mandatory = True,
-                             ),
+        "shells": attr.label_list(),
+        "top": attr.string(
+            doc = "The name of the top module",
+            mandatory = True,
+        ),
+        "defines": attr.string_list(
+            allow_empty = True,
+            default = [],
+            doc = "List of `defines for this cdc run",
+        ),
+        "bbox": attr.string_list(
+            allow_empty = True,
+            default = [],
+            doc = "List of modules to black box",
+        ),
+        "cmd_file": attr.label(
+            allow_files = True,
+            doc = "tcl commands to run in JG",
+            mandatory = True,
+        ),
     },
     outputs = {
         "cdc_preamble_cmds": "%{name}_cdc_preamble_cmds.tcl",
@@ -581,10 +606,10 @@ rtl_cdc_test = rule(
     },
     test = True,
 )
-def _rtl_cdc_gui_impl(ctx):
 
-    trans_flists = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogLibFiles, "transitive_flists", allow_other_outputs = False)
-    trans_srcs = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogLibFiles, "transitive_sources", allow_other_outputs = True)
+def _rtl_cdc_gui_impl(ctx):
+    trans_flists = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_flists", allow_other_outputs = False)
+    trans_srcs = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_sources", allow_other_outputs = True)
 
     # The run script is pretty dumb, the tcl command file has the interesting stuff
     executable_content = [
@@ -609,9 +634,13 @@ def _rtl_cdc_gui_impl(ctx):
     if ctx.attr.bbox:
         bbox_cmd = "-bbox_m {" + "{}".format(" ".join(ctx.attr.bbox)) + "}"
 
+    top_mod = ""
     for dep in ctx.attr.deps:
-        if VerilogLibFiles in dep and dep[VerilogLibFiles].last_module:
-            top_mod = "  {}".format(dep[VerilogLibFiles].last_module.short_path)
+        if VerilogInfo in dep and dep[VerilogInfo].last_module:
+            top_mod = "  {}".format(dep[VerilogInfo].last_module.short_path)
+
+    if top_mod == "":
+        fail("rtl_cdc_gui could not determine top_module from last_module variable")
 
     bbox_a_cmd = "-bbox_a 4096"
 
@@ -658,22 +687,26 @@ rtl_cdc_gui = rule(
     implementation = _rtl_cdc_gui_impl,
     attrs = {
         "deps": attr.label_list(mandatory = True),
-        "shells" : attr.label_list(),
-        "top" : attr.string(doc = "The name of the top module",
-                            mandatory = True,
-                        ),
-        "defines" : attr.string_list(allow_empty = True,
-                                     default = [],
-                                     doc = "List of `defines for this cdc run",
-                                     ),
-        "bbox" : attr.string_list(allow_empty = True,
-                                  default = [],
-                                  doc = "List of modules to black box",
-                              ),
-        "cmd_file" : attr.label(allow_files = True,
-                                doc = "tcl commands to run in JG",
-                                 mandatory = True,
-                             ),
+        "shells": attr.label_list(),
+        "top": attr.string(
+            doc = "The name of the top module",
+            mandatory = True,
+        ),
+        "defines": attr.string_list(
+            allow_empty = True,
+            default = [],
+            doc = "List of `defines for this cdc run",
+        ),
+        "bbox": attr.string_list(
+            allow_empty = True,
+            default = [],
+            doc = "List of modules to black box",
+        ),
+        "cmd_file": attr.label(
+            allow_files = True,
+            doc = "tcl commands to run in JG",
+            mandatory = True,
+        ),
     },
     outputs = {
         "cdc_preamble_cmds": "%{name}_cdc_preamble_cmds.tcl",
@@ -682,14 +715,15 @@ rtl_cdc_gui = rule(
     executable = True,
 )
 
-def rtl_cdc(name,
-            deps,
-            top,
-            cmd_file,
-            shells,
-            bbox,
-            defines,
-            tags=[]):
+def rtl_cdc(
+        name,
+        deps,
+        top,
+        cmd_file,
+        shells,
+        bbox,
+        defines,
+        tags = []):
     """Create rules to run standard CDC test and to run in GUI mode"""
     rtl_cdc_test(
         name = name,
