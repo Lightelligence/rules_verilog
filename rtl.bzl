@@ -314,7 +314,7 @@ def _rtl_flist_impl(ctx):
 
     return [
         VerilogInfo(transitive_sources = trans_srcs, transitive_flists = trans_flists, transitive_dpi = depset()),
-        DefaultInfo(files = trans_srcs + trans_flists),
+        DefaultInfo(files = depset(trans_srcs.to_list() + trans_flists.to_list())),
     ]
 
 rtl_flist = rule(
