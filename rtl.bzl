@@ -522,9 +522,13 @@ def _rtl_cdc_test_impl(ctx):
     if ctx.attr.bbox:
         bbox_cmd = "-bbox_m {" + "{}".format(" ".join(ctx.attr.bbox)) + "}"
 
+    top_mod = ""
     for dep in ctx.attr.deps:
         if VerilogInfo in dep and dep[VerilogInfo].last_module:
             top_mod = "  {}".format(dep[VerilogInfo].last_module.short_path)
+
+    if top_mod == "":
+        fail("rtl_cdc_gui could not determine top_module from last_module variable")
 
     bbox_a_cmd = "-bbox_a 4096"
 
@@ -630,9 +634,13 @@ def _rtl_cdc_gui_impl(ctx):
     if ctx.attr.bbox:
         bbox_cmd = "-bbox_m {" + "{}".format(" ".join(ctx.attr.bbox)) + "}"
 
+    top_mod = ""
     for dep in ctx.attr.deps:
         if VerilogInfo in dep and dep[VerilogInfo].last_module:
             top_mod = "  {}".format(dep[VerilogInfo].last_module.short_path)
+
+    if top_mod == "":
+        fail("rtl_cdc_gui could not determine top_module from last_module variable")
 
     bbox_a_cmd = "-bbox_a 4096"
 
