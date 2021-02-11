@@ -28,32 +28,3 @@ verilator_lint = rule(
     executable = True,
     doc = "Run verilator on an RTL library.",
 )
-
-def _hal_lint_impl(ctx):
-    out = ctx.outputs.executable
-    trans_srcs = get_transitive_srcs([], ctx.attr.deps, RTLLibFiles, "transitive_sources")
-    srcs_list = trans_srcs.to_list()
-    flists = get_transitive_srcs([], ctx.attr.deps, RTLLibFiles, "transitive_flists")
-    flists_list = flists.to_list()
-
-    script = "\n".join(
-        ['runmod -t xrun -- -hal -halargs "-top {}" {}'.format(ctx.attr.top, " ".join(["-f {}".format(f.short_path) for f in flists_list]))],
-    )
-
-    ctx.actions.write(
-        output = out,
-        content = script,
-    )
-
-    runfiles = ctx.runfiles(files = flists_list + srcs_list)
-    return [DefaultInfo(runfiles = runfiles)]
-
-hal_lint = rule(
-    implementation = _hal_lint_impl,
-    attrs = {
-        "deps": attr.label_list(),
-        "top": attr.string(mandatory = True),
-    },
-    executable = True,
-    doc = "Run hal on an RTL library.",
-)
