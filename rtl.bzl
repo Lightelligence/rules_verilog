@@ -501,12 +501,12 @@ def _rtl_cdc_test_impl(ctx):
         "runmod -t jg -- \\",
         "  -cdc \\",
         "  -no_gui \\",
-        "  -proj `calc_simresults_location.py`/jg_cdc_{}\\".format(ctx.attr.top),
+        "  -proj cdc_run\\",
         "  {} \\".format(ctx.outputs.cdc_preamble_cmds.short_path),
         "  {} \\".format(ctx.files.cmd_file[0].short_path),
         "  {} \\".format(ctx.outputs.cdc_epilogue_cmds.short_path),
         "  $@",
-        "! grep \"^\\[*ERROR\" `calc_simresults_location.py`/jg_cdc_{}/jg.log".format(ctx.attr.top),
+        "! grep \"^\\[*ERROR\" cdc_run/jg.log",
         "",
     ]
 
@@ -535,7 +535,7 @@ def _rtl_cdc_test_impl(ctx):
     premable_cmds_content = [
         "clear -all",
         "set elaborate_single_run_mode True",
-        "analyze -sv09 +libext+.v+.sv {} +define+LINT+CDC+SKIP_PWR_GND{} {} {}".format(bbox_cmd, "".join(defines), flists, top_mod),
+        "analyze -sv09 +libext+.v+.sv {} +define+LINT+CDC{} {} {}".format(bbox_cmd, "".join(defines), flists, top_mod),
         "elaborate {} -top {} {}".format(bbox_cmd, ctx.attr.top, bbox_a_cmd),
         "check_cdc -check -rule -set {{treat_boundaries_as_unclocked true}}",
     ]
@@ -616,7 +616,7 @@ def _rtl_cdc_gui_impl(ctx):
         "#!/usr/bin/bash",
         "runmod -t jg -- \\",
         "  -cdc \\",
-        "  -proj `calc_simresults_location.py`/jg_cdc_{}\\".format(ctx.attr.top),
+        "  -proj cdc_run\\",
         "  {} \\".format(ctx.outputs.cdc_preamble_cmds.short_path),
         "  {} \\".format(ctx.files.cmd_file[0].short_path),
         "  {} \\".format(ctx.outputs.cdc_epilogue_cmds.short_path),
