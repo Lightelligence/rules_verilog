@@ -166,8 +166,8 @@ dv_lib = rule(
     outputs = {"out": "%{name}.f"},
 )
 
-_XRUN_COMPILE_ARGS_TEMPLATE = "//:xrun_compile_args_template.txt"
-_XRUN_RUNTIME_ARGS_TEMPLATE = "//:xrun_runtime_args_template.txt"
+_XRUN_COMPILE_ARGS_TEMPLATE = "@verilog_tools//vendors/cadence:xrun_compile_args_template.txt"
+_XRUN_RUNTIME_ARGS_TEMPLATE = "@verilog_tools//vendors/cadence:xrun_runtime_args_template.txt"
 
 def _dv_tb_impl(ctx):
     defines = {}
@@ -308,7 +308,7 @@ dv_unit_test = rule(
         "deps": attr.label_list(mandatory = True),
         "_ut_sim_template": attr.label(
             allow_single_file = True,
-            default = Label("//:ut_sim_template.sh"),
+            default = Label("@verilog_tools//vendors/cadence:ut_sim_template.sh"),
         ),
         "default_sim_opts": attr.label(
             allow_single_file = True,
