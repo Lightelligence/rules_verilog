@@ -379,7 +379,7 @@ rtl_unit_test = rule(
         "out": attr.output(),
         "ut_sim_template": attr.label(
             allow_single_file = True,
-            default = Label("//:rtl_unit_test_sim_template.sh"),
+            default = Label("@verilog_tools//vendors/cadence:rtl_unit_test_sim_template.sh"),
         ),
         "data": attr.label_list(
             allow_files = True,
