@@ -278,7 +278,7 @@ def _dv_unit_test_impl(ctx):
     flists_list = flists.to_list()
 
     ctx.actions.expand_template(
-        template = ctx.file._ut_sim_template,
+        template = ctx.file.ut_sim_template,
         output = ctx.outputs.out,
         substitutions = {
             "{DEFAULT_SIM_OPTS}": "-f {}".format(ctx.file.default_sim_opts.short_path),
@@ -306,7 +306,7 @@ dv_unit_test = rule(
     implementation = _dv_unit_test_impl,
     attrs = {
         "deps": attr.label_list(mandatory = True),
-        "_ut_sim_template": attr.label(
+        "ut_sim_template": attr.label(
             allow_single_file = True,
             default = Label("@verilog_tools//vendors/cadence:dv_unit_test_sim_template.sh"),
         ),
