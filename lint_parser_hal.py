@@ -18,9 +18,6 @@ import bs4
 
 ################################################################################
 # Checkout specific libraries
-lib_dir = os.path.abspath(os.path.dirname(__file__))
-lib_dir = os.path.join(lib_dir)
-sys.path.append(lib_dir)
 import cmn_logging
 log = None
 

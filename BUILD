@@ -2,10 +2,18 @@ load("@com_github_bazelbuild_buildtools//buildifier:def.bzl", "buildifier")
 
 package(default_visibility = ["//visibility:public"])
 
+py_library(
+    name = "cmn_logging",
+    srcs = ["cmn_logging.py"],
+)
+
+py_binary(
+    name = "lint_parser_hal",
+    srcs = ["lint_parser_hal.py"],
+    deps = [":cmn_logging"],
+)
 exports_files([
     "default_sim_opts.f",
-    "lint_parser_hal.py",
-    "cmn_logging.py",
 ])
 
 buildifier(
