@@ -4,7 +4,7 @@ package(default_visibility = ["//visibility:public"])
 
 exports_files([
     "default_sim_opts.f",
-    "lint_parser.py",
+    "lint_parser_hal.py",
     "cmn_logging.py",
 ])
 
