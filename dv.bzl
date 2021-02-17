@@ -308,7 +308,7 @@ dv_unit_test = rule(
         "deps": attr.label_list(mandatory = True),
         "_ut_sim_template": attr.label(
             allow_single_file = True,
-            default = Label("@verilog_tools//vendors/cadence:ut_sim_template.sh"),
+            default = Label("@verilog_tools//vendors/cadence:dv_unit_test_sim_template.sh"),
         ),
         "default_sim_opts": attr.label(
             allow_single_file = True,
