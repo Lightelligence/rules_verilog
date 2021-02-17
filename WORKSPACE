@@ -1,3 +1,5 @@
+workspace(name = "verilog_tools")
+
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
 # buildifier is written in Go and hence needs rules_go to be built.

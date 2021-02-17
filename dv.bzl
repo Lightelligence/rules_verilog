@@ -1,6 +1,6 @@
 """Rules for building DV infrastructure."""
 
-load("//:verilog.bzl", "VerilogInfo", "flists_to_arguments", "gather_shell_defines", "get_transitive_srcs")
+load("@verilog_tools//:verilog.bzl", "VerilogInfo", "flists_to_arguments", "gather_shell_defines", "get_transitive_srcs")
 
 DVTestInfo = provider(fields = {
     "sim_opts": "Simulation options",
