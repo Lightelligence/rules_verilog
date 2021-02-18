@@ -69,3 +69,6 @@ http_archive(
     url = "https://github.com/bazelbuild/buildtools/archive/master.zip",
 )
 
+load("@verilog_tools//:deps.bzl", "verilog_dependencies")
+
+verilog_dependencies()
