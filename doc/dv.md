@@ -1,28 +1,5 @@
 <!-- Generated with Stardoc: http://skydoc.bazel.build -->
 
-<a name="#dv_lib"></a>
-
-## dv_lib
-
-<pre>
-dv_lib(<a href="#dv_lib-name">name</a>, <a href="#dv_lib-deps">deps</a>, <a href="#dv_lib-dpi">dpi</a>, <a href="#dv_lib-in_flist">in_flist</a>, <a href="#dv_lib-incdir">incdir</a>, <a href="#dv_lib-srcs">srcs</a>)
-</pre>
-
-An DV Library. Creates a generated flist file from a list of source files.
-
-**ATTRIBUTES**
-
-
-| Name  | Description | Type | Mandatory | Default |
-| :-------------: | :-------------: | :-------------: | :-------------: | :-------------: |
-| name |  A unique name for this target.   | <a href="https://bazel.build/docs/build-ref.html#name">Name</a> | required |  |
-| deps |  -   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
-| dpi |  cc_libraries to link in through dpi   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
-| in_flist |  Files to be places in generated flist. Generally only the 'pkg' file and interfaces. If left blank, all srcs will be used.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
-| incdir |  Include an incdir to src file directories in generated flist.   | Boolean | optional | True |
-| srcs |  -   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | required |  |
-
-
 <a name="#dv_tb"></a>
 
 ## dv_tb
@@ -100,6 +77,29 @@ Compiles and runs a small DV library. Additional sim options may be passed after
 | deps |  -   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | required |  |
 | sim_args |  Additional simulation arguments to passed to command line   | List of strings | optional | [] |
 | ut_sim_template |  -   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | @verilog_tools//vendors/cadence:dv_unit_test_sim_template.sh |
+
+
+<a name="#verilog_dv_library"></a>
+
+## verilog_dv_library
+
+<pre>
+verilog_dv_library(<a href="#verilog_dv_library-name">name</a>, <a href="#verilog_dv_library-deps">deps</a>, <a href="#verilog_dv_library-dpi">dpi</a>, <a href="#verilog_dv_library-in_flist">in_flist</a>, <a href="#verilog_dv_library-incdir">incdir</a>, <a href="#verilog_dv_library-srcs">srcs</a>)
+</pre>
+
+An DV Library. Creates a generated flist file from a list of source files.
+
+**ATTRIBUTES**
+
+
+| Name  | Description | Type | Mandatory | Default |
+| :-------------: | :-------------: | :-------------: | :-------------: | :-------------: |
+| name |  A unique name for this target.   | <a href="https://bazel.build/docs/build-ref.html#name">Name</a> | required |  |
+| deps |  -   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
+| dpi |  cc_libraries to link in through dpi   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
+| in_flist |  Files to be places in generated flist. Generally only the 'pkg' file and interfaces. If left blank, all srcs will be used.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
+| incdir |  Include an incdir to src file directories in generated flist.   | Boolean | optional | True |
+| srcs |  -   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | required |  |
 
 
 <a name="#DVTBInfo"></a>
