@@ -97,7 +97,7 @@ dv_test_cfg = rule(
     },
 )
 
-def _dv_lib_impl(ctx):
+def _verilog_dv_library_impl(ctx):
     if ctx.attr.incdir:
         # Using dirname may result in bazel-out included in path
         directories = depset([f.short_path[:-len(f.basename) - 1] for f in ctx.files.srcs]).to_list()
@@ -127,7 +127,7 @@ def _dv_lib_impl(ctx):
             if gfile.path.endswith(".so"):
                 sos.append(gfile)
         if len(sos) != 1:
-            fail("Expected to find exactly one .so for dv_lib dpi argument '", dpi, "'. Found .so: ", sos)
+            fail("Expected to find exactly one .so for verilog_dv_library dpi argument '", dpi, "'. Found .so: ", sos)
         all_sos.extend(sos)
 
     out = ctx.outputs.out
@@ -150,9 +150,9 @@ def _dv_lib_impl(ctx):
         ),
     ]
 
-dv_lib = rule(
+verilog_dv_library = rule(
     doc = "An DV Library. Creates a generated flist file from a list of source files.",
-    implementation = _dv_lib_impl,
+    implementation = _verilog_dv_library_impl,
     attrs = {
         "srcs": attr.label_list(allow_files = True, mandatory = True),
         "deps": attr.label_list(),
