@@ -1,7 +1,6 @@
 load("@io_bazel_stardoc//stardoc:stardoc.bzl", "stardoc")
 load("@bazel_skylib//:bzl_library.bzl", "bzl_library")
 
-
 bzl_library(
     name = "rtl_rules",
     srcs = [
@@ -12,11 +11,10 @@ bzl_library(
 
 stardoc(
     name = "rtl_docs",
-    input = "@verilog_tools//:rtl.bzl",
     out = "rtl.md",
+    input = "@verilog_tools//:rtl.bzl",
     deps = [":rtl_rules"],
 )
-
 
 bzl_library(
     name = "dv_rules",
@@ -28,8 +26,8 @@ bzl_library(
 
 stardoc(
     name = "dv_docs",
-    input = "@verilog_tools//:dv.bzl",
     out = "dv.md",
+    input = "@verilog_tools//:dv.bzl",
     deps = [":dv_rules"],
 )
 
@@ -42,6 +40,6 @@ bzl_library(
 
 stardoc(
     name = "verilog_docs",
-    input = "@verilog_tools//:verilog.bzl",
     out = "verilog.md",
+    input = "@verilog_tools//:verilog.bzl",
 )
