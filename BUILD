@@ -12,8 +12,12 @@ py_binary(
     srcs = ["lint_parser_hal.py"],
     deps = [":cmn_logging"],
 )
+
 exports_files([
     "default_sim_opts.f",
+    "rtl.bzl",
+    "dv.bzl",
+    "verilog.bzl",
 ])
 
 buildifier(

@@ -38,6 +38,7 @@ def get_transitive_srcs(srcs, deps, provider, attr_name, allow_other_outputs = F
     Args:
       srcs: a list of source files
       deps: a list of targets that are direct dependencies
+
     Returns:
       a collection of the transitive sources
     """

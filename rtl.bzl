@@ -1,6 +1,6 @@
 """Rules to gather and compile RTL."""
 
-load("@verilog_tools//:verilog.bzl", "CUSTOM_SHELL", "ShellInfo", "VerilogInfo", "gather_shell_defines", "get_transitive_srcs")
+load(":verilog.bzl", "CUSTOM_SHELL", "ShellInfo", "VerilogInfo", "gather_shell_defines", "get_transitive_srcs")
 
 def create_flist_content(ctx, gumi_path, allow_library_discovery, no_synth = False):
     flist_content = []
