@@ -16,6 +16,9 @@ py_binary(
 
 exports_files([
     "default_sim_opts.f",
+    "rtl.bzl",
+    "dv.bzl",
+    "verilog.bzl",
 ])
 
 buildifier(
