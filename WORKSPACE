@@ -47,3 +47,7 @@ http_archive(
     strip_prefix = "buildtools-master",
     url = "https://github.com/bazelbuild/buildtools/archive/master.zip",
 )
+
+load("@verilog_tools//:deps.bzl", "verilog_dependencies")
+
+verilog_dependencies()

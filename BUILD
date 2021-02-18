@@ -1,4 +1,5 @@
 load("@com_github_bazelbuild_buildtools//buildifier:def.bzl", "buildifier")
+load("@rules_python//python:defs.bzl", "py_binary", "py_library")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -12,6 +13,7 @@ py_binary(
     srcs = ["lint_parser_hal.py"],
     deps = [":cmn_logging"],
 )
+
 exports_files([
     "default_sim_opts.f",
 ])
