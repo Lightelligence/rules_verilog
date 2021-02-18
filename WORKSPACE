@@ -51,3 +51,14 @@ http_archive(
 load("@verilog_tools//:deps.bzl", "verilog_dependencies")
 
 verilog_dependencies()
+
+load("@rules_python//python:pip.bzl", "pip_import")
+
+pip_import(
+    name = "pip_deps",
+    requirements = "@verilog_tools//:requirements.txt",
+)
+
+load("@pip_deps//:requirements.bzl", "pip_install")
+
+pip_install()
