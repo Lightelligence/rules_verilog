@@ -30,6 +30,10 @@ stages:
           bazel run --nokeep_state_after_build //:buildifier_format_diff
           bazel run --nokeep_state_after_build //:buildifier_lint
         displayName: 'BUILD Lint Check'
+       
+       - script: |
+          ./test/doc_test.sh
+         displayName: 'Doc Generation Check'
 
       # - script: |
       #     source activate digital
