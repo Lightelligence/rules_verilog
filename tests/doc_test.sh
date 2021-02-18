@@ -5,11 +5,11 @@
 declare -i result=0
 
 # Regenerate documentation
-bazel build //doc/...
+bazel build //docs/...
 result+=$?
 
 # Compare each .md file generated in bazel-bin
-for bazel_bin_file in bazel-bin/doc/*.md
+for bazel_bin_file in bazel-bin/docs/*.md
 do
     static_file=`echo "$bazel_bin_file" | sed -e "s/^bazel-bin\///"`
     echo "diff $bazel_bin_file $static_file"
