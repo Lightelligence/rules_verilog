@@ -1,8 +1,5 @@
 #!/usr/bin/env python
-""" Runs hal lint
-Copyright (C) 2019 Lightelligence
-
-"""
+"""Parses results from HAL lint"""
 
 ################################################################################
 # stdlib
