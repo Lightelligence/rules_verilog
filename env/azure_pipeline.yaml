@@ -32,7 +32,7 @@ stages:
         displayName: 'BUILD Lint Check'
        
       - script: |
-         ./test/doc_test.sh
+         ./tests/doc_test.sh
         displayName: 'Doc Generation Check'
 
       # - script: |
