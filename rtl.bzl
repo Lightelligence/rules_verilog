@@ -37,7 +37,7 @@ def create_flist_content(ctx, gumi_path, allow_library_discovery, no_synth = Fal
     flist_content.append("")
     return flist_content
 
-def _rtl_lib_impl(ctx):
+def _verilog_rtl_library_impl(ctx):
     srcs = ctx.files.headers + ctx.files.modules + ctx.files.lib_files + ctx.files.direct
 
     if ctx.attr.is_pkg:
@@ -49,7 +49,7 @@ def _rtl_lib_impl(ctx):
     else:
         for src in srcs:
             if "_pkg" in src.basename:
-                fail("Package files should not declared in a rtl_lib. Use a rtl_pkg instead. {} is declared in {}".format(src, ctx.label))
+                fail("Package files should not declared in a verilog_rtl_library. Use a rtl_pkg instead. {} is declared in {}".format(src, ctx.label))
 
     if ctx.attr.is_shell_of:
         if len(ctx.attr.modules) != 1 and not ctx.attr.is_shell_of == CUSTOM_SHELL:
@@ -61,10 +61,10 @@ def _rtl_lib_impl(ctx):
     else:
         for dep in ctx.attr.deps:
             if ShellInfo in dep and dep[ShellInfo].is_shell_of and not dep[ShellInfo].is_shell_of == CUSTOM_SHELL:
-                fail("rtl_lib may not depend on shells. Shells should only be included at top-level builds")
+                fail("verilog_rtl_library may not depend on shells. Shells should only be included at top-level builds")
         for src in srcs:
             if "_shell" in src.basename:
-                fail("Shell files should not be declared in an rtl_lib. Use a rtl_shell_static or rtl_shell_dynamic instead. {} is declared in {}".format(src, ctx.label))
+                fail("Shell files should not be declared in an verilog_rtl_library. Use a rtl_shell_static or rtl_shell_dynamic instead. {} is declared in {}".format(src, ctx.label))
 
     gumi_path = ""
     if ctx.attr.enable_gumi:
@@ -72,7 +72,7 @@ def _rtl_lib_impl(ctx):
         gumi_content = []
 
         # Making this more unique than just gumi.basename.upper()
-        # To avoid case where multiple directories define the same name for a rtl_lib
+        # To avoid case where multiple directories define the same name for a verilog_rtl_library
         gumi_guard_value = gumi.short_path.replace("/", "_").replace(".", "_")
         gumi_guard = "__{}__".format(gumi_guard_value.upper())
         gumi_content.append("`ifndef {}".format(gumi_guard))
@@ -146,9 +146,9 @@ def _rtl_lib_impl(ctx):
         ),
     ]
 
-rtl_lib = rule(
+verilog_rtl_library = rule(
     doc = "An RTL Library. Creates a generated flist file from a list of source files.",
-    implementation = _rtl_lib_impl,
+    implementation = _verilog_rtl_library_impl,
     attrs = {
         "headers": attr.label_list(
             allow_files = True,
@@ -205,7 +205,7 @@ def rtl_pkg(
         no_synth = False,
         deps = []):
     """A single rtl pkg file."""
-    rtl_lib(
+    verilog_rtl_library(
         name = name,
         direct = direct,
         deps = deps,
@@ -229,7 +229,7 @@ def rtl_shell_static(
     """
     if not name.startswith(module_to_shell_name) and module_to_shell_name != CUSTOM_SHELL:
         fail("Shell name should start with the original module name: shell name='{}' original module='{}'".format(name, module_to_shell_name))
-    rtl_lib(
+    verilog_rtl_library(
         name = name,
         modules = [shell_module_label],
         # Intentionally do not set deps here
@@ -256,7 +256,7 @@ def rtl_shell_dynamic(
         cmd = "cd $(@D); export LC_ALL=en_US.utf-8; export LANG=en_US.utf-8; cookiecutter --no-input {} module_to_shell={} shell_suffix={}".format(template_path, module_to_shell_name, shell_suffix),
         output_to_bindir = True,
     )
-    rtl_lib(
+    verilog_rtl_library(
         name = name,
         modules = [":{}_gen".format(name)],
         is_shell_of = module_to_shell_name,
@@ -318,7 +318,7 @@ def _rtl_flist_impl(ctx):
     ]
 
 rtl_flist = rule(
-    doc = "Create an RTL Library from an existing flist file. Recommended only for vendor supplied IP. In general, use the rtl_lib rule.",
+    doc = "Create an RTL Library from an existing flist file. Recommended only for vendor supplied IP. In general, use the verilog_rtl_library rule.",
     implementation = _rtl_flist_impl,
     attrs = {
         "srcs": attr.label_list(
