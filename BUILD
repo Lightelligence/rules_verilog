@@ -11,6 +11,7 @@ exports_files([
     "default_sim_opts.f",
     "lint_parser.py",
     "cmn_logging.py",
+    "cdc.bash.template",
 ])
 
 buildifier(
