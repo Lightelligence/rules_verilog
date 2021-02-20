@@ -15,6 +15,19 @@ ShellInfo = provider(fields = {
     "gumi_path": "Short path to gumi file",
 })
 
+
+ToolEncapsulationInfo = provider(fields = {
+    "command" : "The command invocation for a particular tool. Useful for aliases or redirection.",
+})
+
+def _toolencapsulation_impl(ctx):
+    return ToolEncapsulationInfo(command = ctx.build_setting_value)
+
+tool_encapsulation = rule(
+    implementation = _toolencapsulation_impl,
+    build_setting = config.string(flag = True)
+)
+
 def gather_shell_defines(shells):
     defines = {}
     for shell in shells:

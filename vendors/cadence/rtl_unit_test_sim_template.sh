@@ -1,7 +1,7 @@
 #!/usr/bin/bash
 # This is a template for the bazel rtl_unit_test rule
 # It is not intended to be run stand-alone
-runmod -t xrun -- \
+{SIMULATOR_COMMAND} \
     -define TBV \
     -libext .sv \
     -libext .svh \
