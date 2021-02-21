@@ -341,7 +341,7 @@ verilog_rtl_unit_test = rule(
         "out": attr.output(),
         "ut_sim_template": attr.label(
             allow_single_file = True,
-            default = Label("@verilog_tools//vendors/cadence:rtl_unit_test_sim_template.sh"),
+            default = Label("@verilog_tools//vendors/cadence:verilog_rtl_unit_test.sh.template"),
         ),
         "_command_override": attr.label(
             default = Label("@verilog_tools//:verilog_rtl_unit_test_command"),
@@ -566,7 +566,7 @@ verilog_rtl_cdc_test = rule(
         ),
         "bash_template": attr.label(
             allow_single_file = True,
-            default = Label("//vendors/cadence:cdc.bash.template"),
+            default = Label("//vendors/cadence:verilog_rtl_cdc_test.sh.template"),
         ),
         "_command_override": attr.label(
             default = Label("@verilog_tools//:verilog_verilog_rtl_cdc_test_command"),
