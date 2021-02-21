@@ -264,49 +264,10 @@ def verilog_rtl_shell_dynamic(
         enable_gumi = False,
     )
 
-def _rtl_bin_impl(ctx):
-    out = ctx.outputs.out
-    trans_flists = get_transitive_srcs([], ctx.attr.deps, VerilogInfo, "transitive_flists", allow_other_outputs = False)
-
-    ctx.actions.write(
-        output = out,
-        content = "\n".join([" -f {}".format(f.short_path) for f in trans_flists]),
-    )
-
-    trans_flists = get_transitive_srcs([out], ctx.attr.deps, VerilogInfo, "transitive_flists", allow_other_outputs = False)
-    trans_srcs = get_transitive_srcs([], ctx.attr.deps, VerilogInfo, "transitive_sources", allow_other_outputs = True)
-
-    second_out = ctx.outputs.executable
-    script = "\n".join(
-        ["echo `pwd`"],
-    )
-
-    ctx.actions.write(
-        output = second_out,
-        content = script,
-    )
-
-    runfiles = ctx.runfiles(files = trans_srcs.to_list() + trans_flists.to_list())
-
-    return [
-        DefaultInfo(runfiles = runfiles),
-    ]
-
-rtl_bin = rule(
-    doc = "Merge all flists into a single top-level flist.",
-    implementation = _rtl_bin_impl,
-    attrs = {
-        "deps": attr.label_list(),
-    },
-    outputs = {"out": "%{name}.f"},
-    executable = True,
-    #output_to_genfiles = True,
-)
-
-def _rtl_flist_impl(ctx):
+def _verilog_rtl_flist_impl(ctx):
     num_srcs = len(ctx.files.srcs)
     if num_srcs != 1:
-        fail("rtl_flist rule may only have single source file: {}".format(ctx))
+        fail("verilog_rtl_flist rule may only have single source file: {}".format(ctx))
 
     # Ideally it would be nice to grab all the files inside an flist, but this could be recursive, so skipping this for now.
     trans_srcs = depset([])
@@ -317,9 +278,9 @@ def _rtl_flist_impl(ctx):
         DefaultInfo(files = depset(trans_srcs.to_list() + trans_flists.to_list())),
     ]
 
-rtl_flist = rule(
+verilog_rtl_flist = rule(
     doc = "Create an RTL Library from an existing flist file. Recommended only for vendor supplied IP. In general, use the verilog_rtl_library rule.",
-    implementation = _rtl_flist_impl,
+    implementation = _verilog_rtl_flist_impl,
     attrs = {
         "srcs": attr.label_list(
             allow_files = True,
@@ -329,7 +290,7 @@ rtl_flist = rule(
     #output_to_genfiles = True,
 )
 
-def _rtl_unit_test_impl(ctx):
+def _verilog_rtl_unit_test_impl(ctx):
     # out = ctx.outputs.executable
     trans_srcs = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_sources")
     srcs_list = trans_srcs.to_list()
@@ -371,10 +332,10 @@ def _rtl_unit_test_impl(ctx):
         runfiles = runfiles,
     )]
 
-rtl_unit_test = rule(
+verilog_rtl_unit_test = rule(
     # FIXME, this should eventually just be a specific use case of verilog_test
     doc = "Compiles and runs a small RTL library. Additional sim options may be passed after --",
-    implementation = _rtl_unit_test_impl,
+    implementation = _verilog_rtl_unit_test_impl,
     attrs = {
         "deps": attr.label_list(mandatory = True),
         "out": attr.output(),
@@ -386,7 +347,7 @@ rtl_unit_test = rule(
             default = Label("@verilog_tools//:verilog_rtl_unit_test_command"),
             doc = "Allows custom override of simulator command in the event of wrapping via modulefiles.\n" +
                   "Example override in project's .bazelrc:\n" +
-                  '  build --//:rtl_unit_test_command="runmod -t xrun --"',
+                  '  build --//:verilog_rtl_unit_test_command="runmod -t xrun --"',
         ),
         "data": attr.label_list(
             allow_files = True,
@@ -399,7 +360,7 @@ rtl_unit_test = rule(
     test = True,
 )
 
-def _rtl_lint_test_impl(ctx):
+def _verilog_rtl_lint_test_impl(ctx):
     trans_flists = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_flists", allow_other_outputs = False)
 
     content = [
@@ -465,9 +426,9 @@ def _rtl_lint_test_impl(ctx):
         DefaultInfo(runfiles = runfiles),
     ]
 
-rtl_lint_test = rule(
+verilog_rtl_lint_test = rule(
     doc = "Run lint on target",
-    implementation = _rtl_lint_test_impl,
+    implementation = _verilog_rtl_lint_test_impl,
     attrs = {
         "deps": attr.label_list(mandatory = True),
         "rulefile": attr.label(
@@ -498,13 +459,13 @@ rtl_lint_test = rule(
             default = Label("@verilog_tools//:verilog_rtl_lint_test_command"),
             doc = "Allows custom override of simulator command in the event of wrapping via modulefiles\n" +
                   "Example override in project's .bazelrc:\n" +
-                  '  build --//:rtl_lint_test_command="runmod -t xrun --"',
+                  '  build --//:verilog_rtl_lint_test_command="runmod -t xrun --"',
         ),
     },
     test = True,
 )
 
-def _rtl_cdc_test_impl(ctx):
+def _verilog_rtl_cdc_test_impl(ctx):
     trans_flists = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_flists", allow_other_outputs = False)
     trans_srcs = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_sources", allow_other_outputs = True)
 
@@ -578,9 +539,9 @@ def _rtl_cdc_test_impl(ctx):
         DefaultInfo(runfiles = runfiles),
     ]
 
-rtl_cdc_test = rule(
+verilog_rtl_cdc_test = rule(
     doc = "Run CDC",
-    implementation = _rtl_cdc_test_impl,
+    implementation = _verilog_rtl_cdc_test_impl,
     attrs = {
         "deps": attr.label_list(mandatory = True),
         "shells": attr.label_list(),
@@ -608,7 +569,7 @@ rtl_cdc_test = rule(
             default = Label("//vendors/cadence:cdc.bash.template"),
         ),
         "_command_override": attr.label(
-            default = Label("@verilog_tools//:verilog_rtl_cdc_test_command"),
+            default = Label("@verilog_tools//:verilog_verilog_rtl_cdc_test_command"),
             doc = "Allows custom override of simulator command in the event of wrapping via modulefiles\n" +
                   "Example override in project's .bazelrc:\n" +
                   '  build --//:rtl_cdc_test_command="runmod -t jg --"',

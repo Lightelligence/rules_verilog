@@ -1,30 +1,11 @@
 <!-- Generated with Stardoc: http://skydoc.bazel.build -->
 
-<a name="#rtl_bin"></a>
+<a name="#verilog_rtl_cdc_test"></a>
 
-## rtl_bin
-
-<pre>
-rtl_bin(<a href="#rtl_bin-name">name</a>, <a href="#rtl_bin-deps">deps</a>)
-</pre>
-
-Merge all flists into a single top-level flist.
-
-**ATTRIBUTES**
-
-
-| Name  | Description | Type | Mandatory | Default |
-| :-------------: | :-------------: | :-------------: | :-------------: | :-------------: |
-| name |  A unique name for this target.   | <a href="https://bazel.build/docs/build-ref.html#name">Name</a> | required |  |
-| deps |  -   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
-
-
-<a name="#rtl_cdc_test"></a>
-
-## rtl_cdc_test
+## verilog_rtl_cdc_test
 
 <pre>
-rtl_cdc_test(<a href="#rtl_cdc_test-name">name</a>, <a href="#rtl_cdc_test-bash_template">bash_template</a>, <a href="#rtl_cdc_test-bbox">bbox</a>, <a href="#rtl_cdc_test-cmd_file">cmd_file</a>, <a href="#rtl_cdc_test-defines">defines</a>, <a href="#rtl_cdc_test-deps">deps</a>, <a href="#rtl_cdc_test-shells">shells</a>, <a href="#rtl_cdc_test-top">top</a>)
+verilog_rtl_cdc_test(<a href="#verilog_rtl_cdc_test-name">name</a>, <a href="#verilog_rtl_cdc_test-bash_template">bash_template</a>, <a href="#verilog_rtl_cdc_test-bbox">bbox</a>, <a href="#verilog_rtl_cdc_test-cmd_file">cmd_file</a>, <a href="#verilog_rtl_cdc_test-defines">defines</a>, <a href="#verilog_rtl_cdc_test-deps">deps</a>, <a href="#verilog_rtl_cdc_test-shells">shells</a>, <a href="#verilog_rtl_cdc_test-top">top</a>)
 </pre>
 
 Run CDC
@@ -44,12 +25,12 @@ Run CDC
 | top |  The name of the top module   | String | required |  |
 
 
-<a name="#rtl_flist"></a>
+<a name="#verilog_rtl_flist"></a>
 
-## rtl_flist
+## verilog_rtl_flist
 
 <pre>
-rtl_flist(<a href="#rtl_flist-name">name</a>, <a href="#rtl_flist-srcs">srcs</a>)
+verilog_rtl_flist(<a href="#verilog_rtl_flist-name">name</a>, <a href="#verilog_rtl_flist-srcs">srcs</a>)
 </pre>
 
 Create an RTL Library from an existing flist file. Recommended only for vendor supplied IP. In general, use the verilog_rtl_library rule.
@@ -61,57 +42,6 @@ Create an RTL Library from an existing flist file. Recommended only for vendor s
 | :-------------: | :-------------: | :-------------: | :-------------: | :-------------: |
 | name |  A unique name for this target.   | <a href="https://bazel.build/docs/build-ref.html#name">Name</a> | required |  |
 | srcs |  -   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | required |  |
-
-
-<a name="#rtl_lint_test"></a>
-
-## rtl_lint_test
-
-<pre>
-rtl_lint_test(<a href="#rtl_lint_test-name">name</a>, <a href="#rtl_lint_test-defines">defines</a>, <a href="#rtl_lint_test-deps">deps</a>, <a href="#rtl_lint_test-design_info">design_info</a>, <a href="#rtl_lint_test-lint_parser">lint_parser</a>, <a href="#rtl_lint_test-rulefile">rulefile</a>, <a href="#rtl_lint_test-shells">shells</a>, <a href="#rtl_lint_test-top">top</a>, <a href="#rtl_lint_test-waiver_hack">waiver_hack</a>)
-</pre>
-
-Run lint on target
-
-**ATTRIBUTES**
-
-
-| Name  | Description | Type | Mandatory | Default |
-| :-------------: | :-------------: | :-------------: | :-------------: | :-------------: |
-| name |  A unique name for this target.   | <a href="https://bazel.build/docs/build-ref.html#name">Name</a> | required |  |
-| defines |  List of <code>defines for this lint run   | <a href="https://bazel.build/docs/skylark/lib/dict.html">Dictionary: String -> String</a> | optional | {} |
-| deps |  -   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | required |  |
-| design_info |  A design info file to add additional lint rule/waivers   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
-| lint_parser |  -   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | @verilog_tools//:lint_parser_hal |
-| rulefile |  -   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | required |  |
-| shells |  -   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
-| top |  The name of the top module   | String | required |  |
-| waiver_hack |  Lint waiver regex to hack around cases when HAL has formatting errors in xrun.log.xml that cause problems for our lint parser   | String | optional | "" |
-
-
-<a name="#rtl_unit_test"></a>
-
-## rtl_unit_test
-
-<pre>
-rtl_unit_test(<a href="#rtl_unit_test-name">name</a>, <a href="#rtl_unit_test-data">data</a>, <a href="#rtl_unit_test-deps">deps</a>, <a href="#rtl_unit_test-out">out</a>, <a href="#rtl_unit_test-post_flist_args">post_flist_args</a>, <a href="#rtl_unit_test-pre_flist_args">pre_flist_args</a>, <a href="#rtl_unit_test-shells">shells</a>, <a href="#rtl_unit_test-ut_sim_template">ut_sim_template</a>)
-</pre>
-
-Compiles and runs a small RTL library. Additional sim options may be passed after --
-
-**ATTRIBUTES**
-
-
-| Name  | Description | Type | Mandatory | Default |
-| :-------------: | :-------------: | :-------------: | :-------------: | :-------------: |
-| name |  A unique name for this target.   | <a href="https://bazel.build/docs/build-ref.html#name">Name</a> | required |  |
-| data |  Non-verilog dependencies   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
-| deps |  -   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | required |  |
-| out |  -   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | None |
-| post_flist_args |  commands and arguments after flist arguments   | List of strings | optional | [] |
-| pre_flist_args |  commands and arguments before flist arguments   | List of strings | optional | [] |
-| shells |  -   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
-| ut_sim_template |  -   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | @verilog_tools//vendors/cadence:rtl_unit_test_sim_template.sh |
 
 
 <a name="#verilog_rtl_library"></a>
@@ -142,6 +72,59 @@ An RTL Library. Creates a generated flist file from a list of source files.
 | lib_files |  Verilog library files containing multiple modules (i.e. covered by -v)   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
 | modules |  Files containing single modules that may be found via library (i.e. covered by -y)   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
 | no_synth |  When True, do not allow the content of this library to be exposed to synthesis   | Boolean | optional | False |
+
+
+<a name="#verilog_rtl_lint_test"></a>
+
+## verilog_rtl_lint_test
+
+<pre>
+verilog_rtl_lint_test(<a href="#verilog_rtl_lint_test-name">name</a>, <a href="#verilog_rtl_lint_test-defines">defines</a>, <a href="#verilog_rtl_lint_test-deps">deps</a>, <a href="#verilog_rtl_lint_test-design_info">design_info</a>, <a href="#verilog_rtl_lint_test-lint_parser">lint_parser</a>, <a href="#verilog_rtl_lint_test-rulefile">rulefile</a>, <a href="#verilog_rtl_lint_test-shells">shells</a>, <a href="#verilog_rtl_lint_test-top">top</a>,
+                      <a href="#verilog_rtl_lint_test-waiver_hack">waiver_hack</a>)
+</pre>
+
+Run lint on target
+
+**ATTRIBUTES**
+
+
+| Name  | Description | Type | Mandatory | Default |
+| :-------------: | :-------------: | :-------------: | :-------------: | :-------------: |
+| name |  A unique name for this target.   | <a href="https://bazel.build/docs/build-ref.html#name">Name</a> | required |  |
+| defines |  List of <code>defines for this lint run   | <a href="https://bazel.build/docs/skylark/lib/dict.html">Dictionary: String -> String</a> | optional | {} |
+| deps |  -   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | required |  |
+| design_info |  A design info file to add additional lint rule/waivers   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
+| lint_parser |  -   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | @verilog_tools//:lint_parser_hal |
+| rulefile |  -   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | required |  |
+| shells |  -   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
+| top |  The name of the top module   | String | required |  |
+| waiver_hack |  Lint waiver regex to hack around cases when HAL has formatting errors in xrun.log.xml that cause problems for our lint parser   | String | optional | "" |
+
+
+<a name="#verilog_rtl_unit_test"></a>
+
+## verilog_rtl_unit_test
+
+<pre>
+verilog_rtl_unit_test(<a href="#verilog_rtl_unit_test-name">name</a>, <a href="#verilog_rtl_unit_test-data">data</a>, <a href="#verilog_rtl_unit_test-deps">deps</a>, <a href="#verilog_rtl_unit_test-out">out</a>, <a href="#verilog_rtl_unit_test-post_flist_args">post_flist_args</a>, <a href="#verilog_rtl_unit_test-pre_flist_args">pre_flist_args</a>, <a href="#verilog_rtl_unit_test-shells">shells</a>,
+                      <a href="#verilog_rtl_unit_test-ut_sim_template">ut_sim_template</a>)
+</pre>
+
+Compiles and runs a small RTL library. Additional sim options may be passed after --
+
+**ATTRIBUTES**
+
+
+| Name  | Description | Type | Mandatory | Default |
+| :-------------: | :-------------: | :-------------: | :-------------: | :-------------: |
+| name |  A unique name for this target.   | <a href="https://bazel.build/docs/build-ref.html#name">Name</a> | required |  |
+| data |  Non-verilog dependencies   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
+| deps |  -   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | required |  |
+| out |  -   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | None |
+| post_flist_args |  commands and arguments after flist arguments   | List of strings | optional | [] |
+| pre_flist_args |  commands and arguments before flist arguments   | List of strings | optional | [] |
+| shells |  -   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
+| ut_sim_template |  -   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | @verilog_tools//vendors/cadence:rtl_unit_test_sim_template.sh |
 
 
 <a name="#create_flist_content"></a>

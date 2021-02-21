@@ -1,5 +1,5 @@
 #!/usr/bin/bash
-# This is a template for the bazel rtl_unit_test rule in order to run a SVUnit testbench
+# This is a template for the bazel verilog_rtl_unit_test rule in order to run a SVUnit testbench
 # See http://agilesoc.com/open-source-projects/svunit/
 # It is not intended to be run stand-alone
 # Execute by doing:

@@ -1,4 +1,4 @@
-load("@//verilog:rtl.bzl", "rtl_unit_test", "verilog_rtl_library")
+load("@//verilog:rtl.bzl", "verilog_rtl_library", "verilog_rtl_unit_test")
 
 verilog_rtl_library(
     name = "apb",
@@ -13,7 +13,7 @@ verilog_rtl_library(
     deps = [":apb"],
 )
 
-rtl_unit_test(
+verilog_rtl_unit_test(
     name = "test",
     tags = [
         "lic_xcelium",
