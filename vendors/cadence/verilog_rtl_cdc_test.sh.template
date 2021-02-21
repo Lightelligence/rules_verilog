@@ -25,7 +25,7 @@ runmod -t jg -- \
   -cdc \
   $no_gui_flag \
   -proj cdc_run \
-  -define VERILOG_RULES_GUI $use_gui \
+  -define VERILOG_TOOLS_GUI $use_gui \
   {PREAMBLE_CMDS} \
   {CMD_FILE} \
   {EPILOGUE_CMDS} \

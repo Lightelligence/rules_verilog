@@ -501,7 +501,7 @@ def _verilog_rtl_cdc_test_impl(ctx):
         "if {$return_value} {",
         "puts \"$num_violas errors\"",
         "}",
-        "if { $::VERILOG_RULES_GUI == 0 } {",
+        "if { $::VERILOG_TOOLS_GUI == 0 } {",
         "exit $return_value",
         "}        ",
     ]
