@@ -16,7 +16,7 @@ Run CDC
 | Name  | Description | Type | Mandatory | Default |
 | :-------------: | :-------------: | :-------------: | :-------------: | :-------------: |
 | name |  A unique name for this target.   | <a href="https://bazel.build/docs/build-ref.html#name">Name</a> | required |  |
-| bash_template |  -   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | //vendors/cadence:cdc.bash.template |
+| bash_template |  -   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | //vendors/cadence:verilog_rtl_cdc_test.sh.template |
 | bbox |  List of modules to black box   | List of strings | optional | [] |
 | cmd_file |  tcl commands to run in JG   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | required |  |
 | defines |  List of <code>defines for this cdc run   | List of strings | optional | [] |
@@ -124,7 +124,7 @@ Compiles and runs a small RTL library. Additional sim options may be passed afte
 | post_flist_args |  commands and arguments after flist arguments   | List of strings | optional | [] |
 | pre_flist_args |  commands and arguments before flist arguments   | List of strings | optional | [] |
 | shells |  -   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
-| ut_sim_template |  -   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | @verilog_tools//vendors/cadence:rtl_unit_test_sim_template.sh |
+| ut_sim_template |  -   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | @verilog_tools//vendors/cadence:verilog_rtl_unit_test.sh.template |
 
 
 <a name="#create_flist_content"></a>

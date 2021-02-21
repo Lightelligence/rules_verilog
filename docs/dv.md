@@ -99,7 +99,7 @@ Compiles and runs a small DV library. Additional sim options may be passed after
 | default_sim_opts |  -   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | //:default_sim_opts.f |
 | deps |  -   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | required |  |
 | sim_args |  Additional simulation arguments to passed to command line   | List of strings | optional | [] |
-| ut_sim_template |  -   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | @verilog_tools//vendors/cadence:dv_unit_test_sim_template.sh |
+| ut_sim_template |  -   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | @verilog_tools//vendors/cadence:verilog_dv_unit_test.sh.template |
 
 
 <a name="#DVTBInfo"></a>
