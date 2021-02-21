@@ -2,7 +2,7 @@
 test --action_env=HOME
 
 # Lightelligence Specific
-build --//:dv_unit_test_command="runmod -t xrun --"
-build --//:rtl_cdc_test_command="runmod -t jg --"
-build --//:rtl_unit_test_command="runmod -t xrun --"
-build --//:rtl_lint_test_command="runmod -t xrun --"
+build --//:verilog_dv_unit_test_command="runmod -t xrun --"
+build --//:verilog_rtl_cdc_test_command="runmod -t jg --"
+build --//:verilog_rtl_unit_test_command="runmod -t xrun --"
+build --//:verilog_rtl_lint_test_command="runmod -t xrun --"

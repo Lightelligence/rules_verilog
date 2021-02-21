@@ -44,12 +44,12 @@ def _verilog_rtl_library_impl(ctx):
         # FIXME opu_tx_rx is failing this check
         # for dep in ctx.attr.deps:
         #     if ShellInfo in dep and not dep[ShellInfo].is_pkg:
-        #         fail("rtl_pkg may only depend on other rtl_pkgs")
+        #         fail("verilog_rtl_pkg may only depend on other rtl_pkgs")
         pass
     else:
         for src in srcs:
             if "_pkg" in src.basename:
-                fail("Package files should not declared in a verilog_rtl_library. Use a rtl_pkg instead. {} is declared in {}".format(src, ctx.label))
+                fail("Package files should not declared in a verilog_rtl_library. Use a verilog_rtl_pkg instead. {} is declared in {}".format(src, ctx.label))
 
     if ctx.attr.is_shell_of:
         if len(ctx.attr.modules) != 1 and not ctx.attr.is_shell_of == CUSTOM_SHELL:
@@ -64,7 +64,7 @@ def _verilog_rtl_library_impl(ctx):
                 fail("verilog_rtl_library may not depend on shells. Shells should only be included at top-level builds")
         for src in srcs:
             if "_shell" in src.basename:
-                fail("Shell files should not be declared in an verilog_rtl_library. Use a rtl_shell_static or rtl_shell_dynamic instead. {} is declared in {}".format(src, ctx.label))
+                fail("Shell files should not be declared in an verilog_rtl_library. Use a verilog_rtl_shell_static or verilog_rtl_shell_dynamic instead. {} is declared in {}".format(src, ctx.label))
 
     gumi_path = ""
     if ctx.attr.enable_gumi:
@@ -199,7 +199,7 @@ verilog_rtl_library = rule(
     },
 )
 
-def rtl_pkg(
+def verilog_rtl_pkg(
         name,
         direct,
         no_synth = False,
@@ -214,7 +214,7 @@ def rtl_pkg(
         enable_gumi = False,
     )
 
-def rtl_shell_static(
+def verilog_rtl_shell_static(
         name,
         module_to_shell_name,
         shell_module_label,
@@ -239,7 +239,7 @@ def rtl_shell_static(
         deps = deps,
     )
 
-def rtl_shell_dynamic(
+def verilog_rtl_shell_dynamic(
         name,
         module_to_shell_name,
         shell_suffix = "",
@@ -383,7 +383,7 @@ rtl_unit_test = rule(
             default = Label("@verilog_tools//vendors/cadence:rtl_unit_test_sim_template.sh"),
         ),
         "_command_override": attr.label(
-            default = Label("@verilog_tools//:rtl_unit_test_command"),
+            default = Label("@verilog_tools//:verilog_rtl_unit_test_command"),
             doc = "Allows custom override of simulator command in the event of wrapping via modulefiles.\n" +
                   "Example override in project's .bazelrc:\n" +
                   '  build --//:rtl_unit_test_command="runmod -t xrun --"',
@@ -495,7 +495,7 @@ rtl_lint_test = rule(
             doc = "Lint waiver regex to hack around cases when HAL has formatting errors in xrun.log.xml that cause problems for our lint parser",
         ),
         "_command_override": attr.label(
-            default = Label("@verilog_tools//:rtl_lint_test_command"),
+            default = Label("@verilog_tools//:verilog_rtl_lint_test_command"),
             doc = "Allows custom override of simulator command in the event of wrapping via modulefiles\n" +
                   "Example override in project's .bazelrc:\n" +
                   '  build --//:rtl_lint_test_command="runmod -t xrun --"',
@@ -608,7 +608,7 @@ rtl_cdc_test = rule(
             default = Label("//vendors/cadence:cdc.bash.template"),
         ),
         "_command_override": attr.label(
-            default = Label("@verilog_tools//:rtl_cdc_test_command"),
+            default = Label("@verilog_tools//:verilog_rtl_cdc_test_command"),
             doc = "Allows custom override of simulator command in the event of wrapping via modulefiles\n" +
                   "Example override in project's .bazelrc:\n" +
                   '  build --//:rtl_cdc_test_command="runmod -t jg --"',
