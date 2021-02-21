@@ -620,24 +620,3 @@ rtl_cdc_test = rule(
     },
     test = True,
 )
-
-def rtl_cdc(
-        name,
-        deps,
-        top,
-        cmd_file,
-        shells,
-        bbox,
-        defines,
-        tags = []):
-    """Create rules to run standard CDC test and to run in GUI mode"""
-    rtl_cdc_test(
-        name = name,
-        deps = deps,
-        top = top,
-        cmd_file = cmd_file,
-        shells = shells,
-        bbox = bbox,
-        defines = defines,
-        tags = tags,
-    )
