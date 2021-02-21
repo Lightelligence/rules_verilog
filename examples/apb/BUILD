@@ -1,4 +1,4 @@
-load("@//:rtl.bzl", "rtl_unit_test", "verilog_rtl_library")
+load("@//verilog:rtl.bzl", "rtl_unit_test", "verilog_rtl_library")
 
 verilog_rtl_library(
     name = "apb",

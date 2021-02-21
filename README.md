@@ -13,7 +13,7 @@ FIXME implement after first release using https://docs.bazel.build/versions/mast
 ## Rules
 
 ### RTL
-Load rules into your `BUILD` files from [@verilog_tools//:rtl.bzl](rtl.bzl)
+Load rules into your `BUILD` files from [@verilog_tools//verilog:rtl.bzl](verilog/rtl.bzl)
 
 - [verilog_rtl_library](docs/rtl.md#verilog_rtl_library)
 FIXME add more to list
