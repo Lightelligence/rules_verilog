@@ -1,5 +1,23 @@
 <!-- Generated with Stardoc: http://skydoc.bazel.build -->
 
+<a name="#tool_encapsulation"></a>
+
+## tool_encapsulation
+
+<pre>
+tool_encapsulation(<a href="#tool_encapsulation-name">name</a>)
+</pre>
+
+
+
+**ATTRIBUTES**
+
+
+| Name  | Description | Type | Mandatory | Default |
+| :-------------: | :-------------: | :-------------: | :-------------: | :-------------: |
+| name |  A unique name for this target.   | <a href="https://bazel.build/docs/build-ref.html#name">Name</a> | required |  |
+
+
 <a name="#verilog_test"></a>
 
 ## verilog_test
@@ -42,6 +60,24 @@ ShellInfo(<a href="#ShellInfo-is_pkg">is_pkg</a>, <a href="#ShellInfo-is_shell_o
 | is_pkg |  Indicates if this verilog_rtl_library used the rtl_pkg rule    |
 | is_shell_of |  Indicates if this verilog_rtl_library represents a shell module    |
 | gumi_path |  Short path to gumi file    |
+
+
+<a name="#ToolEncapsulationInfo"></a>
+
+## ToolEncapsulationInfo
+
+<pre>
+ToolEncapsulationInfo(<a href="#ToolEncapsulationInfo-command">command</a>)
+</pre>
+
+
+
+**FIELDS**
+
+
+| Name  | Description |
+| :-------------: | :-------------: |
+| command |  The command invocation for a particular tool. Useful for aliases or redirection.    |
 
 
 <a name="#VerilogInfo"></a>
