@@ -249,7 +249,7 @@ verilog_dv_tb = rule(
         ),
         "_default_sim_opts": attr.label(
             allow_single_file = True,
-            default = "//:default_sim_opts.f",
+            default = "@verilog_tools//vendors/cadence:verilog_dv_default_sim_opts.f",
         ),
         "_compile_args_template": attr.label(
             default = Label("@verilog_tools//vendors/cadence:verilog_dv_tb_compile_args.f.template"),
@@ -310,7 +310,7 @@ verilog_dv_unit_test = rule(
         ),
         "default_sim_opts": attr.label(
             allow_single_file = True,
-            default = "//:default_sim_opts.f",
+            default = "@verilog_tools//vendors/cadence:verilog_dv_default_sim_opts.f",
         ),
         "sim_args": attr.string_list(doc = "Additional simulation arguments to passed to command line"),
         "_command_override": attr.label(
