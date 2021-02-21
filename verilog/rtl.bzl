@@ -264,45 +264,6 @@ def verilog_rtl_shell_dynamic(
         enable_gumi = False,
     )
 
-def _rtl_bin_impl(ctx):
-    out = ctx.outputs.out
-    trans_flists = get_transitive_srcs([], ctx.attr.deps, VerilogInfo, "transitive_flists", allow_other_outputs = False)
-
-    ctx.actions.write(
-        output = out,
-        content = "\n".join([" -f {}".format(f.short_path) for f in trans_flists]),
-    )
-
-    trans_flists = get_transitive_srcs([out], ctx.attr.deps, VerilogInfo, "transitive_flists", allow_other_outputs = False)
-    trans_srcs = get_transitive_srcs([], ctx.attr.deps, VerilogInfo, "transitive_sources", allow_other_outputs = True)
-
-    second_out = ctx.outputs.executable
-    script = "\n".join(
-        ["echo `pwd`"],
-    )
-
-    ctx.actions.write(
-        output = second_out,
-        content = script,
-    )
-
-    runfiles = ctx.runfiles(files = trans_srcs.to_list() + trans_flists.to_list())
-
-    return [
-        DefaultInfo(runfiles = runfiles),
-    ]
-
-rtl_bin = rule(
-    doc = "Merge all flists into a single top-level flist.",
-    implementation = _rtl_bin_impl,
-    attrs = {
-        "deps": attr.label_list(),
-    },
-    outputs = {"out": "%{name}.f"},
-    executable = True,
-    #output_to_genfiles = True,
-)
-
 def _rtl_flist_impl(ctx):
     num_srcs = len(ctx.files.srcs)
     if num_srcs != 1:
