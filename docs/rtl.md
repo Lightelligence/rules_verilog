@@ -124,7 +124,7 @@ Compiles and runs a small RTL library. Additional sim options may be passed afte
 | post_flist_args |  commands and arguments after flist arguments   | List of strings | optional | [] |
 | pre_flist_args |  commands and arguments before flist arguments   | List of strings | optional | [] |
 | shells |  -   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
-| ut_sim_template |  The template to generate the script to run the test. Also available is a [SVUnit](http://agilesoc.com/open-source-projects/svunit/) test template: @verilog_tools//vendors/cadence:verilog_rtl_unit_test_svunit.sh.template If using the SVUnit template, you may also want to throw:     post_flist_args = [     "--directory &lt;path_to_test_directory_from_workspace&gt;",  ],   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | @verilog_tools//vendors/cadence:verilog_rtl_unit_test.sh.template |
+| ut_sim_template |  The template to generate the script to run the test. Also available is a [SVUnit](http://agilesoc.com/open-source-projects/svunit/) test template: @verilog_tools//vendors/cadence:verilog_rtl_unit_test_svunit.sh.template If using the SVUnit template, you may also want to throw: <pre><code>    post_flist_args = [     "--directory &lt;path_to_test_directory_from_workspace&gt;",  ],</code></pre>   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | @verilog_tools//vendors/cadence:verilog_rtl_unit_test.sh.template |
 
 
 <a name="#create_flist_content"></a>
