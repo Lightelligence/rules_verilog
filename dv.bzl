@@ -5,7 +5,7 @@ load(":verilog.bzl", "VerilogInfo", "flists_to_arguments", "gather_shell_defines
 DVTestInfo = provider(fields = {
     "sim_opts": "Simulation options",
     "uvm_testname": "UVM Test Name",
-    "vcomp": "Label of type dv_tb",
+    "vcomp": "Label of type verilog_dv_tb",
     "tags": "Tags",
 })
 
@@ -13,7 +13,7 @@ DVTBInfo = provider(fields = {
     "ccf": "Coverage config file",
 })
 
-def _dv_test_cfg_impl(ctx):
+def _verilog_dv_test_cfg_impl(ctx):
     parent_uvm_testnames = [dep[DVTestInfo].uvm_testname for dep in reversed(ctx.attr.inherits) if hasattr(dep[DVTestInfo], "uvm_testname")]
     parent_vcomps = [dep[DVTestInfo].vcomp for dep in reversed(ctx.attr.inherits) if hasattr(dep[DVTestInfo], "vcomp")]
 
@@ -70,14 +70,14 @@ def _dv_test_cfg_impl(ctx):
     )
     return [DVTestInfo(**provider_args)]
 
-dv_test_cfg = rule(
+verilog_dv_test_cfg = rule(
     doc = "A DV test configuration. This is not a executable target.",
-    implementation = _dv_test_cfg_impl,
+    implementation = _verilog_dv_test_cfg_impl,
     attrs = {
         "abstract": attr.bool(default = False, doc = "This configuration is abstract. It is not intended to be excuted, but only to be used as a base for other test configurations."),
-        "inherits": attr.label_list(doc = "Inherit configurations from dv_test_cfg targets. Entries later in the list will override arguements set by previous inherits entries. Any field explicily set in this rule will override values set through inheritance."),
+        "inherits": attr.label_list(doc = "Inherit configurations from verilog_dv_test_cfg targets. Entries later in the list will override arguements set by previous inherits entries. Any field explicily set in this rule will override values set through inheritance."),
         "uvm_testname": attr.string(doc = "UVM testname. If not set, finds from deps."),
-        "vcomp": attr.label(doc = "Must point to a 'dv_tb' target for how to build this testbench."),
+        "vcomp": attr.label(doc = "Must point to a 'verilog_dv_tb' target for how to build this testbench."),
         "sim_opts": attr.string_dict(doc = "Additional simopts flags to throw"),
         "no_run": attr.bool(default = False, doc = "Set to True to skip running this test."),
         "sockets": attr.string_dict(
@@ -169,7 +169,7 @@ verilog_dv_library = rule(
 _XRUN_COMPILE_ARGS_TEMPLATE = "@verilog_tools//vendors/cadence:xrun_compile_args_template.txt"
 _XRUN_RUNTIME_ARGS_TEMPLATE = "@verilog_tools//vendors/cadence:xrun_runtime_args_template.txt"
 
-def _dv_tb_impl(ctx):
+def _verilog_dv_tb_impl(ctx):
     defines = {}
     defines.update(ctx.attr.defines)
     defines.update(gather_shell_defines(ctx.attr.shells))
@@ -220,9 +220,9 @@ def _dv_tb_impl(ctx):
         ),
     ]
 
-dv_tb = rule(
+verilog_dv_tb = rule(
     doc = "A DV Testbench.",
-    implementation = _dv_tb_impl,
+    implementation = _verilog_dv_tb_impl,
     attrs = {
         "deps": attr.label_list(mandatory = True),
         "defines": attr.string_dict(doc = "Additional defines to throw for this testbench compile."),
@@ -271,7 +271,7 @@ dv_tb = rule(
     executable = True,
 )
 
-def _dv_unit_test_impl(ctx):
+def _verilog_dv_unit_test_impl(ctx):
     trans_srcs = get_transitive_srcs([], ctx.attr.deps, VerilogInfo, "transitive_sources")
     srcs_list = trans_srcs.to_list()
     flists = get_transitive_srcs([], ctx.attr.deps, VerilogInfo, "transitive_flists")
@@ -296,7 +296,7 @@ def _dv_unit_test_impl(ctx):
         executable = ctx.outputs.out,
     )]
 
-dv_unit_test = rule(
+verilog_dv_unit_test = rule(
     # FIXME, this should eventually just be a specific use case of verilog_test
     doc = """Compiles and runs a small DV library. Additional sim options may be passed after --
     Interactive example:
@@ -304,7 +304,7 @@ dv_unit_test = rule(
     For ci testing purposes:
       bazel test //digital/dv/interfaces/apb_pkg:test
     """,
-    implementation = _dv_unit_test_impl,
+    implementation = _verilog_dv_unit_test_impl,
     attrs = {
         "deps": attr.label_list(mandatory = True),
         "ut_sim_template": attr.label(
@@ -317,10 +317,10 @@ dv_unit_test = rule(
         ),
         "sim_args": attr.string_list(doc = "Additional simulation arguments to passed to command line"),
         "_command_override": attr.label(
-            default = Label("@verilog_tools//:dv_unit_test_command"),
+            default = Label("@verilog_tools//:verilog_dv_unit_test_command"),
             doc = "Allows custom override of simulator command in the event of wrapping via modulefiles.\n" +
                   "Example override in project's .bazelrc:\n" +
-                  '  build --//:dv_unit_test_command="runmod -t xrun --"',
+                  '  build --//:verilog_dv_unit_test_command="runmod -t xrun --"',
         ),
     },
     outputs = {"out": "%{name}_run.sh"},
@@ -341,14 +341,14 @@ test_to_vcomp_aspect = aspect(
 )
 
 # Used by simmer to find test to find ccf file
-def _dv_tb_ccf_aspect_impl(target, ctx):
+def _verilog_dv_tb_ccf_aspect_impl(target, ctx):
     # buildifier: disable=print
-    print("dv_tb_ccf({})".format([f.path for f in target[DVTBInfo].ccf]))
+    print("verilog_dv_tb_ccf({})".format([f.path for f in target[DVTBInfo].ccf]))
 
     # buildifier: enable=print
     return []
 
-dv_tb_ccf_aspect = aspect(
-    implementation = _dv_tb_ccf_aspect_impl,
+verilog_dv_tb_ccf_aspect = aspect(
+    implementation = _verilog_dv_tb_ccf_aspect_impl,
     attr_aspects = ["ccf"],
 )

@@ -10,7 +10,7 @@ VerilogInfo = provider(fields = {
 })
 
 ShellInfo = provider(fields = {
-    "is_pkg": "Indicates if this verilog_rtl_library used the rtl_pkg rule",
+    "is_pkg": "Indicates if this verilog_rtl_library used the verilog_rtl_pkg rule",
     "is_shell_of": "Indicates if this verilog_rtl_library represents a shell module",
     "gumi_path": "Short path to gumi file",
 })

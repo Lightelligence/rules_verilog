@@ -44,21 +44,21 @@ buildifier(
 )
 
 tool_encapsulation(
-    name = "dv_unit_test_command",
+    name = "verilog_dv_unit_test_command",
     build_setting_default = "xrun",
 )
 
 tool_encapsulation(
-    name = "rtl_cdc_test_command",
+    name = "verilog_rtl_cdc_test_command",
     build_setting_default = "jg",
 )
 
 tool_encapsulation(
-    name = "rtl_lint_test_command",
+    name = "verilog_rtl_lint_test_command",
     build_setting_default = "xrun",
 )
 
 tool_encapsulation(
-    name = "rtl_unit_test_command",
+    name = "verilog_rtl_unit_test_command",
     build_setting_default = "xrun",
 )
