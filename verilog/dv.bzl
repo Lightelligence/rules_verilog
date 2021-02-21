@@ -166,9 +166,6 @@ verilog_dv_library = rule(
     outputs = {"out": "%{name}.f"},
 )
 
-_XRUN_COMPILE_ARGS_TEMPLATE = "@verilog_tools//vendors/cadence:xrun_compile_args_template.txt"
-_XRUN_RUNTIME_ARGS_TEMPLATE = "@verilog_tools//vendors/cadence:xrun_runtime_args_template.txt"
-
 def _verilog_dv_tb_impl(ctx):
     defines = {}
     defines.update(ctx.attr.defines)
@@ -255,18 +252,18 @@ verilog_dv_tb = rule(
             default = "//:default_sim_opts.f",
         ),
         "_compile_args_template": attr.label(
-            default = Label(_XRUN_COMPILE_ARGS_TEMPLATE),
+            default = Label("@verilog_tools//vendors/cadence:verilog_dv_tb_compile_args.f.template"),
             allow_single_file = True,
         ),
         "_runtime_args_template": attr.label(
-            default = Label(_XRUN_RUNTIME_ARGS_TEMPLATE),
+            default = Label("@verilog_tools//vendors/cadence:verilog_dv_tb_runtime_args.f.template"),
             allow_single_file = True,
         ),
     },
     outputs = {
-        "compile_args": "%{name}_compile_args",
+        "compile_args": "%{name}_compile_args.f",
         "compile_warning_waivers": "%{name}_compile_warning_waivers",
-        "runtime_args": "%{name}_runtime_args",
+        "runtime_args": "%{name}_runtime_args.f",
     },
     executable = True,
 )
@@ -309,7 +306,7 @@ verilog_dv_unit_test = rule(
         "deps": attr.label_list(mandatory = True),
         "ut_sim_template": attr.label(
             allow_single_file = True,
-            default = Label("@verilog_tools//vendors/cadence:dv_unit_test_sim_template.sh"),
+            default = Label("@verilog_tools//vendors/cadence:verilog_dv_unit_test.sh.template"),
         ),
         "default_sim_opts": attr.label(
             allow_single_file = True,
