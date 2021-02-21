@@ -264,10 +264,10 @@ def verilog_rtl_shell_dynamic(
         enable_gumi = False,
     )
 
-def _rtl_flist_impl(ctx):
+def _verilog_rtl_flist_impl(ctx):
     num_srcs = len(ctx.files.srcs)
     if num_srcs != 1:
-        fail("rtl_flist rule may only have single source file: {}".format(ctx))
+        fail("verilog_rtl_flist rule may only have single source file: {}".format(ctx))
 
     # Ideally it would be nice to grab all the files inside an flist, but this could be recursive, so skipping this for now.
     trans_srcs = depset([])
@@ -278,9 +278,9 @@ def _rtl_flist_impl(ctx):
         DefaultInfo(files = depset(trans_srcs.to_list() + trans_flists.to_list())),
     ]
 
-rtl_flist = rule(
+verilog_rtl_flist = rule(
     doc = "Create an RTL Library from an existing flist file. Recommended only for vendor supplied IP. In general, use the verilog_rtl_library rule.",
-    implementation = _rtl_flist_impl,
+    implementation = _verilog_rtl_flist_impl,
     attrs = {
         "srcs": attr.label_list(
             allow_files = True,
