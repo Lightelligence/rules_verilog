@@ -342,6 +342,12 @@ verilog_rtl_unit_test = rule(
         "ut_sim_template": attr.label(
             allow_single_file = True,
             default = Label("@verilog_tools//vendors/cadence:verilog_rtl_unit_test.sh.template"),
+            doc = "The template to generate the script to run the test.\n" + 
+            "Also available is a [SVUnit](http://agilesoc.com/open-source-projects/svunit/) test template: @verilog_tools//vendors/cadence:verilog_rtl_unit_test_svunit.sh.template\n" +
+            "If using the SVUnit template, you may also want to throw:\n" + 
+            "    post_flist_args = [\n" +
+            "    \"--directory <path_to_test_directory_from_workspace>\",\n" + 
+            " ],",
         ),
         "_command_override": attr.label(
             default = Label("@verilog_tools//:verilog_rtl_unit_test_command"),
