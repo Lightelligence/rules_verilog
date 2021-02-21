@@ -281,6 +281,7 @@ def _dv_unit_test_impl(ctx):
         template = ctx.file.ut_sim_template,
         output = ctx.outputs.out,
         substitutions = {
+            "{SIMULATOR_COMMAND}": ctx.attr._command_override[ToolEncapsulationInfo].command,
             "{DEFAULT_SIM_OPTS}": "-f {}".format(ctx.file.default_sim_opts.short_path),
             "{DPI_LIBS}": flists_to_arguments(ctx.attr.deps, VerilogInfo, "transitive_dpi", "-sv_lib"),
             "{FLISTS}": " ".join(["-f {}".format(f.short_path) for f in flists_list]),
@@ -315,6 +316,12 @@ dv_unit_test = rule(
             default = "//:default_sim_opts.f",
         ),
         "sim_args": attr.string_list(doc = "Additional simulation arguments to passed to command line"),
+        "_command_override": attr.label(
+            default = Label("@verilog_tools//:dv_unit_test_command"),
+            doc = "Allows custom override of simulator command in the event of wrapping via modulefiles.\n" +
+                  "Example override in project's .bazelrc:\n" +
+                  '  build --//:dv_unit_test_command="runmod -t xrun --"',
+        ),
     },
     outputs = {"out": "%{name}_run.sh"},
     test = True,
