@@ -605,7 +605,7 @@ rtl_cdc_test = rule(
         ),
         "bash_template": attr.label(
             allow_single_file = True,
-            default = Label("//:cdc.bash.template"),
+            default = Label("//vendors/cadence:cdc.bash.template"),
         ),
         "_command_override": attr.label(
             default = Label("@verilog_tools//:rtl_cdc_test_command"),

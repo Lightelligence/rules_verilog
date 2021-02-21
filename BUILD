@@ -17,7 +17,6 @@ py_binary(
 
 exports_files([
     "default_sim_opts.f",
-    "cdc.bash.template",
     "rtl.bzl",
     "dv.bzl",
     "verilog.bzl",

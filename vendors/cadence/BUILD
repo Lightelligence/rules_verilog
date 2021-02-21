@@ -6,4 +6,5 @@ exports_files([
     "dv_unit_test_sim_template.sh",
     "rtl_unit_test_sim_template.sh",
     "rtl_svunit_test_template.sh",
+    "cdc.bash.template",
 ])
