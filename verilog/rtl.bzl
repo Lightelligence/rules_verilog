@@ -465,7 +465,7 @@ verilog_rtl_lint_test = rule(
     test = True,
 )
 
-def _rtl_cdc_test_impl(ctx):
+def _verilog_rtl_cdc_test_impl(ctx):
     trans_flists = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_flists", allow_other_outputs = False)
     trans_srcs = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_sources", allow_other_outputs = True)
 
@@ -539,9 +539,9 @@ def _rtl_cdc_test_impl(ctx):
         DefaultInfo(runfiles = runfiles),
     ]
 
-rtl_cdc_test = rule(
+verilog_rtl_cdc_test = rule(
     doc = "Run CDC",
-    implementation = _rtl_cdc_test_impl,
+    implementation = _verilog_rtl_cdc_test_impl,
     attrs = {
         "deps": attr.label_list(mandatory = True),
         "shells": attr.label_list(),
@@ -569,7 +569,7 @@ rtl_cdc_test = rule(
             default = Label("//vendors/cadence:cdc.bash.template"),
         ),
         "_command_override": attr.label(
-            default = Label("@verilog_tools//:verilog_rtl_cdc_test_command"),
+            default = Label("@verilog_tools//:verilog_verilog_rtl_cdc_test_command"),
             doc = "Allows custom override of simulator command in the event of wrapping via modulefiles\n" +
                   "Example override in project's .bazelrc:\n" +
                   '  build --//:rtl_cdc_test_command="runmod -t jg --"',
