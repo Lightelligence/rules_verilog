@@ -11,6 +11,7 @@ find -name BUILD -o -name '*.bzl' | xargs sed -i 's/rtl_pkg/verilog_rtl_pkg/g'
 find -name BUILD -o -name '*.bzl' | xargs sed -i 's/rtl_shell_dynamic/verilog_rtl_shell_dynamic/g'
 find -name BUILD -o -name '*.bzl' | xargs sed -i 's/rtl_shell_static/verilog_rtl_static/g'
 find -name BUILD -o -name '*.bzl' | xargs sed -i 's/rtl_unit_test/verilog_rtl_unit_test/g'
+find -name BUILD -o -name '*.bzl' | xargs sed -i 's/rtl_lint_test/verilog_rtl_lint_test/g'
 
 find -name BUILD -o -name '*.bzl' | xargs sed -i 's/dv_test_cfg/verilog_dv_test_cfg/g'
 find -name BUILD -o -name '*.bzl' | xargs sed -i 's/dv_lib/verilog_dv_library/g'
