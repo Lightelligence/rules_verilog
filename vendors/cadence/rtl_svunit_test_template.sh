@@ -4,7 +4,7 @@
 # It is not intended to be run stand-alone
 # Execute by doing:
 #   bazel run <path>:<target>
-runmod xrun -- \
+{SIMULATOR_COMMAND} \
     runSVUnit \
     -s xcelium \
     --no_abs_path_flist \

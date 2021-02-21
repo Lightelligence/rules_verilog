@@ -1,17 +1,26 @@
 load("@com_github_bazelbuild_buildtools//buildifier:def.bzl", "buildifier")
+load("@rules_python//python:defs.bzl", "py_binary", "py_library")
+load(":verilog.bzl", "tool_encapsulation")
 
 package(default_visibility = ["//visibility:public"])
 
+py_library(
+    name = "cmn_logging",
+    srcs = ["cmn_logging.py"],
+)
+
+py_binary(
+    name = "lint_parser_hal",
+    srcs = ["lint_parser_hal.py"],
+    deps = [":cmn_logging"],
+)
+
 exports_files([
-    "xrun_compile_args_template.txt",
-    "xrun_runtime_args_template.txt",
-    "ut_sim_template.sh",
-    "rtl_unit_test_sim_template.sh",
-    "rtl_svunit_test_template.sh",
     "default_sim_opts.f",
-    "lint_parser.py",
-    "cmn_logging.py",
     "cdc.bash.template",
+    "rtl.bzl",
+    "dv.bzl",
+    "verilog.bzl",
 ])
 
 buildifier(
@@ -33,4 +42,24 @@ buildifier(
     name = "buildifier_fix",
     lint_mode = "fix",
     mode = "fix",
+)
+
+tool_encapsulation(
+    name = "dv_unit_test_command",
+    build_setting_default = "xrun",
+)
+
+tool_encapsulation(
+    name = "rtl_cdc_test_command",
+    build_setting_default = "jg",
+)
+
+tool_encapsulation(
+    name = "rtl_lint_test_command",
+    build_setting_default = "xrun",
+)
+
+tool_encapsulation(
+    name = "rtl_unit_test_command",
+    build_setting_default = "xrun",
 )

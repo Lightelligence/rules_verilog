@@ -1,6 +1,6 @@
 """Rules to gather and compile RTL."""
 
-load("//:verilog.bzl", "CUSTOM_SHELL", "ShellInfo", "VerilogInfo", "gather_shell_defines", "get_transitive_srcs")
+load(":verilog.bzl", "CUSTOM_SHELL", "ShellInfo", "ToolEncapsulationInfo", "VerilogInfo", "gather_shell_defines", "get_transitive_srcs")
 
 def create_flist_content(ctx, gumi_path, allow_library_discovery, no_synth = False):
     flist_content = []
@@ -37,7 +37,7 @@ def create_flist_content(ctx, gumi_path, allow_library_discovery, no_synth = Fal
     flist_content.append("")
     return flist_content
 
-def _rtl_lib_impl(ctx):
+def _verilog_rtl_library_impl(ctx):
     srcs = ctx.files.headers + ctx.files.modules + ctx.files.lib_files + ctx.files.direct
 
     if ctx.attr.is_pkg:
@@ -49,7 +49,7 @@ def _rtl_lib_impl(ctx):
     else:
         for src in srcs:
             if "_pkg" in src.basename:
-                fail("Package files should not declared in a rtl_lib. Use a rtl_pkg instead. {} is declared in {}".format(src, ctx.label))
+                fail("Package files should not declared in a verilog_rtl_library. Use a rtl_pkg instead. {} is declared in {}".format(src, ctx.label))
 
     if ctx.attr.is_shell_of:
         if len(ctx.attr.modules) != 1 and not ctx.attr.is_shell_of == CUSTOM_SHELL:
@@ -61,10 +61,10 @@ def _rtl_lib_impl(ctx):
     else:
         for dep in ctx.attr.deps:
             if ShellInfo in dep and dep[ShellInfo].is_shell_of and not dep[ShellInfo].is_shell_of == CUSTOM_SHELL:
-                fail("rtl_lib may not depend on shells. Shells should only be included at top-level builds")
+                fail("verilog_rtl_library may not depend on shells. Shells should only be included at top-level builds")
         for src in srcs:
             if "_shell" in src.basename:
-                fail("Shell files should not be declared in an rtl_lib. Use a rtl_shell_static or rtl_shell_dynamic instead. {} is declared in {}".format(src, ctx.label))
+                fail("Shell files should not be declared in an verilog_rtl_library. Use a rtl_shell_static or rtl_shell_dynamic instead. {} is declared in {}".format(src, ctx.label))
 
     gumi_path = ""
     if ctx.attr.enable_gumi:
@@ -72,7 +72,7 @@ def _rtl_lib_impl(ctx):
         gumi_content = []
 
         # Making this more unique than just gumi.basename.upper()
-        # To avoid case where multiple directories define the same name for a rtl_lib
+        # To avoid case where multiple directories define the same name for a verilog_rtl_library
         gumi_guard_value = gumi.short_path.replace("/", "_").replace(".", "_")
         gumi_guard = "__{}__".format(gumi_guard_value.upper())
         gumi_content.append("`ifndef {}".format(gumi_guard))
@@ -146,9 +146,9 @@ def _rtl_lib_impl(ctx):
         ),
     ]
 
-rtl_lib = rule(
+verilog_rtl_library = rule(
     doc = "An RTL Library. Creates a generated flist file from a list of source files.",
-    implementation = _rtl_lib_impl,
+    implementation = _verilog_rtl_library_impl,
     attrs = {
         "headers": attr.label_list(
             allow_files = True,
@@ -205,7 +205,7 @@ def rtl_pkg(
         no_synth = False,
         deps = []):
     """A single rtl pkg file."""
-    rtl_lib(
+    verilog_rtl_library(
         name = name,
         direct = direct,
         deps = deps,
@@ -229,7 +229,7 @@ def rtl_shell_static(
     """
     if not name.startswith(module_to_shell_name) and module_to_shell_name != CUSTOM_SHELL:
         fail("Shell name should start with the original module name: shell name='{}' original module='{}'".format(name, module_to_shell_name))
-    rtl_lib(
+    verilog_rtl_library(
         name = name,
         modules = [shell_module_label],
         # Intentionally do not set deps here
@@ -256,7 +256,7 @@ def rtl_shell_dynamic(
         cmd = "cd $(@D); export LC_ALL=en_US.utf-8; export LANG=en_US.utf-8; cookiecutter --no-input {} module_to_shell={} shell_suffix={}".format(template_path, module_to_shell_name, shell_suffix),
         output_to_bindir = True,
     )
-    rtl_lib(
+    verilog_rtl_library(
         name = name,
         modules = [":{}_gen".format(name)],
         is_shell_of = module_to_shell_name,
@@ -318,7 +318,7 @@ def _rtl_flist_impl(ctx):
     ]
 
 rtl_flist = rule(
-    doc = "Create an RTL Library from an existing flist file. Recommended only for vendor supplied IP. In general, use the rtl_lib rule.",
+    doc = "Create an RTL Library from an existing flist file. Recommended only for vendor supplied IP. In general, use the verilog_rtl_library rule.",
     implementation = _rtl_flist_impl,
     attrs = {
         "srcs": attr.label_list(
@@ -358,6 +358,7 @@ def _rtl_unit_test_impl(ctx):
         template = ctx.file.ut_sim_template,
         output = ctx.outputs.executable,
         substitutions = {
+            "{SIMULATOR_COMMAND}": ctx.attr._command_override[ToolEncapsulationInfo].command,
             "{FLISTS}": " ".join(["-f {}".format(f.short_path) for f in flists_list]),
             "{TOP}": top,
             "{PRE_FLIST_ARGS}": "\n".join(pre_fa),
@@ -379,7 +380,13 @@ rtl_unit_test = rule(
         "out": attr.output(),
         "ut_sim_template": attr.label(
             allow_single_file = True,
-            default = Label("//:rtl_unit_test_sim_template.sh"),
+            default = Label("@verilog_tools//vendors/cadence:rtl_unit_test_sim_template.sh"),
+        ),
+        "_command_override": attr.label(
+            default = Label("@verilog_tools//:rtl_unit_test_command"),
+            doc = "Allows custom override of simulator command in the event of wrapping via modulefiles.\n" +
+                  "Example override in project's .bazelrc:\n" +
+                  '  build --//:rtl_unit_test_command="runmod -t xrun --"',
         ),
         "data": attr.label_list(
             allow_files = True,
@@ -397,7 +404,7 @@ def _rtl_lint_test_impl(ctx):
 
     content = [
         "#!/usr/bin/bash",
-        "runmod -t xrun -- \\",
+        "{} \\".format(ctx._command_override[ToolEncapsulationInfo].command),
         "  -define LINT \\",
         "  -sv \\",
         "  -hal  \\",
@@ -439,9 +446,10 @@ def _rtl_lint_test_impl(ctx):
         design_info_arg = design_info_arg,
     ))
     content.append("  -logfile xrun.log")
+    parser_location = ctx.files.lint_parser[0].short_path
 
     content.append("")
-    content.append("python external/verilog_tools/lint_parser.py $@ --waiver-hack \"{}\"".format(ctx.attr.waiver_hack))
+    content.append("python {} $@ --waiver-hack \"{}\"".format(parser_location, ctx.attr.waiver_hack))
 
     ctx.actions.write(
         output = ctx.outputs.executable,
@@ -481,10 +489,16 @@ rtl_lint_test = rule(
         ),
         "lint_parser": attr.label(
             allow_files = True,
-            default = "@verilog_tools//:lint_parser.py",
+            default = "@verilog_tools//:lint_parser_hal",
         ),
         "waiver_hack": attr.string(
             doc = "Lint waiver regex to hack around cases when HAL has formatting errors in xrun.log.xml that cause problems for our lint parser",
+        ),
+        "_command_override": attr.label(
+            default = Label("@verilog_tools//:rtl_lint_test_command"),
+            doc = "Allows custom override of simulator command in the event of wrapping via modulefiles\n" +
+                  "Example override in project's .bazelrc:\n" +
+                  '  build --//:rtl_lint_test_command="runmod -t xrun --"',
         ),
     },
     test = True,
@@ -499,6 +513,7 @@ def _rtl_cdc_test_impl(ctx):
         template = ctx.file.bash_template,
         output = ctx.outputs.executable,
         substitutions = {
+            "{CDC_COMMAND}": ctx._command_override[ToolEncapsulationInfo].command,
             "{PREAMBLE_CMDS}": ctx.outputs.cdc_preamble_cmds.short_path,
             "{CMD_FILE}": ctx.outputs.cdc_epilogue_cmds.short_path,
             "{EPILOGUE_CMDS}": ctx.outputs.cdc_epilogue_cmds.short_path,
@@ -591,6 +606,12 @@ rtl_cdc_test = rule(
         "bash_template": attr.label(
             allow_single_file = True,
             default = Label("//:cdc.bash.template"),
+        ),
+        "_command_override": attr.label(
+            default = Label("@verilog_tools//:rtl_cdc_test_command"),
+            doc = "Allows custom override of simulator command in the event of wrapping via modulefiles\n" +
+                  "Example override in project's .bazelrc:\n" +
+                  '  build --//:rtl_cdc_test_command="runmod -t jg --"',
         ),
     },
     outputs = {

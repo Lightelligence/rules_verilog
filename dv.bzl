@@ -1,6 +1,6 @@
 """Rules for building DV infrastructure."""
 
-load("//:verilog.bzl", "VerilogInfo", "flists_to_arguments", "gather_shell_defines", "get_transitive_srcs")
+load(":verilog.bzl", "VerilogInfo", "flists_to_arguments", "gather_shell_defines", "get_transitive_srcs")
 
 DVTestInfo = provider(fields = {
     "sim_opts": "Simulation options",
@@ -97,7 +97,7 @@ dv_test_cfg = rule(
     },
 )
 
-def _dv_lib_impl(ctx):
+def _verilog_dv_library_impl(ctx):
     if ctx.attr.incdir:
         # Using dirname may result in bazel-out included in path
         directories = depset([f.short_path[:-len(f.basename) - 1] for f in ctx.files.srcs]).to_list()
@@ -127,7 +127,7 @@ def _dv_lib_impl(ctx):
             if gfile.path.endswith(".so"):
                 sos.append(gfile)
         if len(sos) != 1:
-            fail("Expected to find exactly one .so for dv_lib dpi argument '", dpi, "'. Found .so: ", sos)
+            fail("Expected to find exactly one .so for verilog_dv_library dpi argument '", dpi, "'. Found .so: ", sos)
         all_sos.extend(sos)
 
     out = ctx.outputs.out
@@ -150,9 +150,9 @@ def _dv_lib_impl(ctx):
         ),
     ]
 
-dv_lib = rule(
+verilog_dv_library = rule(
     doc = "An DV Library. Creates a generated flist file from a list of source files.",
-    implementation = _dv_lib_impl,
+    implementation = _verilog_dv_library_impl,
     attrs = {
         "srcs": attr.label_list(allow_files = True, mandatory = True),
         "deps": attr.label_list(),
@@ -166,8 +166,8 @@ dv_lib = rule(
     outputs = {"out": "%{name}.f"},
 )
 
-_XRUN_COMPILE_ARGS_TEMPLATE = "//:xrun_compile_args_template.txt"
-_XRUN_RUNTIME_ARGS_TEMPLATE = "//:xrun_runtime_args_template.txt"
+_XRUN_COMPILE_ARGS_TEMPLATE = "@verilog_tools//vendors/cadence:xrun_compile_args_template.txt"
+_XRUN_RUNTIME_ARGS_TEMPLATE = "@verilog_tools//vendors/cadence:xrun_runtime_args_template.txt"
 
 def _dv_tb_impl(ctx):
     defines = {}
@@ -278,9 +278,10 @@ def _dv_unit_test_impl(ctx):
     flists_list = flists.to_list()
 
     ctx.actions.expand_template(
-        template = ctx.file._ut_sim_template,
+        template = ctx.file.ut_sim_template,
         output = ctx.outputs.out,
         substitutions = {
+            "{SIMULATOR_COMMAND}": ctx.attr._command_override[ToolEncapsulationInfo].command,
             "{DEFAULT_SIM_OPTS}": "-f {}".format(ctx.file.default_sim_opts.short_path),
             "{DPI_LIBS}": flists_to_arguments(ctx.attr.deps, VerilogInfo, "transitive_dpi", "-sv_lib"),
             "{FLISTS}": " ".join(["-f {}".format(f.short_path) for f in flists_list]),
@@ -306,15 +307,21 @@ dv_unit_test = rule(
     implementation = _dv_unit_test_impl,
     attrs = {
         "deps": attr.label_list(mandatory = True),
-        "_ut_sim_template": attr.label(
+        "ut_sim_template": attr.label(
             allow_single_file = True,
-            default = Label("//:ut_sim_template.sh"),
+            default = Label("@verilog_tools//vendors/cadence:dv_unit_test_sim_template.sh"),
         ),
         "default_sim_opts": attr.label(
             allow_single_file = True,
             default = "//:default_sim_opts.f",
         ),
         "sim_args": attr.string_list(doc = "Additional simulation arguments to passed to command line"),
+        "_command_override": attr.label(
+            default = Label("@verilog_tools//:dv_unit_test_command"),
+            doc = "Allows custom override of simulator command in the event of wrapping via modulefiles.\n" +
+                  "Example override in project's .bazelrc:\n" +
+                  '  build --//:dv_unit_test_command="runmod -t xrun --"',
+        ),
     },
     outputs = {"out": "%{name}_run.sh"},
     test = True,

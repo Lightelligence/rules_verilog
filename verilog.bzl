@@ -10,10 +10,22 @@ VerilogInfo = provider(fields = {
 })
 
 ShellInfo = provider(fields = {
-    "is_pkg": "Indicates if this rtl_lib used the rtl_pkg rule",
-    "is_shell_of": "Indicates if this rtl_lib represents a shell module",
+    "is_pkg": "Indicates if this verilog_rtl_library used the rtl_pkg rule",
+    "is_shell_of": "Indicates if this verilog_rtl_library represents a shell module",
     "gumi_path": "Short path to gumi file",
 })
+
+ToolEncapsulationInfo = provider(fields = {
+    "command": "The command invocation for a particular tool. Useful for aliases or redirection.",
+})
+
+def _toolencapsulation_impl(ctx):
+    return ToolEncapsulationInfo(command = ctx.build_setting_value)
+
+tool_encapsulation = rule(
+    implementation = _toolencapsulation_impl,
+    build_setting = config.string(flag = True),
+)
 
 def gather_shell_defines(shells):
     defines = {}
@@ -38,6 +50,7 @@ def get_transitive_srcs(srcs, deps, provider, attr_name, allow_other_outputs = F
     Args:
       srcs: a list of source files
       deps: a list of targets that are direct dependencies
+
     Returns:
       a collection of the transitive sources
     """
