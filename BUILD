@@ -45,21 +45,20 @@ buildifier(
 
 tool_encapsulation(
     name = "dv_unit_test_command",
-    build_setting_default = "xrun"
+    build_setting_default = "xrun",
 )
 
 tool_encapsulation(
     name = "rtl_cdc_test_command",
-    build_setting_default = "jg"
+    build_setting_default = "jg",
 )
 
 tool_encapsulation(
     name = "rtl_lint_test_command",
-    build_setting_default = "xrun"
+    build_setting_default = "xrun",
 )
 
 tool_encapsulation(
     name = "rtl_unit_test_command",
-    build_setting_default = "xrun"
+    build_setting_default = "xrun",
 )
-

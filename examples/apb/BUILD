@@ -1,10 +1,10 @@
-load("@//:rtl.bzl", "verilog_rtl_library", "rtl_lint_test", "rtl_pkg", "rtl_unit_test")
+load("@//:rtl.bzl", "rtl_unit_test", "verilog_rtl_library")
 
 verilog_rtl_library(
     name = "apb",
     modules = [
         "apb.sv",
-    ]
+    ],
 )
 
 verilog_rtl_library(

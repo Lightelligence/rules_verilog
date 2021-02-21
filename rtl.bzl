@@ -1,6 +1,6 @@
 """Rules to gather and compile RTL."""
 
-load(":verilog.bzl", "CUSTOM_SHELL", "ShellInfo", "VerilogInfo", "gather_shell_defines", "get_transitive_srcs", "ToolEncapsulationInfo")
+load(":verilog.bzl", "CUSTOM_SHELL", "ShellInfo", "ToolEncapsulationInfo", "VerilogInfo", "gather_shell_defines", "get_transitive_srcs")
 
 def create_flist_content(ctx, gumi_path, allow_library_discovery, no_synth = False):
     flist_content = []
@@ -382,11 +382,11 @@ rtl_unit_test = rule(
             allow_single_file = True,
             default = Label("@verilog_tools//vendors/cadence:rtl_unit_test_sim_template.sh"),
         ),
-        "_command_override" : attr.label(
+        "_command_override": attr.label(
             default = Label("@verilog_tools//:rtl_unit_test_command"),
-            doc = "Allows custom override of simulator command in the event of wrapping via modulefiles.\n" + 
-            "Example override in project's .bazelrc:\n" +
-            '  build --//:rtl_unit_test_command="runmod -t xrun --"',
+            doc = "Allows custom override of simulator command in the event of wrapping via modulefiles.\n" +
+                  "Example override in project's .bazelrc:\n" +
+                  '  build --//:rtl_unit_test_command="runmod -t xrun --"',
         ),
         "data": attr.label_list(
             allow_files = True,
@@ -494,11 +494,11 @@ rtl_lint_test = rule(
         "waiver_hack": attr.string(
             doc = "Lint waiver regex to hack around cases when HAL has formatting errors in xrun.log.xml that cause problems for our lint parser",
         ),
-        "_command_override" : attr.label(
+        "_command_override": attr.label(
             default = Label("@verilog_tools//:rtl_lint_test_command"),
-            doc = "Allows custom override of simulator command in the event of wrapping via modulefiles\n" + 
-            "Example override in project's .bazelrc:\n" +
-            '  build --//:rtl_lint_test_command="runmod -t xrun --"',
+            doc = "Allows custom override of simulator command in the event of wrapping via modulefiles\n" +
+                  "Example override in project's .bazelrc:\n" +
+                  '  build --//:rtl_lint_test_command="runmod -t xrun --"',
         ),
     },
     test = True,
@@ -613,11 +613,11 @@ rtl_cdc_test = rule(
             doc = "tcl commands to run in JG",
             mandatory = True,
         ),
-        "_command_override" : attr.label(
+        "_command_override": attr.label(
             default = Label("@verilog_tools//:rtl_cdc_test_command"),
-            doc = "Allows custom override of simulator command in the event of wrapping via modulefiles\n" + 
-            "Example override in project's .bazelrc:\n" +
-            '  build --//:rtl_cdc_test_command="runmod -t jg --"',
+            doc = "Allows custom override of simulator command in the event of wrapping via modulefiles\n" +
+                  "Example override in project's .bazelrc:\n" +
+                  '  build --//:rtl_cdc_test_command="runmod -t jg --"',
         ),
     },
     outputs = {
@@ -727,11 +727,11 @@ rtl_cdc_gui = rule(
             doc = "tcl commands to run in JG",
             mandatory = True,
         ),
-        "_command_override" : attr.label(
+        "_command_override": attr.label(
             default = Label("@verilog_tools//:rtl_cdc_test_command"),
-            doc = "Allows custom override of simulator command in the event of wrapping via modulefiles\n" + 
-            "Example override in project's .bazelrc:\n" +
-            '  build --//:rtl_cdc_test_command="runmod -t jg --"',
+            doc = "Allows custom override of simulator command in the event of wrapping via modulefiles\n" +
+                  "Example override in project's .bazelrc:\n" +
+                  '  build --//:rtl_cdc_test_command="runmod -t jg --"',
         ),
     },
     outputs = {
