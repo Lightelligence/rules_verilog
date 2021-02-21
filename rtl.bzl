@@ -508,24 +508,17 @@ def _rtl_cdc_test_impl(ctx):
     trans_flists = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_flists", allow_other_outputs = False)
     trans_srcs = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_sources", allow_other_outputs = True)
 
-    # The run script is pretty dumb, the tcl command file has the interesting stuff
-    executable_content = [
-        "#!/usr/bin/bash",
-        "set -e",
-        "{} \\".format(ctx._command_override[ToolEncapsulationInfo].command),
-        "  -cdc \\",
-        "  -no_gui \\",
-        "  -proj cdc_run\\",
-        "  {} \\".format(ctx.outputs.cdc_preamble_cmds.short_path),
-        "  {} \\".format(ctx.files.cmd_file[0].short_path),
-        "  {} \\".format(ctx.outputs.cdc_epilogue_cmds.short_path),
-        "  $@",
-        "! grep \"^\\[*ERROR\" cdc_run/jg.log",
-        "",
-    ]
-
-    executable_content.append("  $@")
-    executable_content.append("")
+    # The run script is simple, the tcl command file has the interesting stuff
+    ctx.actions.expand_template(
+        template = ctx.file.bash_template,
+        output = ctx.outputs.executable,
+        substitutions = {
+            "{CDC_COMMAND}": ctx._command_override[ToolEncapsulationInfo].command,
+            "{PREAMBLE_CMDS}": ctx.outputs.cdc_preamble_cmds.short_path,
+            "{CMD_FILE}": ctx.outputs.cdc_epilogue_cmds.short_path,
+            "{EPILOGUE_CMDS}": ctx.outputs.cdc_epilogue_cmds.short_path,
+        },
+    )
 
     flists = " ".join(["-f {}".format(f.short_path) for f in trans_flists.to_list()])
     defines = ["+{}".format(define) for define in ctx.attr.defines]
@@ -564,13 +557,10 @@ def _rtl_cdc_test_impl(ctx):
         "if {$return_value} {",
         "puts \"$num_violas errors\"",
         "}",
+        "if { $::VERILOG_RULES_GUI == 0 } {",
         "exit $return_value",
+        "}        ",
     ]
-
-    ctx.actions.write(
-        output = ctx.outputs.executable,
-        content = "\n".join(executable_content),
-    )
 
     runfiles = ctx.runfiles(files = [ctx.outputs.cdc_preamble_cmds, ctx.outputs.cdc_epilogue_cmds] + trans_srcs.to_list() + trans_flists.to_list() + ctx.files.cmd_file)
 
@@ -613,6 +603,10 @@ rtl_cdc_test = rule(
             doc = "tcl commands to run in JG",
             mandatory = True,
         ),
+        "bash_template": attr.label(
+            allow_single_file = True,
+            default = Label("//vendors/cadence:cdc.bash.template"),
+        ),
         "_command_override": attr.label(
             default = Label("@verilog_tools//:rtl_cdc_test_command"),
             doc = "Allows custom override of simulator command in the event of wrapping via modulefiles\n" +
@@ -626,148 +620,3 @@ rtl_cdc_test = rule(
     },
     test = True,
 )
-
-def _rtl_cdc_gui_impl(ctx):
-    trans_flists = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_flists", allow_other_outputs = False)
-    trans_srcs = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_sources", allow_other_outputs = True)
-
-    # The run script is pretty dumb, the tcl command file has the interesting stuff
-    executable_content = [
-        "#!/usr/bin/bash",
-        "{} \\".format(ctx._command_override[ToolEncapsulationInfo].command),
-        "  -cdc \\",
-        "  -proj cdc_run\\",
-        "  {} \\".format(ctx.outputs.cdc_preamble_cmds.short_path),
-        "  {} \\".format(ctx.files.cmd_file[0].short_path),
-        "  {} \\".format(ctx.outputs.cdc_epilogue_cmds.short_path),
-    ]
-
-    executable_content.append("  $@")
-    executable_content.append("")
-
-    flists = " ".join(["-f {}".format(f.short_path) for f in trans_flists.to_list()])
-    defines = ["+{}".format(define) for define in ctx.attr.defines]
-    for key, value in gather_shell_defines(ctx.attr.shells).items():
-        defines.append("+{}{}".format(key, value))
-
-    bbox_cmd = ""
-    if ctx.attr.bbox:
-        bbox_cmd = "-bbox_m {" + "{}".format(" ".join(ctx.attr.bbox)) + "}"
-
-    top_mod = ""
-    for dep in ctx.attr.deps:
-        if VerilogInfo in dep and dep[VerilogInfo].last_module:
-            top_mod = "  {}".format(dep[VerilogInfo].last_module.short_path)
-
-    if top_mod == "":
-        fail("rtl_cdc_gui could not determine top_module from last_module variable")
-
-    bbox_a_cmd = "-bbox_a 4096"
-
-    premable_cmds_content = [
-        "clear -all",
-        "set elaborate_single_run_mode True",
-        "analyze -sv09 +libext+.v+.sv {} +define+LINT+CDC+SKIP_PWR_GND{} {} {}".format(bbox_cmd, "".join(defines), flists, top_mod),
-        "elaborate {} -top {} {}".format(bbox_cmd, ctx.attr.top, bbox_a_cmd),
-        "check_cdc -check -rule -set {{treat_boundaries_as_unclocked true}}",
-    ]
-
-    epilogue_cmds_content = [
-        "set all_violas [check_cdc -list violations]",
-        "set num_violas [llength $all_violas]",
-        "for {set viola_idx 0} {$viola_idx < $num_violas} {incr viola_idx} {",
-        "puts \"[lindex $all_violas $viola_idx]\n\"",
-        "}",
-        "set return_value [expr {$num_violas > 0}]",
-    ]
-
-    ctx.actions.write(
-        output = ctx.outputs.executable,
-        content = "\n".join(executable_content),
-    )
-
-    runfiles = ctx.runfiles(files = [ctx.outputs.cdc_preamble_cmds, ctx.outputs.cdc_epilogue_cmds] + trans_srcs.to_list() + trans_flists.to_list() + ctx.files.cmd_file)
-
-    ctx.actions.write(
-        output = ctx.outputs.cdc_preamble_cmds,
-        content = "\n".join(premable_cmds_content),
-    )
-
-    ctx.actions.write(
-        output = ctx.outputs.cdc_epilogue_cmds,
-        content = "\n".join(epilogue_cmds_content),
-    )
-
-    return [
-        DefaultInfo(runfiles = runfiles),
-    ]
-
-rtl_cdc_gui = rule(
-    doc = "Run CDC",
-    implementation = _rtl_cdc_gui_impl,
-    attrs = {
-        "deps": attr.label_list(mandatory = True),
-        "shells": attr.label_list(),
-        "top": attr.string(
-            doc = "The name of the top module",
-            mandatory = True,
-        ),
-        "defines": attr.string_list(
-            allow_empty = True,
-            default = [],
-            doc = "List of `defines for this cdc run",
-        ),
-        "bbox": attr.string_list(
-            allow_empty = True,
-            default = [],
-            doc = "List of modules to black box",
-        ),
-        "cmd_file": attr.label(
-            allow_files = True,
-            doc = "tcl commands to run in JG",
-            mandatory = True,
-        ),
-        "_command_override": attr.label(
-            default = Label("@verilog_tools//:rtl_cdc_test_command"),
-            doc = "Allows custom override of simulator command in the event of wrapping via modulefiles\n" +
-                  "Example override in project's .bazelrc:\n" +
-                  '  build --//:rtl_cdc_test_command="runmod -t jg --"',
-        ),
-    },
-    outputs = {
-        "cdc_preamble_cmds": "%{name}_cdc_preamble_cmds.tcl",
-        "cdc_epilogue_cmds": "%{name}_cdc_epilogue_cmds.tcl",
-    },
-    executable = True,
-)
-
-def rtl_cdc(
-        name,
-        deps,
-        top,
-        cmd_file,
-        shells,
-        bbox,
-        defines,
-        tags = []):
-    """Create rules to run standard CDC test and to run in GUI mode"""
-    rtl_cdc_test(
-        name = name,
-        deps = deps,
-        top = top,
-        cmd_file = cmd_file,
-        shells = shells,
-        bbox = bbox,
-        defines = defines,
-        tags = tags,
-    )
-
-    rtl_cdc_gui(
-        name = "{}_gui".format(name),
-        deps = deps,
-        top = top,
-        cmd_file = cmd_file,
-        shells = shells,
-        bbox = bbox,
-        defines = defines,
-    )

@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+set -e
+
+use_gui=0
+
+while (( $# ))
+do
+    case $1 in
+        "--gui" )
+            use_gui=1
+            ;;
+        *)
+            ;;    
+    esac
+    shift
+done
+
+no_gui_flag="-no_gui"
+if [ $use_gui -eq 1 ]
+then
+    no_gui_flag=""
+fi
+
+runmod -t jg -- \
+  -cdc \
+  $no_gui_flag \
+  -proj cdc_run \
+  -define VERILOG_RULES_GUI $use_gui \
+  {PREAMBLE_CMDS} \
+  {CMD_FILE} \
+  {EPILOGUE_CMDS} \
+  $@
+! grep "^\[*ERROR" cdc_run/jg.log
