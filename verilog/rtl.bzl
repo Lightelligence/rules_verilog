@@ -360,7 +360,7 @@ verilog_rtl_unit_test = rule(
     test = True,
 )
 
-def _rtl_lint_test_impl(ctx):
+def _verilog_rtl_lint_test_impl(ctx):
     trans_flists = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_flists", allow_other_outputs = False)
 
     content = [
@@ -426,9 +426,9 @@ def _rtl_lint_test_impl(ctx):
         DefaultInfo(runfiles = runfiles),
     ]
 
-rtl_lint_test = rule(
+verilog_rtl_lint_test = rule(
     doc = "Run lint on target",
-    implementation = _rtl_lint_test_impl,
+    implementation = _verilog_rtl_lint_test_impl,
     attrs = {
         "deps": attr.label_list(mandatory = True),
         "rulefile": attr.label(
@@ -459,7 +459,7 @@ rtl_lint_test = rule(
             default = Label("@verilog_tools//:verilog_rtl_lint_test_command"),
             doc = "Allows custom override of simulator command in the event of wrapping via modulefiles\n" +
                   "Example override in project's .bazelrc:\n" +
-                  '  build --//:rtl_lint_test_command="runmod -t xrun --"',
+                  '  build --//:verilog_rtl_lint_test_command="runmod -t xrun --"',
         ),
     },
     test = True,
