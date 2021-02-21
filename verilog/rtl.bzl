@@ -290,7 +290,7 @@ verilog_rtl_flist = rule(
     #output_to_genfiles = True,
 )
 
-def _rtl_unit_test_impl(ctx):
+def _verilog_rtl_unit_test_impl(ctx):
     # out = ctx.outputs.executable
     trans_srcs = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_sources")
     srcs_list = trans_srcs.to_list()
@@ -332,10 +332,10 @@ def _rtl_unit_test_impl(ctx):
         runfiles = runfiles,
     )]
 
-rtl_unit_test = rule(
+verilog_rtl_unit_test = rule(
     # FIXME, this should eventually just be a specific use case of verilog_test
     doc = "Compiles and runs a small RTL library. Additional sim options may be passed after --",
-    implementation = _rtl_unit_test_impl,
+    implementation = _verilog_rtl_unit_test_impl,
     attrs = {
         "deps": attr.label_list(mandatory = True),
         "out": attr.output(),
@@ -347,7 +347,7 @@ rtl_unit_test = rule(
             default = Label("@verilog_tools//:verilog_rtl_unit_test_command"),
             doc = "Allows custom override of simulator command in the event of wrapping via modulefiles.\n" +
                   "Example override in project's .bazelrc:\n" +
-                  '  build --//:rtl_unit_test_command="runmod -t xrun --"',
+                  '  build --//:verilog_rtl_unit_test_command="runmod -t xrun --"',
         ),
         "data": attr.label_list(
             allow_files = True,
