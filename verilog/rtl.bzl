@@ -64,7 +64,7 @@ def _verilog_rtl_library_impl(ctx):
                 fail("verilog_rtl_library may not depend on shells. Shells should only be included at top-level builds")
         for src in srcs:
             if "_shell" in src.basename:
-                fail("Shell files should not be declared in an verilog_rtl_library. Use a verilog_rtl_shell_static or verilog_rtl_shell_dynamic instead. {} is declared in {}".format(src, ctx.label))
+                fail("Shell files should not be declared in an verilog_rtl_library. Use a verilog_rtl_shell instead. {} is declared in {}".format(src, ctx.label))
 
     gumi_path = ""
     if ctx.attr.enable_gumi:
@@ -214,12 +214,12 @@ def verilog_rtl_pkg(
         enable_gumi = False,
     )
 
-def verilog_rtl_shell_static(
+def verilog_rtl_shell(
         name,
         module_to_shell_name,
         shell_module_label,
         deps = []):
-    """A prevously created RTL shell that is version controlled.
+    """A RTL shell that has the same ports as another module, but limited functionality.
 
     Use when a shell needs to be hand-edited after generation If
     module_to_shell_name == 'custom', then all rules regarding shells are
@@ -237,31 +237,6 @@ def verilog_rtl_shell_static(
         no_synth = True,
         enable_gumi = False,
         deps = deps,
-    )
-
-def verilog_rtl_shell_dynamic(
-        name,
-        module_to_shell_name,
-        shell_suffix = "",
-        deps = []):
-    """Create a shell on the fly."""
-    # if module_to_shell_name + "_shell" + shell_suffix != name:
-    #     fail("Shell name should be original module name plus shell and suffix")
-
-    template_path = "$$PROJ_DIR/digital/rtl/shells/template" + shell_suffix
-    native.genrule(
-        name = "_{}".format(name),
-        outs = ["{}.sv".format(name)],
-        srcs = deps,
-        cmd = "cd $(@D); export LC_ALL=en_US.utf-8; export LANG=en_US.utf-8; cookiecutter --no-input {} module_to_shell={} shell_suffix={}".format(template_path, module_to_shell_name, shell_suffix),
-        output_to_bindir = True,
-    )
-    verilog_rtl_library(
-        name = name,
-        modules = [":_{}".format(name)],
-        is_shell_of = module_to_shell_name,
-        no_synth = True,
-        enable_gumi = False,
     )
 
 def _verilog_rtl_flist_impl(ctx):

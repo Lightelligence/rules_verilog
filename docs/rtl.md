@@ -169,36 +169,15 @@ A single rtl pkg file.
 | deps |  <p align="center"> - </p>   |  <code>[]</code> |
 
 
-<a name="#verilog_rtl_shell_dynamic"></a>
+<a name="#verilog_rtl_shell"></a>
 
-## verilog_rtl_shell_dynamic
-
-<pre>
-verilog_rtl_shell_dynamic(<a href="#verilog_rtl_shell_dynamic-name">name</a>, <a href="#verilog_rtl_shell_dynamic-module_to_shell_name">module_to_shell_name</a>, <a href="#verilog_rtl_shell_dynamic-shell_suffix">shell_suffix</a>, <a href="#verilog_rtl_shell_dynamic-deps">deps</a>)
-</pre>
-
-Create a shell on the fly.
-
-**PARAMETERS**
-
-
-| Name  | Description | Default Value |
-| :-------------: | :-------------: | :-------------: |
-| name |  <p align="center"> - </p>   |  none |
-| module_to_shell_name |  <p align="center"> - </p>   |  none |
-| shell_suffix |  <p align="center"> - </p>   |  <code>""</code> |
-| deps |  <p align="center"> - </p>   |  <code>[]</code> |
-
-
-<a name="#verilog_rtl_shell_static"></a>
-
-## verilog_rtl_shell_static
+## verilog_rtl_shell
 
 <pre>
-verilog_rtl_shell_static(<a href="#verilog_rtl_shell_static-name">name</a>, <a href="#verilog_rtl_shell_static-module_to_shell_name">module_to_shell_name</a>, <a href="#verilog_rtl_shell_static-shell_module_label">shell_module_label</a>, <a href="#verilog_rtl_shell_static-deps">deps</a>)
+verilog_rtl_shell(<a href="#verilog_rtl_shell-name">name</a>, <a href="#verilog_rtl_shell-module_to_shell_name">module_to_shell_name</a>, <a href="#verilog_rtl_shell-shell_module_label">shell_module_label</a>, <a href="#verilog_rtl_shell-deps">deps</a>)
 </pre>
 
-A prevously created RTL shell that is version controlled.
+A RTL shell that has the same ports as another module, but limited functionality.
 
 Use when a shell needs to be hand-edited after generation If
 module_to_shell_name == 'custom', then all rules regarding shells are
