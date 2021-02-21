@@ -19,36 +19,12 @@ Merge all flists into a single top-level flist.
 | deps |  -   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
 
 
-<a name="#rtl_cdc_gui"></a>
-
-## rtl_cdc_gui
-
-<pre>
-rtl_cdc_gui(<a href="#rtl_cdc_gui-name">name</a>, <a href="#rtl_cdc_gui-bbox">bbox</a>, <a href="#rtl_cdc_gui-cmd_file">cmd_file</a>, <a href="#rtl_cdc_gui-defines">defines</a>, <a href="#rtl_cdc_gui-deps">deps</a>, <a href="#rtl_cdc_gui-shells">shells</a>, <a href="#rtl_cdc_gui-top">top</a>)
-</pre>
-
-Run CDC
-
-**ATTRIBUTES**
-
-
-| Name  | Description | Type | Mandatory | Default |
-| :-------------: | :-------------: | :-------------: | :-------------: | :-------------: |
-| name |  A unique name for this target.   | <a href="https://bazel.build/docs/build-ref.html#name">Name</a> | required |  |
-| bbox |  List of modules to black box   | List of strings | optional | [] |
-| cmd_file |  tcl commands to run in JG   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | required |  |
-| defines |  List of <code>defines for this cdc run   | List of strings | optional | [] |
-| deps |  -   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | required |  |
-| shells |  -   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
-| top |  The name of the top module   | String | required |  |
-
-
 <a name="#rtl_cdc_test"></a>
 
 ## rtl_cdc_test
 
 <pre>
-rtl_cdc_test(<a href="#rtl_cdc_test-name">name</a>, <a href="#rtl_cdc_test-bbox">bbox</a>, <a href="#rtl_cdc_test-cmd_file">cmd_file</a>, <a href="#rtl_cdc_test-defines">defines</a>, <a href="#rtl_cdc_test-deps">deps</a>, <a href="#rtl_cdc_test-shells">shells</a>, <a href="#rtl_cdc_test-top">top</a>)
+rtl_cdc_test(<a href="#rtl_cdc_test-name">name</a>, <a href="#rtl_cdc_test-bash_template">bash_template</a>, <a href="#rtl_cdc_test-bbox">bbox</a>, <a href="#rtl_cdc_test-cmd_file">cmd_file</a>, <a href="#rtl_cdc_test-defines">defines</a>, <a href="#rtl_cdc_test-deps">deps</a>, <a href="#rtl_cdc_test-shells">shells</a>, <a href="#rtl_cdc_test-top">top</a>)
 </pre>
 
 Run CDC
@@ -59,6 +35,7 @@ Run CDC
 | Name  | Description | Type | Mandatory | Default |
 | :-------------: | :-------------: | :-------------: | :-------------: | :-------------: |
 | name |  A unique name for this target.   | <a href="https://bazel.build/docs/build-ref.html#name">Name</a> | required |  |
+| bash_template |  -   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | //vendors/cadence:cdc.bash.template |
 | bbox |  List of modules to black box   | List of strings | optional | [] |
 | cmd_file |  tcl commands to run in JG   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | required |  |
 | defines |  List of <code>defines for this cdc run   | List of strings | optional | [] |
@@ -186,31 +163,6 @@ create_flist_content(<a href="#create_flist_content-ctx">ctx</a>, <a href="#crea
 | gumi_path |  <p align="center"> - </p>   |  none |
 | allow_library_discovery |  <p align="center"> - </p>   |  none |
 | no_synth |  <p align="center"> - </p>   |  <code>False</code> |
-
-
-<a name="#rtl_cdc"></a>
-
-## rtl_cdc
-
-<pre>
-rtl_cdc(<a href="#rtl_cdc-name">name</a>, <a href="#rtl_cdc-deps">deps</a>, <a href="#rtl_cdc-top">top</a>, <a href="#rtl_cdc-cmd_file">cmd_file</a>, <a href="#rtl_cdc-shells">shells</a>, <a href="#rtl_cdc-bbox">bbox</a>, <a href="#rtl_cdc-defines">defines</a>, <a href="#rtl_cdc-tags">tags</a>)
-</pre>
-
-Create rules to run standard CDC test and to run in GUI mode
-
-**PARAMETERS**
-
-
-| Name  | Description | Default Value |
-| :-------------: | :-------------: | :-------------: |
-| name |  <p align="center"> - </p>   |  none |
-| deps |  <p align="center"> - </p>   |  none |
-| top |  <p align="center"> - </p>   |  none |
-| cmd_file |  <p align="center"> - </p>   |  none |
-| shells |  <p align="center"> - </p>   |  none |
-| bbox |  <p align="center"> - </p>   |  none |
-| defines |  <p align="center"> - </p>   |  none |
-| tags |  <p align="center"> - </p>   |  <code>[]</code> |
 
 
 <a name="#rtl_pkg"></a>
