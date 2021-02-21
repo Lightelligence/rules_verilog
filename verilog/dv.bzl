@@ -3,14 +3,14 @@
 load(":verilog.bzl", "VerilogInfo", "flists_to_arguments", "gather_shell_defines", "get_transitive_srcs")
 
 DVTestInfo = provider(fields = {
-    "sim_opts": "Simulation options",
-    "uvm_testname": "UVM Test Name",
-    "vcomp": "Label of type verilog_dv_tb",
-    "tags": "Tags",
+    "sim_opts": "Simulation options to carry forward.",
+    "uvm_testname": "UVM Test Name; passed to simulator via plusarg +UVM_TESTNAME.",
+    "vcomp": "The verilog compile associated with this test. Must be a Label of type verilog_dv_tb.",
+    "tags": "Additional tags to be able to filter in downstream simulation launching tool.",
 })
 
 DVTBInfo = provider(fields = {
-    "ccf": "Coverage config file",
+    "ccf": "Coverage config file.",
 })
 
 def _verilog_dv_test_cfg_impl(ctx):

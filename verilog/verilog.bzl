@@ -3,20 +3,20 @@
 CUSTOM_SHELL = "custom"
 
 VerilogInfo = provider(fields = {
-    "transitive_sources": "Source files",
-    "transitive_flists": "Generated or built flists",
-    "transitive_dpi": "Shared libraries to link in via dpi",
-    "last_module": "Last module specified is assumed top",
+    "transitive_sources": "All source source files needed by a target. This flow is not currently setup to do partioned compile, so all files need to be carried through to the final step for compilation as a whole.",
+    "transitive_flists": "All flists which specify ordering of transitive sources.",
+    "transitive_dpi": "Shared libraries (only .so extension allowed) to link in via the DPI for testbenches.",
+    "last_module": "This is a convenience accessor. The last module specified is assumed be the top module in a design. This is frequently needed by downstream tools.",
 })
 
 ShellInfo = provider(fields = {
-    "is_pkg": "Indicates if this verilog_rtl_library used the verilog_rtl_pkg rule",
-    "is_shell_of": "Indicates if this verilog_rtl_library represents a shell module",
-    "gumi_path": "Short path to gumi file",
+    "is_pkg": "Indicates if this verilog_rtl_library used the verilog_rtl_pkg rule. Additional restrictions are imposed on packages to encourage a clean dependency tree.",
+    "is_shell_of": "If non-empty, indicates this verilog_rtl_library represents a shell of another module",
+    "gumi_path": "The bazel short_path to a gumi file. Used when generating a verilog_rtl_library's associated flist.",
 })
 
 ToolEncapsulationInfo = provider(fields = {
-    "command": "The command invocation for a particular tool. Useful for aliases or redirection.",
+    "command": "The command invocation for a particular tool. Useful for aliases, redirection, and wrappers.",
 })
 
 def _toolencapsulation_impl(ctx):
