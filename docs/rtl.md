@@ -135,17 +135,23 @@ Compiles and runs a small RTL library. Additional sim options may be passed afte
 verilog_rtl_pkg(<a href="#verilog_rtl_pkg-name">name</a>, <a href="#verilog_rtl_pkg-direct">direct</a>, <a href="#verilog_rtl_pkg-no_synth">no_synth</a>, <a href="#verilog_rtl_pkg-deps">deps</a>)
 </pre>
 
-A single rtl pkg file.
+A single Systemverilog package.
+
+This rule is a specialized case of verilog_rtl_library. Systemverilog
+packages should be placed into their own rule instance to limit cross
+dependencies. In general, a block may depend on another block's package but
+should not need to depend on all the modules in the block.
+
 
 **PARAMETERS**
 
 
 | Name  | Description | Default Value |
 | :-------------: | :-------------: | :-------------: |
-| name |  <p align="center"> - </p>   |  none |
-| direct |  <p align="center"> - </p>   |  none |
-| no_synth |  <p align="center"> - </p>   |  <code>False</code> |
-| deps |  <p align="center"> - </p>   |  <code>[]</code> |
+| name |  A unique name for this target.   |  none |
+| direct |  The Systemverilog file containing the package.<br><br>  See verilog_rtl_library::direct.   |  none |
+| no_synth |  Default False.<br><br>  See verilog_rtl_library::no_synth.   |  <code>False</code> |
+| deps |  Other packages this target is dependent on.<br><br>  See verilog_rtl_library::deps.   |  <code>[]</code> |
 
 
 <a name="#verilog_rtl_shell"></a>
@@ -156,12 +162,12 @@ A single rtl pkg file.
 verilog_rtl_shell(<a href="#verilog_rtl_shell-name">name</a>, <a href="#verilog_rtl_shell-module_to_shell_name">module_to_shell_name</a>, <a href="#verilog_rtl_shell-shell_module_label">shell_module_label</a>, <a href="#verilog_rtl_shell-deps">deps</a>)
 </pre>
 
-A RTL shell that has the same ports as another module, but limited functionality.
+A RTL shell has the same ports as another module.
 
-Use when a shell needs to be hand-edited after generation If
-module_to_shell_name == 'custom', then all rules regarding shells are
-ignored and gumi shell defines are not thrown, allowing the user great
-power.
+A 'shell' is similar to a 'stub' (empty module), but a shell may contain
+limited functionality. Frequent uses include:
+  * Blackboxing hierarchy that will not be the target of testing
+  * Replacing functionality with a simpler model (simulation-only memory models)
 
 
 **PARAMETERS**
@@ -169,9 +175,9 @@ power.
 
 | Name  | Description | Default Value |
 | :-------------: | :-------------: | :-------------: |
-| name |  <p align="center"> - </p>   |  none |
-| module_to_shell_name |  <p align="center"> - </p>   |  none |
-| shell_module_label |  <p align="center"> - </p>   |  none |
-| deps |  <p align="center"> - </p>   |  <code>[]</code> |
+| name |  A unique name for this target.   |  none |
+| module_to_shell_name |  The name of the module that will be replaced.<br><br>  When a downstream test uses this 'shell', a gumi define will be created using this name.<br><br>  When a shell needs to be hand-edited after generation If   module_to_shell_name == 'custom', then all rules regarding shells are   ignored and gumi shell defines are not thrown, allowing the user great   power.   |  none |
+| shell_module_label |  The Label or file containing the shell.<br><br>  See verilog_rtl_library::no_synth.   |  none |
+| deps |  Other packages this target is dependent on.<br><br>  In general. shells should avoid having dependencies. Exceptions include   necessary packages and possible a DV model to implement functional   behavior.<br><br>  See verilog_rtl_library::deps.   |  <code>[]</code> |
 
 

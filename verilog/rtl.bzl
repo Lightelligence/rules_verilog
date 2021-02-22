@@ -22,6 +22,9 @@ def _create_flist_content(ctx, gumi_path, allow_library_discovery, no_synth = Fa
 
         This is an extra precaution to ensure that nonsynthesizable libraries
         are not passed to the synthesis tool.
+
+    Returns:
+      List of strings representing flist content.
     """
     flist_content = []
 
@@ -241,7 +244,25 @@ def verilog_rtl_pkg(
         direct,
         no_synth = False,
         deps = []):
-    """A single rtl pkg file."""
+    """A single Systemverilog package.
+
+    This rule is a specialized case of verilog_rtl_library. Systemverilog
+    packages should be placed into their own rule instance to limit cross
+    dependencies. In general, a block may depend on another block's package but
+    should not need to depend on all the modules in the block.
+
+    Args:
+      name: A unique name for this target.
+      direct: The Systemverilog file containing the package.
+    
+        See verilog_rtl_library::direct.
+      no_synth: Default False.
+
+        See verilog_rtl_library::no_synth.
+      deps: Other packages this target is dependent on.
+    
+        See verilog_rtl_library::deps.
+    """
     verilog_rtl_library(
         name = name,
         direct = direct,
@@ -256,13 +277,33 @@ def verilog_rtl_shell(
         module_to_shell_name,
         shell_module_label,
         deps = []):
-    """A RTL shell that has the same ports as another module, but limited functionality.
+    """A RTL shell has the same ports as another module.
 
-    Use when a shell needs to be hand-edited after generation If
-    module_to_shell_name == 'custom', then all rules regarding shells are
-    ignored and gumi shell defines are not thrown, allowing the user great
-    power.
+    A 'shell' is similar to a 'stub' (empty module), but a shell may contain
+    limited functionality. Frequent uses include:
+      * Blackboxing hierarchy that will not be the target of testing
+      * Replacing functionality with a simpler model (simulation-only memory models)
 
+    Args:
+      name: A unique name for this target.
+      module_to_shell_name: The name of the module that will be replaced.
+        
+        When a downstream test uses this 'shell', a gumi define will be created using this name.
+        
+        When a shell needs to be hand-edited after generation If
+        module_to_shell_name == 'custom', then all rules regarding shells are
+        ignored and gumi shell defines are not thrown, allowing the user great
+        power.
+      shell_module_label: The Label or file containing the shell.
+
+        See verilog_rtl_library::no_synth.
+      deps: Other packages this target is dependent on.
+
+        In general. shells should avoid having dependencies. Exceptions include
+        necessary packages and possible a DV model to implement functional
+        behavior.
+
+        See verilog_rtl_library::deps.
     """
     if not name.startswith(module_to_shell_name) and module_to_shell_name != CUSTOM_SHELL:
         fail("Shell name should start with the original module name: shell name='{}' original module='{}'".format(name, module_to_shell_name))
