@@ -2,6 +2,11 @@
 
 load(":verilog.bzl", "CUSTOM_SHELL", "ShellInfo", "ToolEncapsulationInfo", "VerilogInfo", "gather_shell_defines", "get_transitive_srcs")
 
+_SHELLS_DOC = """List of verilog_rtl_shell Labels.
+For each Label, a gumi define will be placed on the command line to use this shell instead of the original module.
+This requires that the original module was instantiated using `gumi_<module_name> instead of just <module_name>."""
+
+
 def _create_flist_content(ctx, gumi_path, allow_library_discovery, no_synth = False):
     """Create the content of a '.f' file.
 
@@ -403,9 +408,7 @@ verilog_rtl_unit_test = rule(
             doc = "Non-verilog dependencies. Useful when reading in data files as stimulus/prediction.",
         ),
         "shells": attr.label_list(
-            doc = "List of verilog_rtl_shell Labels.\n" +
-            "For each Label, a gumi define will be placed on the command line to use this shell instead of the original module.\n" +
-            "This requires that the original module was instantiated using `gumi_<module_name> instead of just <module_name>.",
+            doc = _SHELLS_DOC,
         ),
         "pre_flist_args": attr.string_list(
             doc = "Additional command line arguments to be placed after the simulator binary but before the flist arguments.\n" +
@@ -487,33 +490,54 @@ def _verilog_rtl_lint_test_impl(ctx):
     ]
 
 verilog_rtl_lint_test = rule(
-    doc = "Run lint on target",
+    doc = """Compile and run lint on target
+
+    This rule was written for Cadence HAL to be run under xcelium. As such, it
+    is not entirely generic. It also uses a log post-processor
+    (lint_parser_hal.py) to allow for easier waiving of warnings.
+
+    The DUT must have no unwaived warning/errors in order for this rule to
+    pass. The intended philosophy is for blocks to maintain a clean lint status
+    throughout the lifecycle of the project, not to run lint as a checklist
+    item towards the end of the project.
+
+    """,
     implementation = _verilog_rtl_lint_test_impl,
     attrs = {
-        "deps": attr.label_list(mandatory = True),
+        "deps": attr.label_list(
+            mandatory = True,
+            doc = "Other verilog libraries this target is dependent upon.\n" +
+            "All Labels specified here must provide a VerilogInfo provider.",
+        ),
         "rulefile": attr.label(
             allow_single_file = True,
             mandatory = True,
+            doc = "The Cadence rulefile for HAL.\n" +
+            "Suggested one per project.\n" +
+            "Example: https://github.com/freecores/t6507lp/blob/ca7d7ea779082900699310db459a544133fe258a/lint/run/hal.def",
         ),
-        "shells": attr.label_list(),
+        "shells": attr.label_list(
+            doc = _SHELLS_DOC
+        ),
         "top": attr.string(
-            doc = "The name of the top module",
+            doc = "The name of the top module.",
             mandatory = True,
         ),
         "design_info": attr.label_list(
             allow_files = True,
-            doc = "A design info file to add additional lint rule/waivers",
+            doc = "A Cadence design info file to add additional lint rule/waivers",
         ),
         "defines": attr.string_dict(
             allow_empty = True,
-            doc = "List of `defines for this lint run",
+            doc = "List of additional `defines for this lint run",
         ),
         "lint_parser": attr.label(
             allow_files = True,
             default = "@verilog_tools//:lint_parser_hal",
+            doc = "Post processor for lint logs allowing for easier waiving of warnings.",
         ),
         "waiver_hack": attr.string(
-            doc = "Lint waiver regex to hack around cases when HAL has formatting errors in xrun.log.xml that cause problems for our lint parser",
+            doc = "Lint waiver python regex to hack around cases when HAL has formatting errors in xrun.log.xml that cause problems for our lint parser",
         ),
         "_command_override": attr.label(
             default = Label("@verilog_tools//:verilog_rtl_lint_test_command"),
@@ -600,11 +624,17 @@ def _verilog_rtl_cdc_test_impl(ctx):
     ]
 
 verilog_rtl_cdc_test = rule(
-    doc = "Run CDC",
+    doc = "Run Jaspergold CDC on a verilog_rtl_library.",
     implementation = _verilog_rtl_cdc_test_impl,
     attrs = {
-        "deps": attr.label_list(mandatory = True),
-        "shells": attr.label_list(),
+        "deps": attr.label_list(
+            mandatory = True,
+            doc = "Other verilog libraries this target is dependent upon.\n" +
+            "All Labels specified here must provide a VerilogInfo provider.",
+        ),
+        "shells": attr.label_list(
+            doc = _SHELLS_DOC,
+        ),
         "top": attr.string(
             doc = "The name of the top module",
             mandatory = True,
@@ -612,7 +642,7 @@ verilog_rtl_cdc_test = rule(
         "defines": attr.string_list(
             allow_empty = True,
             default = [],
-            doc = "List of `defines for this cdc run",
+            doc = "List of additinal `defines for this cdc run",
         ),
         "bbox": attr.string_list(
             allow_empty = True,
@@ -621,12 +651,13 @@ verilog_rtl_cdc_test = rule(
         ),
         "cmd_file": attr.label(
             allow_files = True,
-            doc = "tcl commands to run in JG",
+            doc = "A tcl file containing commands to run in JG",
             mandatory = True,
         ),
         "bash_template": attr.label(
             allow_single_file = True,
             default = Label("//vendors/cadence:verilog_rtl_cdc_test.sh.template"),
+            doc = "The template for the generated bash script which will run the case.",
         ),
         "_command_override": attr.label(
             default = Label("@verilog_tools//:verilog_verilog_rtl_cdc_test_command"),
