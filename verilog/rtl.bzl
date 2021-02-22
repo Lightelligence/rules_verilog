@@ -319,7 +319,6 @@ def verilog_rtl_shell(
     )
 
 def _verilog_rtl_unit_test_impl(ctx):
-    # out = ctx.outputs.executable
     trans_srcs = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_sources")
     srcs_list = trans_srcs.to_list()
     flists = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_flists")
