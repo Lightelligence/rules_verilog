@@ -175,7 +175,7 @@ verilog_rtl_library = rule(
     attrs = {
         "headers": attr.label_list(
             allow_files = True,
-            doc = "Files that will be \`included into other files.\n" +
+            doc = "Files that will be included into other files.\n" +
             "A '+incdir' flag will be added for each source file's directory.",
         ),
         "modules": attr.label_list(
@@ -360,12 +360,26 @@ def _verilog_rtl_unit_test_impl(ctx):
     )]
 
 verilog_rtl_unit_test = rule(
-    # FIXME, this should eventually just be a specific use case of verilog_test
-    doc = "Compiles and runs a small RTL library. Additional sim options may be passed after --",
+    # TODO: this could eventually be a specific use case of verilog_test
+    doc = """Compile and simulate a verilog_rtl_library.
+
+    Allows a designer to write small unit/directed tests which can be included in regression.
+
+    This rule is capable of running SVUnit regressions as well. See ut_sim_template attribute.
+
+    Additional sim options may be passed after --.
+
+    Typically, an additional verilog_rtl_library containing 'unit_test_top.sv'
+    is created. This unit_test_top will be dependent on the DUT top, and will
+    be the only dep provided to verilog_rtl_unit_test.
+    """,
     implementation = _verilog_rtl_unit_test_impl,
     attrs = {
-        "deps": attr.label_list(mandatory = True),
-        "out": attr.output(),
+        "deps": attr.label_list(
+            mandatory = True,
+            doc = "Other verilog libraries this target is dependent upon.\n" +
+            "All Labels specified here must provide a VerilogInfo provider.",
+        ),
         "ut_sim_template": attr.label(
             allow_single_file = True,
             default = Label("@verilog_tools//vendors/cadence:verilog_rtl_unit_test.sh.template"),
@@ -386,11 +400,22 @@ verilog_rtl_unit_test = rule(
         ),
         "data": attr.label_list(
             allow_files = True,
-            doc = "Non-verilog dependencies",
+            doc = "Non-verilog dependencies. Useful when reading in data files as stimulus/prediction.",
         ),
-        "shells": attr.label_list(),
-        "pre_flist_args": attr.string_list(doc = "commands and arguments before flist arguments"),
-        "post_flist_args": attr.string_list(doc = "commands and arguments after flist arguments"),
+        "shells": attr.label_list(
+            doc = "List of verilog_rtl_shell Labels.\n" +
+            "For each Label, a gumi define will be placed on the command line to use this shell instead of the original module.\n" +
+            "This requires that the original module was instantiated using `gumi_<module_name> instead of just <module_name>.",
+        ),
+        "pre_flist_args": attr.string_list(
+            doc = "Additional command line arguments to be placed after the simulator binary but before the flist arguments.\n" +
+            "See ut_sim_template attribute for exact layout." + 
+            "For defines to have effect, they must be declared in pre_flist_args not post_flist_args.",
+        ),
+        "post_flist_args": attr.string_list(
+            doc = "Additional command line arguments to be placed after the flist arguments\n" +
+            "See ut_sim_template attribute for exact layout.",
+        ),
     },
     test = True,
 )
