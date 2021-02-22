@@ -318,32 +318,6 @@ def verilog_rtl_shell(
         deps = deps,
     )
 
-def _verilog_rtl_flist_impl(ctx):
-    num_srcs = len(ctx.files.srcs)
-    if num_srcs != 1:
-        fail("verilog_rtl_flist rule may only have single source file: {}".format(ctx))
-
-    # Ideally it would be nice to grab all the files inside an flist, but this could be recursive, so skipping this for now.
-    trans_srcs = depset([])
-    trans_flists = depset(ctx.files.srcs)
-
-    return [
-        VerilogInfo(transitive_sources = trans_srcs, transitive_flists = trans_flists, transitive_dpi = depset()),
-        DefaultInfo(files = depset(trans_srcs.to_list() + trans_flists.to_list())),
-    ]
-
-verilog_rtl_flist = rule(
-    doc = "Create an RTL Library from an existing flist file. Recommended only for vendor supplied IP. In general, use the verilog_rtl_library rule.",
-    implementation = _verilog_rtl_flist_impl,
-    attrs = {
-        "srcs": attr.label_list(
-            allow_files = True,
-            mandatory = True,
-        ),
-    },
-    #output_to_genfiles = True,
-)
-
 def _verilog_rtl_unit_test_impl(ctx):
     # out = ctx.outputs.executable
     trans_srcs = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_sources")
