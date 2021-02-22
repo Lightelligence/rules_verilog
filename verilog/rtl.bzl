@@ -72,7 +72,7 @@ def _verilog_rtl_library_impl(ctx):
         # FIXME opu_tx_rx is failing this check
         # for dep in ctx.attr.deps:
         #     if ShellInfo in dep and not dep[ShellInfo].is_pkg:
-        #         fail("verilog_rtl_pkg may only depend on other rtl_pkgs")
+        #         fail("verilog_rtl_pkg may only depend on other verilog_rtl_pkg instances")
         pass
     else:
         for src in srcs:
@@ -580,7 +580,7 @@ def _verilog_rtl_cdc_test_impl(ctx):
             top_mod = "  {}".format(dep[VerilogInfo].last_module.short_path)
 
     if top_mod == "":
-        fail("rtl_cdc_gui could not determine top_module from last_module variable")
+        fail("verilog_rtl_cdc_test could not determine top_module from last_module variable")
 
     bbox_a_cmd = "-bbox_a 4096"
 
