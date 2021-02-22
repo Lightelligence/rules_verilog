@@ -3,6 +3,26 @@
 load(":verilog.bzl", "CUSTOM_SHELL", "ShellInfo", "ToolEncapsulationInfo", "VerilogInfo", "gather_shell_defines", "get_transitive_srcs")
 
 def _create_flist_content(ctx, gumi_path, allow_library_discovery, no_synth = False):
+    """Create the content of a '.f' file.
+
+    Args:
+      gumi_path: The path to the dynamically created gumi file to include.
+
+        The gumi file is put directly on the command line to ensure that the
+        defines are always used.
+      allow_library_discovery: When false, modules are placed directly on the command line.
+
+        Preference is to use the -y (modules in this directory can be found by
+        searching for a file with the same name) and -v (file is a library file
+        containing multiple modules) flags. Some tools, e.g. Genus, do not
+        handle -y correctly when invoked many times. As a workaround for these
+        tools, setting allow_library_discovery to false will put all module
+        files and library files directly onto the command line.
+      no_synth: When true, filter any target that sets no_synth=True
+
+        This is an extra precaution to ensure that nonsynthesizable libraries
+        are not passed to the synthesis tool.
+    """
     flist_content = []
 
     # Using dirname may result in bazel-out included in path
