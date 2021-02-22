@@ -2,7 +2,35 @@
 
 load(":verilog.bzl", "CUSTOM_SHELL", "ShellInfo", "ToolEncapsulationInfo", "VerilogInfo", "gather_shell_defines", "get_transitive_srcs")
 
-def create_flist_content(ctx, gumi_path, allow_library_discovery, no_synth = False):
+_SHELLS_DOC = """List of verilog_rtl_shell Labels.
+For each Label, a gumi define will be placed on the command line to use this shell instead of the original module.
+This requires that the original module was instantiated using `gumi_<module_name> instead of just <module_name>."""
+
+
+def _create_flist_content(ctx, gumi_path, allow_library_discovery, no_synth = False):
+    """Create the content of a '.f' file.
+
+    Args:
+      gumi_path: The path to the dynamically created gumi file to include.
+
+        The gumi file is put directly on the command line to ensure that the
+        defines are always used.
+      allow_library_discovery: When false, modules are placed directly on the command line.
+
+        Preference is to use the -y (modules in this directory can be found by
+        searching for a file with the same name) and -v (file is a library file
+        containing multiple modules) flags. Some tools, e.g. Genus, do not
+        handle -y correctly when invoked many times. As a workaround for these
+        tools, setting allow_library_discovery to false will put all module
+        files and library files directly onto the command line.
+      no_synth: When true, filter any target that sets no_synth=True
+
+        This is an extra precaution to ensure that nonsynthesizable libraries
+        are not passed to the synthesis tool.
+
+    Returns:
+      List of strings representing flist content.
+    """
     flist_content = []
 
     # Using dirname may result in bazel-out included in path
@@ -44,7 +72,7 @@ def _verilog_rtl_library_impl(ctx):
         # FIXME opu_tx_rx is failing this check
         # for dep in ctx.attr.deps:
         #     if ShellInfo in dep and not dep[ShellInfo].is_pkg:
-        #         fail("verilog_rtl_pkg may only depend on other rtl_pkgs")
+        #         fail("verilog_rtl_pkg may only depend on other verilog_rtl_pkg instances")
         pass
     else:
         for src in srcs:
@@ -103,7 +131,7 @@ def _verilog_rtl_library_impl(ctx):
     elif not (ctx.attr.gumi_file_override == None):
         gumi_path = ctx.file.gumi_file_override.short_path
 
-    flist_content = create_flist_content(ctx, gumi_path = gumi_path, allow_library_discovery = True)
+    flist_content = _create_flist_content(ctx, gumi_path = gumi_path, allow_library_discovery = True)
 
     last_module = None
     for m in ctx.files.modules:
@@ -147,51 +175,68 @@ def _verilog_rtl_library_impl(ctx):
     ]
 
 verilog_rtl_library = rule(
-    doc = "An RTL Library. Creates a generated flist file from a list of source files.",
+    doc = "A collection of RTL design files. Creates a generated flist file to be included later in a compile.",
     implementation = _verilog_rtl_library_impl,
     attrs = {
         "headers": attr.label_list(
             allow_files = True,
-            doc = "Files that should nomally be `included into other files. (i.e. covered by +incdir)",
+            doc = "Files that will be included into other files.\n" +
+            "A '+incdir' flag will be added for each source file's directory.",
         ),
         "modules": attr.label_list(
             allow_files = True,
-            doc = "Files containing single modules that may be found via library (i.e. covered by -y)",
+            doc = "Files containing a single module which matches the filename may be found via library.\n" +
+            "A '-y' flag will be added for each source file's directory.\n" +
+            "This is the preferred mechanism for specifying RTL modules.",
         ),
         "lib_files": attr.label_list(
             allow_files = True,
-            doc = "Verilog library files containing multiple modules (i.e. covered by -v)",
+            doc = "Verilog library files containing multiple modules.\n" +
+            "A '-v' flag will be added for each file in this attribute.\n" +
+            "It is preferable to used the 'modules' attribute when possible because library files require reading in entirely to discover all modules.",
         ),
         "direct": attr.label_list(
             allow_files = True,
-            doc = "Verilog files that must be put directly onto the command line.",
+            doc = "Verilog files that must be put directly onto the command line.\n" +
+            "Avoid using 'direct' with preference towards 'modules'.",
         ),
         "deps": attr.label_list(
-            doc = "Other verilog libraries this target is dependent upon.",
+            doc = "Other verilog libraries this target is dependent upon.\n" +
+            "All Labels specified here must provide a VerilogInfo provider.",
         ),
         "no_synth": attr.bool(
             default = False,
-            doc = "When True, do not allow the content of this library to be exposed to synthesis",
+            doc = "When True, do not allow the content of this library to be exposed to synthesis.\n" +
+            "TODO: This currently enforced via an Aspect which is not included in this repository.\n" +
+            "The aspect creates a parallel set of 'synth__*.f' which have the filtered views which are passed to the synthesis tool.",
         ),
         "is_pkg": attr.bool(
             default = False,
-            doc = "Do not set directly in rule instances. Used for internal bookkeeping.",
+            doc = "INTERNAL: Do not set in verilog_rtl_library instances.\n" + 
+            "Used for internal bookkeeping for macros derived from verilog_rtl_library.\n" +
+            "Used to enforce naming conventions related to packages to encourage simple dependency graphs",
         ),
         "is_shell_of": attr.string(
             default = "",
-            doc = "Do not set directly in rule instances. Used for internal bookkeeping. If set, this library is a shell of another module.",
+            doc = "INTERNAL: Do not set in verilog_rtl_library instances.\n" + 
+            "Used for internal bookkeeping for macros derived from verilog_rtl_library.\n" +
+            "If set, this library is represents a 'shell' of another module.\n" +
+            "Allows downstream test rules to specify this Label as a 'shell' to override another instance via the gumi system.",
         ),
         "enable_gumi": attr.bool(
             default = True,
-            doc = "Do not set directly in rule instances. Used for internal bookkeeping.",
+            doc = "When set, create an additional file creating default preprocessor values for the gumi system.",
         ),
         "gumi_file_override": attr.label(
             default = None,
             allow_single_file = True,
-            doc = "Should only be set if enable_gumi=False",
+            doc = "Allow a more elaborate default set of gumi defines by pointing to another Label or file.\n" +
+            "Useful for creating a per-instance instead of per-type modules which require additional information.",
         ),
         "gumi_override": attr.string_list(
-            doc = "A list of string of module names to create gumi defines. If empty, the modules variable is used instead.",
+            doc = "A list of strings of module names to create gumi defines.\n" +
+            "If empty (default), the modules variable is used instead.\n" +
+            "Useful when using 'direct' or 'lib_files' or to limit the defines created when using a glob in 'modules'",
         ),
     },
     outputs = {
@@ -204,7 +249,25 @@ def verilog_rtl_pkg(
         direct,
         no_synth = False,
         deps = []):
-    """A single rtl pkg file."""
+    """A single Systemverilog package.
+
+    This rule is a specialized case of verilog_rtl_library. Systemverilog
+    packages should be placed into their own rule instance to limit cross
+    dependencies. In general, a block may depend on another block's package but
+    should not need to depend on all the modules in the block.
+
+    Args:
+      name: A unique name for this target.
+      direct: The Systemverilog file containing the package.
+    
+        See verilog_rtl_library::direct.
+      no_synth: Default False.
+
+        See verilog_rtl_library::no_synth.
+      deps: Other packages this target is dependent on.
+    
+        See verilog_rtl_library::deps.
+    """
     verilog_rtl_library(
         name = name,
         direct = direct,
@@ -219,13 +282,34 @@ def verilog_rtl_shell(
         module_to_shell_name,
         shell_module_label,
         deps = []):
-    """A RTL shell that has the same ports as another module, but limited functionality.
+    """A RTL shell has the same ports as another module.
 
-    Use when a shell needs to be hand-edited after generation If
-    module_to_shell_name == 'custom', then all rules regarding shells are
-    ignored and gumi shell defines are not thrown, allowing the user great
-    power.
+    This rule is a specialized case of verilog_rtl_library.
+    A 'shell' is similar to a 'stub' (empty module), but a shell may contain
+    limited functionality. Frequent uses include:
+      * Blackboxing hierarchy that will not be the target of testing
+      * Replacing functionality with a simpler model (simulation-only memory models)
 
+    Args:
+      name: A unique name for this target.
+      module_to_shell_name: The name of the module that will be replaced.
+        
+        When a downstream test uses this 'shell', a gumi define will be created using this name.
+        
+        When a shell needs to be hand-edited after generation If
+        module_to_shell_name == 'custom', then all rules regarding shells are
+        ignored and gumi shell defines are not thrown, allowing the user great
+        power.
+      shell_module_label: The Label or file containing the shell.
+
+        See verilog_rtl_library::no_synth.
+      deps: Other packages this target is dependent on.
+
+        In general. shells should avoid having dependencies. Exceptions include
+        necessary packages and possible a DV model to implement functional
+        behavior.
+
+        See verilog_rtl_library::deps.
     """
     if not name.startswith(module_to_shell_name) and module_to_shell_name != CUSTOM_SHELL:
         fail("Shell name should start with the original module name: shell name='{}' original module='{}'".format(name, module_to_shell_name))
@@ -239,34 +323,7 @@ def verilog_rtl_shell(
         deps = deps,
     )
 
-def _verilog_rtl_flist_impl(ctx):
-    num_srcs = len(ctx.files.srcs)
-    if num_srcs != 1:
-        fail("verilog_rtl_flist rule may only have single source file: {}".format(ctx))
-
-    # Ideally it would be nice to grab all the files inside an flist, but this could be recursive, so skipping this for now.
-    trans_srcs = depset([])
-    trans_flists = depset(ctx.files.srcs)
-
-    return [
-        VerilogInfo(transitive_sources = trans_srcs, transitive_flists = trans_flists, transitive_dpi = depset()),
-        DefaultInfo(files = depset(trans_srcs.to_list() + trans_flists.to_list())),
-    ]
-
-verilog_rtl_flist = rule(
-    doc = "Create an RTL Library from an existing flist file. Recommended only for vendor supplied IP. In general, use the verilog_rtl_library rule.",
-    implementation = _verilog_rtl_flist_impl,
-    attrs = {
-        "srcs": attr.label_list(
-            allow_files = True,
-            mandatory = True,
-        ),
-    },
-    #output_to_genfiles = True,
-)
-
 def _verilog_rtl_unit_test_impl(ctx):
-    # out = ctx.outputs.executable
     trans_srcs = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_sources")
     srcs_list = trans_srcs.to_list()
     flists = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_flists")
@@ -308,12 +365,26 @@ def _verilog_rtl_unit_test_impl(ctx):
     )]
 
 verilog_rtl_unit_test = rule(
-    # FIXME, this should eventually just be a specific use case of verilog_test
-    doc = "Compiles and runs a small RTL library. Additional sim options may be passed after --",
+    # TODO: this could eventually be a specific use case of verilog_test
+    doc = """Compile and simulate a verilog_rtl_library.
+
+    Allows a designer to write small unit/directed tests which can be included in regression.
+
+    This rule is capable of running SVUnit regressions as well. See ut_sim_template attribute.
+
+    Additional sim options may be passed after --.
+
+    Typically, an additional verilog_rtl_library containing 'unit_test_top.sv'
+    is created. This unit_test_top will be dependent on the DUT top, and will
+    be the only dep provided to verilog_rtl_unit_test.
+    """,
     implementation = _verilog_rtl_unit_test_impl,
     attrs = {
-        "deps": attr.label_list(mandatory = True),
-        "out": attr.output(),
+        "deps": attr.label_list(
+            mandatory = True,
+            doc = "Other verilog libraries this target is dependent upon.\n" +
+            "All Labels specified here must provide a VerilogInfo provider.",
+        ),
         "ut_sim_template": attr.label(
             allow_single_file = True,
             default = Label("@verilog_tools//vendors/cadence:verilog_rtl_unit_test.sh.template"),
@@ -334,11 +405,20 @@ verilog_rtl_unit_test = rule(
         ),
         "data": attr.label_list(
             allow_files = True,
-            doc = "Non-verilog dependencies",
+            doc = "Non-verilog dependencies. Useful when reading in data files as stimulus/prediction.",
         ),
-        "shells": attr.label_list(),
-        "pre_flist_args": attr.string_list(doc = "commands and arguments before flist arguments"),
-        "post_flist_args": attr.string_list(doc = "commands and arguments after flist arguments"),
+        "shells": attr.label_list(
+            doc = _SHELLS_DOC,
+        ),
+        "pre_flist_args": attr.string_list(
+            doc = "Additional command line arguments to be placed after the simulator binary but before the flist arguments.\n" +
+            "See ut_sim_template attribute for exact layout." + 
+            "For defines to have effect, they must be declared in pre_flist_args not post_flist_args.",
+        ),
+        "post_flist_args": attr.string_list(
+            doc = "Additional command line arguments to be placed after the flist arguments\n" +
+            "See ut_sim_template attribute for exact layout.",
+        ),
     },
     test = True,
 )
@@ -410,33 +490,54 @@ def _verilog_rtl_lint_test_impl(ctx):
     ]
 
 verilog_rtl_lint_test = rule(
-    doc = "Run lint on target",
+    doc = """Compile and run lint on target
+
+    This rule was written for Cadence HAL to be run under xcelium. As such, it
+    is not entirely generic. It also uses a log post-processor
+    (lint_parser_hal.py) to allow for easier waiving of warnings.
+
+    The DUT must have no unwaived warning/errors in order for this rule to
+    pass. The intended philosophy is for blocks to maintain a clean lint status
+    throughout the lifecycle of the project, not to run lint as a checklist
+    item towards the end of the project.
+
+    """,
     implementation = _verilog_rtl_lint_test_impl,
     attrs = {
-        "deps": attr.label_list(mandatory = True),
+        "deps": attr.label_list(
+            mandatory = True,
+            doc = "Other verilog libraries this target is dependent upon.\n" +
+            "All Labels specified here must provide a VerilogInfo provider.",
+        ),
         "rulefile": attr.label(
             allow_single_file = True,
             mandatory = True,
+            doc = "The Cadence rulefile for HAL.\n" +
+            "Suggested one per project.\n" +
+            "Example: https://github.com/freecores/t6507lp/blob/ca7d7ea779082900699310db459a544133fe258a/lint/run/hal.def",
         ),
-        "shells": attr.label_list(),
+        "shells": attr.label_list(
+            doc = _SHELLS_DOC
+        ),
         "top": attr.string(
-            doc = "The name of the top module",
+            doc = "The name of the top module.",
             mandatory = True,
         ),
         "design_info": attr.label_list(
             allow_files = True,
-            doc = "A design info file to add additional lint rule/waivers",
+            doc = "A Cadence design info file to add additional lint rule/waivers",
         ),
         "defines": attr.string_dict(
             allow_empty = True,
-            doc = "List of `defines for this lint run",
+            doc = "List of additional `defines for this lint run",
         ),
         "lint_parser": attr.label(
             allow_files = True,
             default = "@verilog_tools//:lint_parser_hal",
+            doc = "Post processor for lint logs allowing for easier waiving of warnings.",
         ),
         "waiver_hack": attr.string(
-            doc = "Lint waiver regex to hack around cases when HAL has formatting errors in xrun.log.xml that cause problems for our lint parser",
+            doc = "Lint waiver python regex to hack around cases when HAL has formatting errors in xrun.log.xml that cause problems for our lint parser",
         ),
         "_command_override": attr.label(
             default = Label("@verilog_tools//:verilog_rtl_lint_test_command"),
@@ -479,7 +580,7 @@ def _verilog_rtl_cdc_test_impl(ctx):
             top_mod = "  {}".format(dep[VerilogInfo].last_module.short_path)
 
     if top_mod == "":
-        fail("rtl_cdc_gui could not determine top_module from last_module variable")
+        fail("verilog_rtl_cdc_test could not determine top_module from last_module variable")
 
     bbox_a_cmd = "-bbox_a 4096"
 
@@ -523,11 +624,17 @@ def _verilog_rtl_cdc_test_impl(ctx):
     ]
 
 verilog_rtl_cdc_test = rule(
-    doc = "Run CDC",
+    doc = "Run Jaspergold CDC on a verilog_rtl_library.",
     implementation = _verilog_rtl_cdc_test_impl,
     attrs = {
-        "deps": attr.label_list(mandatory = True),
-        "shells": attr.label_list(),
+        "deps": attr.label_list(
+            mandatory = True,
+            doc = "Other verilog libraries this target is dependent upon.\n" +
+            "All Labels specified here must provide a VerilogInfo provider.",
+        ),
+        "shells": attr.label_list(
+            doc = _SHELLS_DOC,
+        ),
         "top": attr.string(
             doc = "The name of the top module",
             mandatory = True,
@@ -535,7 +642,7 @@ verilog_rtl_cdc_test = rule(
         "defines": attr.string_list(
             allow_empty = True,
             default = [],
-            doc = "List of `defines for this cdc run",
+            doc = "List of additional `defines for this cdc run",
         ),
         "bbox": attr.string_list(
             allow_empty = True,
@@ -544,12 +651,13 @@ verilog_rtl_cdc_test = rule(
         ),
         "cmd_file": attr.label(
             allow_files = True,
-            doc = "tcl commands to run in JG",
+            doc = "A tcl file containing commands to run in JG",
             mandatory = True,
         ),
         "bash_template": attr.label(
             allow_single_file = True,
             default = Label("//vendors/cadence:verilog_rtl_cdc_test.sh.template"),
+            doc = "The template for the generated bash script which will run the case.",
         ),
         "_command_override": attr.label(
             default = Label("@verilog_tools//:verilog_verilog_rtl_cdc_test_command"),
