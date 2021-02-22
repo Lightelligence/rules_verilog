@@ -167,51 +167,68 @@ def _verilog_rtl_library_impl(ctx):
     ]
 
 verilog_rtl_library = rule(
-    doc = "An RTL Library. Creates a generated flist file from a list of source files.",
+    doc = "A collection of RTL design files. Creates a generated flist file to be included later in a compile.",
     implementation = _verilog_rtl_library_impl,
     attrs = {
         "headers": attr.label_list(
             allow_files = True,
-            doc = "Files that should nomally be `included into other files. (i.e. covered by +incdir)",
+            doc = "Files that will be \`included into other files.\n" +
+            "A '+incdir' flag will be added for each source file's directory.",
         ),
         "modules": attr.label_list(
             allow_files = True,
-            doc = "Files containing single modules that may be found via library (i.e. covered by -y)",
+            doc = "Files containing a single module which matches the filename may be found via library.\n" +
+            "A '-y' flag will be added for each source file's directory.\n" +
+            "This is the preferred mechanism for specifying RTL modules.",
         ),
         "lib_files": attr.label_list(
             allow_files = True,
-            doc = "Verilog library files containing multiple modules (i.e. covered by -v)",
+            doc = "Verilog library files containing multiple modules.\n" +
+            "A '-v' flag will be added for each file in thi attribute.\n" +
+            "It is preferrable to used the 'modules' attribute when possible because library files require reading in entirely to discover all modules.",
         ),
         "direct": attr.label_list(
             allow_files = True,
-            doc = "Verilog files that must be put directly onto the command line.",
+            doc = "Verilog files that must be put directly onto the command line.\n" +
+            "Avoid using 'direct' with preference towards 'modules'.",
         ),
         "deps": attr.label_list(
-            doc = "Other verilog libraries this target is dependent upon.",
+            doc = "Other verilog libraries this target is dependent upon.\n" +
+            "All Labels specified here must provide a VerilogInfo provider.",
         ),
         "no_synth": attr.bool(
             default = False,
-            doc = "When True, do not allow the content of this library to be exposed to synthesis",
+            doc = "When True, do not allow the content of this library to be exposed to synthesis.\n" +
+            "TODO: This currently enforced via an Aspect which is not included in this repository.\n" +
+            "The aspect creates a parallel set of 'synth__*.f' which have the filtered views which are passed to the synthesis tool.",
         ),
         "is_pkg": attr.bool(
             default = False,
-            doc = "Do not set directly in rule instances. Used for internal bookkeeping.",
+            doc = "INTERNAL: Do not set in verilog_rtl_library instances.\n" + 
+            "Used for internal bookkeeping for macros derived from verilog_rtl_library.\n" +
+            "Used to enforce naming conventions related to packages to encourage simple dependency graphs",
         ),
         "is_shell_of": attr.string(
             default = "",
-            doc = "Do not set directly in rule instances. Used for internal bookkeeping. If set, this library is a shell of another module.",
+            doc = "INTERNAL: Do not set in verilog_rtl_library instances.\n" + 
+            "Used for internal bookkeeping for macros derived from verilog_rtl_library.\n" +
+            "If set, this library is represents a 'shell' of another module.\n" +
+            "Allows downstream test rules to specify this Label as a 'shell' to override another instance via the gumi system.",
         ),
         "enable_gumi": attr.bool(
             default = True,
-            doc = "Do not set directly in rule instances. Used for internal bookkeeping.",
+            doc = "When set, create an additional file creating default preprocessor values for the gumi system.",
         ),
         "gumi_file_override": attr.label(
             default = None,
             allow_single_file = True,
-            doc = "Should only be set if enable_gumi=False",
+            doc = "Allow a more elaborate default set of gumi defines by pointing to another Label or file.\n" +
+            "Useful for creating a per-instance instead of per-type modules which require additional information.",
         ),
         "gumi_override": attr.string_list(
-            doc = "A list of string of module names to create gumi defines. If empty, the modules variable is used instead.",
+            doc = "A list of strings of module names to create gumi defines.\n" +
+            "If empty (default), the modules variable is used instead.\n" +
+            "Useful when using 'direct' or 'lib_files' or to limit the defines created when using a glob in 'modules'",
         ),
     },
     outputs = {

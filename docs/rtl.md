@@ -53,7 +53,7 @@ verilog_rtl_library(<a href="#verilog_rtl_library-name">name</a>, <a href="#veri
                     <a href="#verilog_rtl_library-is_pkg">is_pkg</a>, <a href="#verilog_rtl_library-is_shell_of">is_shell_of</a>, <a href="#verilog_rtl_library-lib_files">lib_files</a>, <a href="#verilog_rtl_library-modules">modules</a>, <a href="#verilog_rtl_library-no_synth">no_synth</a>)
 </pre>
 
-An RTL Library. Creates a generated flist file from a list of source files.
+A collection of RTL design files. Creates a generated flist file to be included later in a compile.
 
 **ATTRIBUTES**
 
@@ -61,17 +61,17 @@ An RTL Library. Creates a generated flist file from a list of source files.
 | Name  | Description | Type | Mandatory | Default |
 | :-------------: | :-------------: | :-------------: | :-------------: | :-------------: |
 | name |  A unique name for this target.   | <a href="https://bazel.build/docs/build-ref.html#name">Name</a> | required |  |
-| deps |  Other verilog libraries this target is dependent upon.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
-| direct |  Verilog files that must be put directly onto the command line.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
-| enable_gumi |  Do not set directly in rule instances. Used for internal bookkeeping.   | Boolean | optional | True |
-| gumi_file_override |  Should only be set if enable_gumi=False   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | None |
-| gumi_override |  A list of string of module names to create gumi defines. If empty, the modules variable is used instead.   | List of strings | optional | [] |
-| headers |  Files that should nomally be <code>included into other files. (i.e. covered by +incdir)   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
-| is_pkg |  Do not set directly in rule instances. Used for internal bookkeeping.   | Boolean | optional | False |
-| is_shell_of |  Do not set directly in rule instances. Used for internal bookkeeping. If set, this library is a shell of another module.   | String | optional | "" |
-| lib_files |  Verilog library files containing multiple modules (i.e. covered by -v)   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
-| modules |  Files containing single modules that may be found via library (i.e. covered by -y)   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
-| no_synth |  When True, do not allow the content of this library to be exposed to synthesis   | Boolean | optional | False |
+| deps |  Other verilog libraries this target is dependent upon. All Labels specified here must provide a VerilogInfo provider.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
+| direct |  Verilog files that must be put directly onto the command line. Avoid using 'direct' with preference towards 'modules'.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
+| enable_gumi |  When set, create an additional file creating default preprocessor values for the gumi system.   | Boolean | optional | True |
+| gumi_file_override |  Allow a more elaborate default set of gumi defines by pointing to another Label or file. Useful for creating a per-instance instead of per-type modules which require additional information.   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | None |
+| gumi_override |  A list of strings of module names to create gumi defines. If empty (default), the modules variable is used instead. Useful when using 'direct' or 'lib_files' or to limit the defines created when using a glob in 'modules'   | List of strings | optional | [] |
+| headers |  Files that will be \<code>included into other files. A '+incdir' flag will be added for each source file's directory.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
+| is_pkg |  INTERNAL: Do not set in verilog_rtl_library instances. Used for internal bookkeeping for macros derived from verilog_rtl_library. Used to enforce naming conventions related to packages to encourage simple dependency graphs   | Boolean | optional | False |
+| is_shell_of |  INTERNAL: Do not set in verilog_rtl_library instances. Used for internal bookkeeping for macros derived from verilog_rtl_library. If set, this library is represents a 'shell' of another module. Allows downstream test rules to specify this Label as a 'shell' to override another instance via the gumi system.   | String | optional | "" |
+| lib_files |  Verilog library files containing multiple modules. A '-v' flag will be added for each file in thi attribute. It is preferrable to used the 'modules' attribute when possible because library files require reading in entirely to discover all modules.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
+| modules |  Files containing a single module which matches the filename may be found via library. A '-y' flag will be added for each source file's directory. This is the preferred mechanism for specifying RTL modules.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
+| no_synth |  When True, do not allow the content of this library to be exposed to synthesis. TODO: This currently enforced via an Aspect which is not included in this repository. The aspect creates a parallel set of 'synth__*.f' which have the filtered views which are passed to the synthesis tool.   | Boolean | optional | False |
 
 
 <a name="#verilog_rtl_lint_test"></a>
