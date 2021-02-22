@@ -279,6 +279,7 @@ def verilog_rtl_shell(
         deps = []):
     """A RTL shell has the same ports as another module.
 
+    This rule is a specialized case of verilog_rtl_library.
     A 'shell' is similar to a 'stub' (empty module), but a shell may contain
     limited functionality. Frequent uses include:
       * Blackboxing hierarchy that will not be the target of testing
