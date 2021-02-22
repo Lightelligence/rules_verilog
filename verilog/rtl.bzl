@@ -192,8 +192,8 @@ verilog_rtl_library = rule(
         "lib_files": attr.label_list(
             allow_files = True,
             doc = "Verilog library files containing multiple modules.\n" +
-            "A '-v' flag will be added for each file in thi attribute.\n" +
-            "It is preferrable to used the 'modules' attribute when possible because library files require reading in entirely to discover all modules.",
+            "A '-v' flag will be added for each file in this attribute.\n" +
+            "It is preferable to used the 'modules' attribute when possible because library files require reading in entirely to discover all modules.",
         ),
         "direct": attr.label_list(
             allow_files = True,
@@ -642,7 +642,7 @@ verilog_rtl_cdc_test = rule(
         "defines": attr.string_list(
             allow_empty = True,
             default = [],
-            doc = "List of additinal `defines for this cdc run",
+            doc = "List of additional `defines for this cdc run",
         ),
         "bbox": attr.string_list(
             allow_empty = True,
