@@ -127,27 +127,6 @@ Compiles and runs a small RTL library. Additional sim options may be passed afte
 | ut_sim_template |  The template to generate the script to run the test. Also available is a [SVUnit](http://agilesoc.com/open-source-projects/svunit/) test template: @verilog_tools//vendors/cadence:verilog_rtl_unit_test_svunit.sh.template If using the SVUnit template, you may also want to throw: <pre><code>    post_flist_args = [     "--directory &lt;path_to_test_directory_from_workspace&gt;",  ],</code></pre>   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | @verilog_tools//vendors/cadence:verilog_rtl_unit_test.sh.template |
 
 
-<a name="#create_flist_content"></a>
-
-## create_flist_content
-
-<pre>
-create_flist_content(<a href="#create_flist_content-ctx">ctx</a>, <a href="#create_flist_content-gumi_path">gumi_path</a>, <a href="#create_flist_content-allow_library_discovery">allow_library_discovery</a>, <a href="#create_flist_content-no_synth">no_synth</a>)
-</pre>
-
-
-
-**PARAMETERS**
-
-
-| Name  | Description | Default Value |
-| :-------------: | :-------------: | :-------------: |
-| ctx |  <p align="center"> - </p>   |  none |
-| gumi_path |  <p align="center"> - </p>   |  none |
-| allow_library_discovery |  <p align="center"> - </p>   |  none |
-| no_synth |  <p align="center"> - </p>   |  <code>False</code> |
-
-
 <a name="#verilog_rtl_pkg"></a>
 
 ## verilog_rtl_pkg

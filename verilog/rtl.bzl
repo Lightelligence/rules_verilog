@@ -2,7 +2,7 @@
 
 load(":verilog.bzl", "CUSTOM_SHELL", "ShellInfo", "ToolEncapsulationInfo", "VerilogInfo", "gather_shell_defines", "get_transitive_srcs")
 
-def create_flist_content(ctx, gumi_path, allow_library_discovery, no_synth = False):
+def _create_flist_content(ctx, gumi_path, allow_library_discovery, no_synth = False):
     flist_content = []
 
     # Using dirname may result in bazel-out included in path
@@ -103,7 +103,7 @@ def _verilog_rtl_library_impl(ctx):
     elif not (ctx.attr.gumi_file_override == None):
         gumi_path = ctx.file.gumi_file_override.short_path
 
-    flist_content = create_flist_content(ctx, gumi_path = gumi_path, allow_library_discovery = True)
+    flist_content = _create_flist_content(ctx, gumi_path = gumi_path, allow_library_discovery = True)
 
     last_module = None
     for m in ctx.files.modules:
