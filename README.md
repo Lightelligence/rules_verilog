@@ -17,7 +17,7 @@ Load rules into your `BUILD` files from [@verilog_tools//verilog:rtl.bzl](verilo
 
 - [verilog_rtl_library](docs/rtl.md#verilog_rtl_library)
 - [verilog_rtl_pkg](docs/rtl.md#verilog_rtl_pkg)
-- [verilog_rtl_shel](docs/rtl.md#verilog_rtl_shell)
+- [verilog_rtl_shell](docs/rtl.md#verilog_rtl_shell)
 - [verilog_rtl_unit_test](docs/rtl.md#verilog_rtl_unit_test)
 - [verilog_rtl_lint_test](docs/rtl.md#verilog_rtl_lint_test)
 - [verilog_rtl_cdc_test](docs/rtl.md#verilog_rtl_cdc_test)
