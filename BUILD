@@ -1,6 +1,6 @@
 load("@com_github_bazelbuild_buildtools//buildifier:def.bzl", "buildifier")
 load("@rules_python//python:defs.bzl", "py_binary", "py_library")
-load("//verilog:verilog.bzl", "tool_encapsulation")
+load("@verilog_tools//verilog:defs.bzl", "tool_encapsulation")
 
 package(default_visibility = ["//visibility:public"])
 
