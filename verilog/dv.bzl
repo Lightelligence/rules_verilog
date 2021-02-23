@@ -6,7 +6,7 @@ DVTestInfo = provider(fields = {
     "sim_opts": "Simulation options to carry forward.",
     "uvm_testname": "UVM Test Name; passed to simulator via plusarg +UVM_TESTNAME.",
     "vcomp": "The verilog compile associated with this test. Must be a Label of type verilog_dv_tb.",
-    "tags": "Additional tags to be able to filter in downstream simulation launching tool.",
+    "tags": "Additional tags to be able to filter in simmer.",
 })
 
 DVTBInfo = provider(fields = {
@@ -19,7 +19,7 @@ def _verilog_dv_test_cfg_impl(ctx):
 
     sim_opts = {}
 
-    # Each successive depdency may override previous deps
+    # Each successive dependency may override previous deps
     for dep in ctx.attr.inherits:
         sim_opts.update(dep[DVTestInfo].sim_opts)
 
@@ -71,24 +71,57 @@ def _verilog_dv_test_cfg_impl(ctx):
     return [DVTestInfo(**provider_args)]
 
 verilog_dv_test_cfg = rule(
-    doc = "A DV test configuration. This is not a executable target.",
+    doc = """A DV test configuration.
+
+    This is not a executable target. It generates multiple files which may then
+    be used by simmer (the wrapping tool to invoke the simulator).
+    """,
     implementation = _verilog_dv_test_cfg_impl,
     attrs = {
-        "abstract": attr.bool(default = False, doc = "This configuration is abstract. It is not intended to be excuted, but only to be used as a base for other test configurations."),
-        "inherits": attr.label_list(doc = "Inherit configurations from verilog_dv_test_cfg targets. Entries later in the list will override arguements set by previous inherits entries. Any field explicily set in this rule will override values set through inheritance."),
-        "uvm_testname": attr.string(doc = "UVM testname. If not set, finds from deps."),
-        "vcomp": attr.label(doc = "Must point to a 'verilog_dv_tb' target for how to build this testbench."),
-        "sim_opts": attr.string_dict(doc = "Additional simopts flags to throw"),
-        "no_run": attr.bool(default = False, doc = "Set to True to skip running this test."),
+        "abstract": attr.bool(
+            default = False,
+            doc = "When True, this configuration is abstract and does not represent a complete configuration.\n" + 
+            "It is not intended to be executed, but only to be used as a base for other test configurations to inherit from.\n" +
+            "See inherits attribute.\n",
+        ),
+        "inherits": attr.label_list(
+            doc = "Inherit configurations from other verilog_dv_test_cfg targets.\n" +
+            "Entries later in the list will override arguments set by previous inherits entries.\n" +
+            "Only attributes noted as inheritable in documentation may be inherited.\n" +
+            "Any field explicitly set in this rule will override values set via inheritance.",
+        ),
+        "uvm_testname": attr.string(
+            doc = "UVM testname eventually passed to simulator via plusarg +UVM_TESTNAME.\n" +
+            "This attribute is inheritable. See 'inherits' attribute.\n",
+        ),
+        "vcomp": attr.label(
+            # FIXME rename vcomp to tb to remove confusion
+            doc = "The testbench to run this test on. This label must be a 'verilog_dv_tb' target." +
+            "This attribute is inheritable. See 'inherits' attribute.\n" +
+            "Future: Allow vcomp to be a list of labels to allow a test to run on multiple verilog_dv_tb",
+        ),
+        "sim_opts": attr.string_dict(
+            doc = "Additional simulation options. These are 'runtime' arguments. Preprocessor or compiler directives will not take effect.\n" +
+            "The key, value pairs are joined without additional characters. If it is a unary flag, set the value portion to be the empty string.\n" +
+            "For binary flags, add an '=' as a suffix to the key.\n" +
+            "This attribute is inheritable. See 'inherits' attribute.\n" +
+            "Unlike other inheritable attributes, simopts are not entirely overridden. Instead, the dictionary is 'updated' with new values at each successive level.\n" +
+            "This allows for the override of individual simopts for finer grain control.",
+        ),
+        "no_run": attr.bool(
+            default = False,
+            doc = "Set to True to skip running this test.\n" +
+            "This flag is not used by bazel but is used as a query filter by simmer." +
+            "TODO: Deprecate this flag in favor of using built-in tags.",
+        ),
         "sockets": attr.string_dict(
-            doc = "\n".join([
-                "Dictionary mapping of socket_name to socket_command.",
-                "For each entry in the list, simmer will create a separate process and pass a unique temporary file path to both the simulator and the socket_command.",
-                "The socket name is a short identifier that will be passed as \"+SOCKET__<socket_name>=<socket_file>\" to the simulator.",
-                "The socket_file is just a filepath to a temporary file in the simulation results directory (for uniqueness)",
-                "The socket_command is a bash command that must use a python string formatter of \"{socket_file}\" somewhere in the command.",
-                "The socket_command will be run from the root of the project tree.",
-            ]),
+            doc ="Dictionary mapping of socket_name to socket_command.\n" +
+            "Simmer has the ability to spawn parallel processes to the primary simulation that are connected via sockets.\n" +
+            "For each entry in the list, simmer will create a separate process and pass a unique temporary file path to both the simulator and the socket_command.\n" +
+            "The socket name is a short identifier that will be passed as \"+SOCKET__<socket_name>=<socket_file>\" to the simulator.\n" +
+            "The socket_file is just a file path to a temporary file in the simulation results directory (for uniqueness)\n." +
+            "The socket_command is a bash command that must use a python string formatter of \"{socket_file}\" somewhere in the command.\n" +
+            "The socket_command will be run from the root of the project tree.",
         ),
     },
     outputs = {
@@ -151,17 +184,34 @@ def _verilog_dv_library_impl(ctx):
     ]
 
 verilog_dv_library = rule(
-    doc = "An DV Library. Creates a generated flist file from a list of source files.",
+    doc = """A DV Library.
+    
+    Creates a generated flist file from a list of source files.
+    """,
     implementation = _verilog_dv_library_impl,
     attrs = {
-        "srcs": attr.label_list(allow_files = True, mandatory = True),
-        "deps": attr.label_list(),
+        "srcs": attr.label_list(
+            allow_files = True,
+            mandatory = True,
+            doc = "Systemverilog source files.\n" +
+            "Files are assumed to be `included inside another file (i.e. the package file) and will not be placed on directly in the flist unless declared in the 'in_flist' attribute.",
+        ),
+        "deps": attr.label_list(
+            doc = "verilog_dv_library targets that this target is dependent on.",
+        ),
         "in_flist": attr.label_list(
             allow_files = True,
-            doc = "Files to be places in generated flist. Generally only the 'pkg' file and interfaces. If left blank, all srcs will be used.",
+            doc = "Files to be placed directly in the generated flist.\n" +
+            "Best practice recommends 'pkg' and 'interface' files be declared here.\n" +
+            "If this entry is empty (default), all srcs will put into the flist instead.",
         ),
-        "dpi": attr.label_list(doc = "cc_libraries to link in through dpi"),
-        "incdir": attr.bool(default = True, doc = "Include an incdir to src file directories in generated flist."),
+        "dpi": attr.label_list(
+            doc = "cc_libraries to link in through the DPI. Currently, cc_import is not support for precompiled shared libraries.",
+        ),
+        "incdir": attr.bool(
+            default = True,
+            doc = "Generate a +incdir in generated flist for every file's directory declared in 'srcs' attribute.",
+        ),
     },
     outputs = {"out": "%{name}.f"},
 )
@@ -218,46 +268,69 @@ def _verilog_dv_tb_impl(ctx):
     ]
 
 verilog_dv_tb = rule(
-    doc = "A DV Testbench.",
+    doc = """A DV Testbench.
+    
+    To strongly differentiate between a compilation and a simulation, there
+    exist separate rules: verilog_dv_tb and verilog_dv_test_cg respectively.
+
+    A verilog_dv_tb describes how to compile a testbench.
+    """,
     implementation = _verilog_dv_tb_impl,
     attrs = {
-        "deps": attr.label_list(mandatory = True),
-        "defines": attr.string_dict(doc = "Additional defines to throw for this testbench compile."),
-        "warning_waivers": attr.string_list(doc = "Waive warnings in the compile. Converted to python regular expressions"),
+        "deps": attr.label_list(
+            mandatory = True,
+            doc = "verilog_dv_library or verilog_rtl_library labels that the testbench is dependent on.\n" +
+            "Ordering should not matter here if dependencies are consistently declared in all other rules.",
+        ),
+        "defines": attr.string_dict(
+            doc = "Additional preprocessor defines to throw for this testbench compile.\n" + 
+            "Key, value pairs are joined without additional characters. If it is a unary flag, set the value portion to be the empty string.\n" +
+            "For binary flags, add an '=' as a suffix to the key.",
+        ),
+        "warning_waivers": attr.string_list(
+            doc = "Waive warnings in the compile. By default, simmer promotes all compile warnings to errors.\n" +
+            "This list is converted to python regular expressions which are imported by simmer to waive warning.\n" +
+            "All warnings may be waived by using '\\*W'\n",
+        ),
         "shells": attr.label_list(
-            doc =
-                "List of shells to use.\n" +
-                "Each shell thrown will create two defines:\n" +
-                " `define gumi_<module> <module>_shell\n" +
-                " `define gumi_use_<module>_shell\n" +
-                "The shell module declaration must be guarded by the gumi_use_<module>_shell define:\n" +
-                " `ifdef gumi_use_<module>_shell\n" +
-                "    module <module>_shell(/*AUTOARGS*/);\n" +
-                "      ...\n" +
-                "    endmodule\n" +
-                " `endif\n",
+            doc = "List of shells to use. Each label must be a verilog_rtl_shell instance.\n" +
+            "Each shell thrown will create two defines:\n" +
+            " `define gumi_<module> <module>_shell\n" +
+            " `define gumi_use_<module>_shell\n" +
+            "The shell module declaration must be guarded by the gumi_use_<module>_shell define:\n" +
+            " `ifdef gumi_use_<module>_shell\n" +
+            "    module <module>_shell(/*AUTOARGS*/);\n" +
+            "      ...\n" +
+            "    endmodule\n" +
+            " `endif\n",
         ),
         "ccf": attr.label_list(
             allow_files = True,
-            doc = "Coverage configuration file",
+            doc = "Coverage configuration file to provider to simmer.",
         ),
-        "extra_compile_args": attr.string_list(doc = "Additional flags to throw to compile"),
-        "extra_runtime_args": attr.string_list(doc = "Additional flags to throw to simultation run"),
+        "extra_compile_args": attr.string_list(
+            doc = "Additional flags to throw to pass to the compile."
+        ),
+        "extra_runtime_args": attr.string_list(
+            doc = "Additional flags to throw to simulation run. These flags will not be provided to the compilation, but only to subsequent simulation invocations."),
         "extra_runfiles": attr.label_list(
             allow_files = True,
-            doc = "Additional files that need to be passed as runfiles to bazel. The generally should only be things referred to by extra_compile_args or extra_runtime_args",
+            doc = "Additional files that need to be passed as runfiles to bazel. Most commonly it is used for files referred to by extra_compile_args or extra_runtime_args.",
         ),
         "_default_sim_opts": attr.label(
             allow_single_file = True,
             default = "@verilog_tools//vendors/cadence:verilog_dv_default_sim_opts.f",
+            doc = "Default simulator options.",
         ),
         "_compile_args_template": attr.label(
             default = Label("@verilog_tools//vendors/cadence:verilog_dv_tb_compile_args.f.template"),
             allow_single_file = True,
+            doc = "Template to generate compilation arguments flist.",
         ),
         "_runtime_args_template": attr.label(
             default = Label("@verilog_tools//vendors/cadence:verilog_dv_tb_runtime_args.f.template"),
             allow_single_file = True,
+            doc = "Template to generate runtime args form the 'extra_runtime_args' attribute.",
         ),
     },
     outputs = {
@@ -265,6 +338,7 @@ verilog_dv_tb = rule(
         "compile_warning_waivers": "%{name}_compile_warning_waivers",
         "runtime_args": "%{name}_runtime_args.f",
     },
+    # TODO does this still need to be executable with a empty command?
     executable = True,
 )
 
@@ -294,8 +368,11 @@ def _verilog_dv_unit_test_impl(ctx):
     )]
 
 verilog_dv_unit_test = rule(
-    # FIXME, this should eventually just be a specific use case of verilog_test
-    doc = """Compiles and runs a small DV library. Additional sim options may be passed after --
+    # TODO this could just be a specific use case of verilog_test
+    doc = """Compiles and runs a small unit test for DV.
+    
+    Typically a single verilog_dv_library (and its dependencies).
+    Additional sim options may be passed after --
     Interactive example:
       bazel run //digital/dv/interfaces/apb_pkg:test -- -gui
     For ci testing purposes:
@@ -303,16 +380,26 @@ verilog_dv_unit_test = rule(
     """,
     implementation = _verilog_dv_unit_test_impl,
     attrs = {
-        "deps": attr.label_list(mandatory = True),
+        "deps": attr.label_list(
+            mandatory = True,
+            doc = "verilog_dv_library or verilog_rtl_library labels that the testbench is dependent on.\n" +
+            "Ordering should not matter here if dependencies are consistently declared in all other rules.",
+        ),
         "ut_sim_template": attr.label(
             allow_single_file = True,
             default = Label("@verilog_tools//vendors/cadence:verilog_dv_unit_test.sh.template"),
+            doc = "The template to generate the bash script to run the simulation.",
         ),
         "default_sim_opts": attr.label(
             allow_single_file = True,
             default = "@verilog_tools//vendors/cadence:verilog_dv_default_sim_opts.f",
+            doc = "Default simulator options to be passed in to the simulation.",
+            # TODO remove this and just make it part of the template?
         ),
-        "sim_args": attr.string_list(doc = "Additional simulation arguments to passed to command line"),
+        "sim_args": attr.string_list(
+            doc = "Additional arguments to passed to command line to the simulator.\n" + 
+            "Both compile and runtime arguments are allowed (single step flow).",
+        ),
         "_command_override": attr.label(
             default = Label("@verilog_tools//:verilog_dv_unit_test_command"),
             doc = "Allows custom override of simulator command in the event of wrapping via modulefiles.\n" +
@@ -324,7 +411,6 @@ verilog_dv_unit_test = rule(
     test = True,
 )
 
-# Used by simmer to find test to tb/vcomp mappings
 def _test_to_vcomp_aspect_impl(target, ctx):
     # buildifier: disable=print
     print("test_to_vcomp({}, {}, {})".format(target.label, target[DVTestInfo].vcomp.label, target[DVTestInfo].tags))
@@ -333,11 +419,11 @@ def _test_to_vcomp_aspect_impl(target, ctx):
     return []
 
 test_to_vcomp_aspect = aspect(
+    doc = """Find test to tb/vcomp and tag mappings in simmer.""",
     implementation = _test_to_vcomp_aspect_impl,
     attr_aspects = ["deps", "tags"],
 )
 
-# Used by simmer to find test to find ccf file
 def _verilog_dv_tb_ccf_aspect_impl(target, ctx):
     # buildifier: disable=print
     print("verilog_dv_tb_ccf({})".format([f.path for f in target[DVTBInfo].ccf]))
@@ -346,6 +432,7 @@ def _verilog_dv_tb_ccf_aspect_impl(target, ctx):
     return []
 
 verilog_dv_tb_ccf_aspect = aspect(
+    doc = """Find test to find ccf file mappings simmer.""",
     implementation = _verilog_dv_tb_ccf_aspect_impl,
     attr_aspects = ["ccf"],
 )
