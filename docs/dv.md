@@ -40,7 +40,10 @@ A DV Testbench.
     To strongly differentiate between a compilation and a simulation, there
     exist separate rules: verilog_dv_tb and verilog_dv_test_cg respectively.
 
-    A verilog_dv_tb describes how to compile a testbench.
+    A verilog_dv_tb describes how to compile a testbench. It is not a
+    standalone executable rule by bazel. It is intended to provide simmer (a
+    higher level simulation spawning tool) hooks to execute the compile and
+    subsequent simulations.
     
 
 **ATTRIBUTES**
@@ -64,7 +67,7 @@ A DV Testbench.
 ## verilog_dv_test_cfg
 
 <pre>
-verilog_dv_test_cfg(<a href="#verilog_dv_test_cfg-name">name</a>, <a href="#verilog_dv_test_cfg-abstract">abstract</a>, <a href="#verilog_dv_test_cfg-inherits">inherits</a>, <a href="#verilog_dv_test_cfg-no_run">no_run</a>, <a href="#verilog_dv_test_cfg-sim_opts">sim_opts</a>, <a href="#verilog_dv_test_cfg-sockets">sockets</a>, <a href="#verilog_dv_test_cfg-uvm_testname">uvm_testname</a>, <a href="#verilog_dv_test_cfg-vcomp">vcomp</a>)
+verilog_dv_test_cfg(<a href="#verilog_dv_test_cfg-name">name</a>, <a href="#verilog_dv_test_cfg-abstract">abstract</a>, <a href="#verilog_dv_test_cfg-inherits">inherits</a>, <a href="#verilog_dv_test_cfg-no_run">no_run</a>, <a href="#verilog_dv_test_cfg-sim_opts">sim_opts</a>, <a href="#verilog_dv_test_cfg-sockets">sockets</a>, <a href="#verilog_dv_test_cfg-tb">tb</a>, <a href="#verilog_dv_test_cfg-uvm_testname">uvm_testname</a>)
 </pre>
 
 A DV test configuration.
@@ -84,8 +87,8 @@ A DV test configuration.
 | no_run |  Set to True to skip running this test. This flag is not used by bazel but is used as a query filter by simmer.TODO: Deprecate this flag in favor of using built-in tags.   | Boolean | optional | False |
 | sim_opts |  Additional simulation options. These are 'runtime' arguments. Preprocessor or compiler directives will not take effect. The key, value pairs are joined without additional characters. If it is a unary flag, set the value portion to be the empty string. For binary flags, add an '=' as a suffix to the key. This attribute is inheritable. See 'inherits' attribute. Unlike other inheritable attributes, simopts are not entirely overridden. Instead, the dictionary is 'updated' with new values at each successive level. This allows for the override of individual simopts for finer grain control.   | <a href="https://bazel.build/docs/skylark/lib/dict.html">Dictionary: String -> String</a> | optional | {} |
 | sockets |  Dictionary mapping of socket_name to socket_command. Simmer has the ability to spawn parallel processes to the primary simulation that are connected via sockets. For each entry in the list, simmer will create a separate process and pass a unique temporary file path to both the simulator and the socket_command. The socket name is a short identifier that will be passed as "+SOCKET__&lt;socket_name&gt;=&lt;socket_file&gt;" to the simulator. The socket_file is just a file path to a temporary file in the simulation results directory (for uniqueness) .The socket_command is a bash command that must use a python string formatter of "{socket_file}" somewhere in the command. The socket_command will be run from the root of the project tree.   | <a href="https://bazel.build/docs/skylark/lib/dict.html">Dictionary: String -> String</a> | optional | {} |
+| tb |  The testbench to run this test on. This label must be a 'verilog_dv_tb' target.This attribute is inheritable. See 'inherits' attribute. Future: Allow tb to be a list of labels to allow a test to run on multiple verilog_dv_tb   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | None |
 | uvm_testname |  UVM testname eventually passed to simulator via plusarg +UVM_TESTNAME. This attribute is inheritable. See 'inherits' attribute.   | String | optional | "" |
-| vcomp |  The testbench to run this test on. This label must be a 'verilog_dv_tb' target.This attribute is inheritable. See 'inherits' attribute. Future: Allow vcomp to be a list of labels to allow a test to run on multiple verilog_dv_tb   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | None |
 
 
 <a name="#verilog_dv_unit_test"></a>
@@ -141,7 +144,7 @@ DVTBInfo(<a href="#DVTBInfo-ccf">ccf</a>)
 ## DVTestInfo
 
 <pre>
-DVTestInfo(<a href="#DVTestInfo-sim_opts">sim_opts</a>, <a href="#DVTestInfo-uvm_testname">uvm_testname</a>, <a href="#DVTestInfo-vcomp">vcomp</a>, <a href="#DVTestInfo-tags">tags</a>)
+DVTestInfo(<a href="#DVTestInfo-sim_opts">sim_opts</a>, <a href="#DVTestInfo-uvm_testname">uvm_testname</a>, <a href="#DVTestInfo-tb">tb</a>, <a href="#DVTestInfo-tags">tags</a>)
 </pre>
 
 
@@ -153,7 +156,7 @@ DVTestInfo(<a href="#DVTestInfo-sim_opts">sim_opts</a>, <a href="#DVTestInfo-uvm
 | :-------------: | :-------------: |
 | sim_opts |  Simulation options to carry forward.    |
 | uvm_testname |  UVM Test Name; passed to simulator via plusarg +UVM_TESTNAME.    |
-| vcomp |  The verilog compile associated with this test. Must be a Label of type verilog_dv_tb.    |
+| tb |  The verilog_dv_tb (verilog compile) associated with this test. Must be a Label of type verilog_dv_tb.    |
 | tags |  Additional tags to be able to filter in simmer.    |
 
 
@@ -183,15 +186,15 @@ Find test to find ccf file mappings simmer.
 | name |  A unique name for this target.   | <a href="https://bazel.build/docs/build-ref.html#name">Name</a> | required |   |
 
 
-<a name="#verilog_dv_test_cfg_to_vcomp_aspect"></a>
+<a name="#verilog_dv_test_cfg_info_aspect"></a>
 
-## verilog_dv_test_cfg_to_vcomp_aspect
+## verilog_dv_test_cfg_info_aspect
 
 <pre>
-verilog_dv_test_cfg_to_vcomp_aspect(<a href="#verilog_dv_test_cfg_to_vcomp_aspect-name">name</a>)
+verilog_dv_test_cfg_info_aspect(<a href="#verilog_dv_test_cfg_info_aspect-name">name</a>)
 </pre>
 
-Find test to tb/vcomp and tag mappings in simmer.
+Gather information about the tb and tags related to a verilog_dv_test_config for use in simmer.
 
 **ASPECT ATTRIBUTES**
 

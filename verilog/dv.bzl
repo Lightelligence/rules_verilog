@@ -5,7 +5,7 @@ load(":verilog.bzl", "VerilogInfo", "flists_to_arguments", "gather_shell_defines
 DVTestInfo = provider(fields = {
     "sim_opts": "Simulation options to carry forward.",
     "uvm_testname": "UVM Test Name; passed to simulator via plusarg +UVM_TESTNAME.",
-    "vcomp": "The verilog compile associated with this test. Must be a Label of type verilog_dv_tb.",
+    "tb": "The verilog_dv_tb (verilog compile) associated with this test. Must be a Label of type verilog_dv_tb.",
     "tags": "Additional tags to be able to filter in simmer.",
 })
 
@@ -15,7 +15,7 @@ DVTBInfo = provider(fields = {
 
 def _verilog_dv_test_cfg_impl(ctx):
     parent_uvm_testnames = [dep[DVTestInfo].uvm_testname for dep in reversed(ctx.attr.inherits) if hasattr(dep[DVTestInfo], "uvm_testname")]
-    parent_vcomps = [dep[DVTestInfo].vcomp for dep in reversed(ctx.attr.inherits) if hasattr(dep[DVTestInfo], "vcomp")]
+    parent_tbs = [dep[DVTestInfo].tb for dep in reversed(ctx.attr.inherits) if hasattr(dep[DVTestInfo], "tb")]
 
     sim_opts = {}
 
@@ -36,14 +36,14 @@ def _verilog_dv_test_cfg_impl(ctx):
     else:
         uvm_testname = ctx.attr.name
 
-    vcomp = None
-    if ctx.attr.vcomp:
-        vcomp = ctx.attr.vcomp
+    tb = None
+    if ctx.attr.tb:
+        tb = ctx.attr.tb
     else:
-        vcomp = parent_vcomps[0]
+        tb = parent_tb[0]
 
     provider_args["uvm_testname"] = uvm_testname
-    provider_args["vcomp"] = vcomp
+    provider_args["tb"] = tb
     provider_args["sim_opts"] = sim_opts
     provider_args["tags"] = ctx.attr.tags
 
@@ -94,11 +94,10 @@ verilog_dv_test_cfg = rule(
             doc = "UVM testname eventually passed to simulator via plusarg +UVM_TESTNAME.\n" +
             "This attribute is inheritable. See 'inherits' attribute.\n",
         ),
-        "vcomp": attr.label(
-            # FIXME rename vcomp to tb to remove confusion
+        "tb": attr.label(
             doc = "The testbench to run this test on. This label must be a 'verilog_dv_tb' target." +
             "This attribute is inheritable. See 'inherits' attribute.\n" +
-            "Future: Allow vcomp to be a list of labels to allow a test to run on multiple verilog_dv_tb",
+            "Future: Allow tb to be a list of labels to allow a test to run on multiple verilog_dv_tb",
         ),
         "sim_opts": attr.string_dict(
             doc = "Additional simulation options. These are 'runtime' arguments. Preprocessor or compiler directives will not take effect.\n" +
@@ -273,7 +272,10 @@ verilog_dv_tb = rule(
     To strongly differentiate between a compilation and a simulation, there
     exist separate rules: verilog_dv_tb and verilog_dv_test_cg respectively.
 
-    A verilog_dv_tb describes how to compile a testbench.
+    A verilog_dv_tb describes how to compile a testbench. It is not a
+    standalone executable rule by bazel. It is intended to provide simmer (a
+    higher level simulation spawning tool) hooks to execute the compile and
+    subsequent simulations.
     """,
     implementation = _verilog_dv_tb_impl,
     attrs = {
@@ -411,16 +413,16 @@ verilog_dv_unit_test = rule(
     test = True,
 )
 
-def _verilog_dv_test_cfg_to_vcomp_aspect_impl(target, ctx):
+def _verilog_dv_test_cfg_info_aspect_impl(target, ctx):
     # buildifier: disable=print
-    print("test_to_vcomp({}, {}, {})".format(target.label, target[DVTestInfo].vcomp.label, target[DVTestInfo].tags))
+    print("verilog_dv_test_cfg_info({}, {}, {})".format(target.label, target[DVTestInfo].tb.label, target[DVTestInfo].tags))
 
     # buildifier: enable=print
     return []
 
-verilog_dv_test_cfg_to_vcomp_aspect = aspect(
-    doc = """Find test to tb/vcomp and tag mappings in simmer.""",
-    implementation = _verilog_dv_test_cfg_to_vcomp_aspect_impl,
+verilog_dv_test_cfg_info_aspect = aspect(
+    doc = """Gather information about the tb and tags related to a verilog_dv_test_config for use in simmer.""",
+    implementation = _verilog_dv_test_cfg_info_aspect_impl,
     attr_aspects = ["deps", "tags"],
 )
 
