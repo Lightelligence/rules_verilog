@@ -295,11 +295,11 @@ verilog_dv_tb = rule(
         "shells": attr.label_list(
             doc = "List of shells to use. Each label must be a verilog_rtl_shell instance.\n" +
             "Each shell thrown will create two defines:\n" +
-            " `define gumi_<module> <module>_shell\n" +
-            " `define gumi_use_<module>_shell\n" +
-            "The shell module declaration must be guarded by the gumi_use_<module>_shell define:\n" +
-            " `ifdef gumi_use_<module>_shell\n" +
-            "    module <module>_shell(/*AUTOARGS*/);\n" +
+            " `define gumi_{module} {module}_shell\n" +
+            " `define gumi_use_{module}_shell\n" +
+            "The shell module declaration must be guarded by the gumi_use_{module}_shell define:\n" +
+            " `ifdef gumi_use_{module}_shell\n" +
+            "    module {module}_shell(/*AUTOARGS*/);\n" +
             "      ...\n" +
             "    endmodule\n" +
             " `endif\n",
