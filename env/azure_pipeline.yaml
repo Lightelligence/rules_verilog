@@ -37,7 +37,6 @@ stages:
 
       - script: |
           source activate digital
-          source env/env.sh
           bazel test --cache_test_results=no --jobs 8 --test_output=all $(bazel query "tests(//...) except attr(tags, 'no_ci_gate', //...) except attr(tags, 'requires_license', //...)")
         displayName: 'Bazel tests (no licenses)'
 
@@ -59,7 +58,6 @@ stages:
 
       - bash: |
           source activate digital
-          source env/env.sh
           find -L `bazel info bazel-testlogs` -name "test.xml" | xargs rm
           bazel test --cache_test_results=no --jobs 8 --test_output=all $(bazel query "attr(tags, 'requires_license', tests(//...)) except attr(tags, 'no_ci_gate', //...)")
         displayName: 'Bazel Tests'
