@@ -40,7 +40,7 @@ def _verilog_dv_test_cfg_impl(ctx):
     if ctx.attr.tb:
         tb = ctx.attr.tb
     else:
-        tb = parent_tb[0]
+        tb = parent_tbs[0]
 
     provider_args["uvm_testname"] = uvm_testname
     provider_args["tb"] = tb
