@@ -157,33 +157,6 @@ DVTestInfo(<a href="#DVTestInfo-sim_opts">sim_opts</a>, <a href="#DVTestInfo-uvm
 | tags |  Additional tags to be able to filter in simmer.    |
 
 
-<a name="#test_to_vcomp_aspect"></a>
-
-## test_to_vcomp_aspect
-
-<pre>
-test_to_vcomp_aspect(<a href="#test_to_vcomp_aspect-name">name</a>)
-</pre>
-
-Find test to tb/vcomp and tag mappings in simmer.
-
-**ASPECT ATTRIBUTES**
-
-
-| Name | Type |
-| :-------------: | :-------------: |
-| deps| String |
-| tags| String |
-
-
-**ATTRIBUTES**
-
-
-| Name  | Description | Type | Mandatory | Default |
-| :-------------: | :-------------: | :-------------: | :-------------: | :-------------: |
-| name |  A unique name for this target.   | <a href="https://bazel.build/docs/build-ref.html#name">Name</a> | required |   |
-
-
 <a name="#verilog_dv_tb_ccf_aspect"></a>
 
 ## verilog_dv_tb_ccf_aspect
@@ -200,6 +173,33 @@ Find test to find ccf file mappings simmer.
 | Name | Type |
 | :-------------: | :-------------: |
 | ccf| String |
+
+
+**ATTRIBUTES**
+
+
+| Name  | Description | Type | Mandatory | Default |
+| :-------------: | :-------------: | :-------------: | :-------------: | :-------------: |
+| name |  A unique name for this target.   | <a href="https://bazel.build/docs/build-ref.html#name">Name</a> | required |   |
+
+
+<a name="#verilog_dv_test_cfg_to_vcomp_aspect"></a>
+
+## verilog_dv_test_cfg_to_vcomp_aspect
+
+<pre>
+verilog_dv_test_cfg_to_vcomp_aspect(<a href="#verilog_dv_test_cfg_to_vcomp_aspect-name">name</a>)
+</pre>
+
+Find test to tb/vcomp and tag mappings in simmer.
+
+**ASPECT ATTRIBUTES**
+
+
+| Name | Type |
+| :-------------: | :-------------: |
+| deps| String |
+| tags| String |
 
 
 **ATTRIBUTES**

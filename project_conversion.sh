@@ -14,7 +14,10 @@
 #        cmd = "cd $(@D); export LC_ALL=en_US.utf-8; export LANG=en_US.utf-8; cookiecutter --no-input {} module_to_shell={} shell_suffix={}".format(template_path, module_to_shell_name, shell_suffix),
 #        output_to_bindir = True,
 #    )
-
+#
+# 2. Update simmer
+#    test_to_vcomp_aspect -> verilog_dv_test_cfg_to_vcomp_aspect
+#    dv_tb_ccf_aspect -> verilog_dv_tb_ccf_aspect
 
 find -name BUILD -o -name '*.bzl' | xargs sed -i 's/load("@verilog_tools\/\/:rtl.bzl/load("@verilog_tools\/\/verilog:rtl.bzl/g'
 find -name BUILD -o -name '*.bzl' | xargs sed -i 's/load("@verilog_tools\/\/:dv.bzl/load("@verilog_tools\/\/verilog:dv.bzl/g'

@@ -411,16 +411,16 @@ verilog_dv_unit_test = rule(
     test = True,
 )
 
-def _test_to_vcomp_aspect_impl(target, ctx):
+def _verilog_dv_test_cfg_to_vcomp_aspect_impl(target, ctx):
     # buildifier: disable=print
     print("test_to_vcomp({}, {}, {})".format(target.label, target[DVTestInfo].vcomp.label, target[DVTestInfo].tags))
 
     # buildifier: enable=print
     return []
 
-test_to_vcomp_aspect = aspect(
+verilog_dv_test_cfg_to_vcomp_aspect = aspect(
     doc = """Find test to tb/vcomp and tag mappings in simmer.""",
-    implementation = _test_to_vcomp_aspect_impl,
+    implementation = _verilog_dv_test_cfg_to_vcomp_aspect_impl,
     attr_aspects = ["deps", "tags"],
 )
 
