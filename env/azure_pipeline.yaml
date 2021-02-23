@@ -35,18 +35,18 @@ stages:
          ./tests/doc_test.sh
         displayName: 'Doc Generation Check'
 
-      # - script: |
-      #     source activate digital
-      #     source env/env.sh
-      #     bazel test --cache_test_results=no --jobs 8 --test_output=all $(bazel query "tests(//...) except attr(tags, 'no_ci_gate', //...) except attr(tags, 'requires_license', //...)")
-      #   displayName: 'Bazel tests (no licenses)'
+      - script: |
+          source activate digital
+          source env/env.sh
+          bazel test --cache_test_results=no --jobs 8 --test_output=all $(bazel query "tests(//...) except attr(tags, 'no_ci_gate', //...) except attr(tags, 'requires_license', //...)")
+        displayName: 'Bazel tests (no licenses)'
 
-      # - task: PublishTestResults@2
-      #   condition: succeededOrFailed()
-      #   inputs:
-      #     testResultsFiles: 'bazel-testlogs/**/*.xml'
-      #     testRunTitle: 'Publish test results.'
-      #   displayName: 'Bazel Tests'
+      - task: PublishTestResults@2
+        condition: succeededOrFailed()
+        inputs:
+          testResultsFiles: 'bazel-testlogs/**/*.xml'
+          testRunTitle: 'Publish test results.'
+        displayName: 'Bazel Tests'
 
     - job: 'CI'
       pool:
@@ -57,16 +57,16 @@ stages:
           pwd
         displayName: 'Display PWD'
 
-      # - bash: |
-      #     source activate digital
-      #     source env/env.sh
-      #     find -L `bazel info bazel-testlogs` -name "test.xml" | xargs rm
-      #     bazel test --cache_test_results=no --jobs 8 --test_output=all $(bazel query "attr(tags, 'requires_license', tests(//...)) except attr(tags, 'no_ci_gate', //...)")
-      #   displayName: 'Bazel Tests'
+      - bash: |
+          source activate digital
+          source env/env.sh
+          find -L `bazel info bazel-testlogs` -name "test.xml" | xargs rm
+          bazel test --cache_test_results=no --jobs 8 --test_output=all $(bazel query "attr(tags, 'requires_license', tests(//...)) except attr(tags, 'no_ci_gate', //...)")
+        displayName: 'Bazel Tests'
 
-      # - task: PublishTestResults@2
-      #   condition: succeededOrFailed()
-      #   inputs:
-      #     testResultsFiles: 'bazel-testlogs/**/*.xml'
-      #     testRunTitle: 'Publish test results.'
-      #   displayName: 'Bazel Tests Publish Results'
+      - task: PublishTestResults@2
+        condition: succeededOrFailed()
+        inputs:
+          testResultsFiles: 'bazel-testlogs/**/*.xml'
+          testRunTitle: 'Publish test results.'
+        displayName: 'Bazel Tests Publish Results'
