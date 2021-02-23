@@ -6,7 +6,6 @@ _SHELLS_DOC = """List of verilog_rtl_shell Labels.
 For each Label, a gumi define will be placed on the command line to use this shell instead of the original module.
 This requires that the original module was instantiated using `gumi_<module_name> instead of just <module_name>."""
 
-
 def _create_flist_content(ctx, gumi_path, allow_library_discovery, no_synth = False):
     """Create the content of a '.f' file.
 
@@ -181,47 +180,47 @@ verilog_rtl_library = rule(
         "headers": attr.label_list(
             allow_files = True,
             doc = "Files that will be included into other files.\n" +
-            "A '+incdir' flag will be added for each source file's directory.",
+                  "A '+incdir' flag will be added for each source file's directory.",
         ),
         "modules": attr.label_list(
             allow_files = True,
             doc = "Files containing a single module which matches the filename may be found via library.\n" +
-            "A '-y' flag will be added for each source file's directory.\n" +
-            "This is the preferred mechanism for specifying RTL modules.",
+                  "A '-y' flag will be added for each source file's directory.\n" +
+                  "This is the preferred mechanism for specifying RTL modules.",
         ),
         "lib_files": attr.label_list(
             allow_files = True,
             doc = "Verilog library files containing multiple modules.\n" +
-            "A '-v' flag will be added for each file in this attribute.\n" +
-            "It is preferable to used the 'modules' attribute when possible because library files require reading in entirely to discover all modules.",
+                  "A '-v' flag will be added for each file in this attribute.\n" +
+                  "It is preferable to used the 'modules' attribute when possible because library files require reading in entirely to discover all modules.",
         ),
         "direct": attr.label_list(
             allow_files = True,
             doc = "Verilog files that must be put directly onto the command line.\n" +
-            "Avoid using 'direct' with preference towards 'modules'.",
+                  "Avoid using 'direct' with preference towards 'modules'.",
         ),
         "deps": attr.label_list(
             doc = "Other verilog libraries this target is dependent upon.\n" +
-            "All Labels specified here must provide a VerilogInfo provider.",
+                  "All Labels specified here must provide a VerilogInfo provider.",
         ),
         "no_synth": attr.bool(
             default = False,
             doc = "When True, do not allow the content of this library to be exposed to synthesis.\n" +
-            "TODO: This currently enforced via an Aspect which is not included in this repository.\n" +
-            "The aspect creates a parallel set of 'synth__*.f' which have the filtered views which are passed to the synthesis tool.",
+                  "TODO: This currently enforced via an Aspect which is not included in this repository.\n" +
+                  "The aspect creates a parallel set of 'synth__*.f' which have the filtered views which are passed to the synthesis tool.",
         ),
         "is_pkg": attr.bool(
             default = False,
-            doc = "INTERNAL: Do not set in verilog_rtl_library instances.\n" + 
-            "Used for internal bookkeeping for macros derived from verilog_rtl_library.\n" +
-            "Used to enforce naming conventions related to packages to encourage simple dependency graphs",
+            doc = "INTERNAL: Do not set in verilog_rtl_library instances.\n" +
+                  "Used for internal bookkeeping for macros derived from verilog_rtl_library.\n" +
+                  "Used to enforce naming conventions related to packages to encourage simple dependency graphs",
         ),
         "is_shell_of": attr.string(
             default = "",
-            doc = "INTERNAL: Do not set in verilog_rtl_library instances.\n" + 
-            "Used for internal bookkeeping for macros derived from verilog_rtl_library.\n" +
-            "If set, this library is represents a 'shell' of another module.\n" +
-            "Allows downstream test rules to specify this Label as a 'shell' to override another instance via the gumi system.",
+            doc = "INTERNAL: Do not set in verilog_rtl_library instances.\n" +
+                  "Used for internal bookkeeping for macros derived from verilog_rtl_library.\n" +
+                  "If set, this library is represents a 'shell' of another module.\n" +
+                  "Allows downstream test rules to specify this Label as a 'shell' to override another instance via the gumi system.",
         ),
         "enable_gumi": attr.bool(
             default = True,
@@ -231,12 +230,12 @@ verilog_rtl_library = rule(
             default = None,
             allow_single_file = True,
             doc = "Allow a more elaborate default set of gumi defines by pointing to another Label or file.\n" +
-            "Useful for creating a per-instance instead of per-type modules which require additional information.",
+                  "Useful for creating a per-instance instead of per-type modules which require additional information.",
         ),
         "gumi_override": attr.string_list(
             doc = "A list of strings of module names to create gumi defines.\n" +
-            "If empty (default), the modules variable is used instead.\n" +
-            "Useful when using 'direct' or 'lib_files' or to limit the defines created when using a glob in 'modules'",
+                  "If empty (default), the modules variable is used instead.\n" +
+                  "Useful when using 'direct' or 'lib_files' or to limit the defines created when using a glob in 'modules'",
         ),
     },
     outputs = {
@@ -259,13 +258,13 @@ def verilog_rtl_pkg(
     Args:
       name: A unique name for this target.
       direct: The Systemverilog file containing the package.
-    
+
         See verilog_rtl_library::direct.
       no_synth: Default False.
 
         See verilog_rtl_library::no_synth.
       deps: Other packages this target is dependent on.
-    
+
         See verilog_rtl_library::deps.
     """
     verilog_rtl_library(
@@ -293,9 +292,9 @@ def verilog_rtl_shell(
     Args:
       name: A unique name for this target.
       module_to_shell_name: The name of the module that will be replaced.
-        
+
         When a downstream test uses this 'shell', a gumi define will be created using this name.
-        
+
         When a shell needs to be hand-edited after generation If
         module_to_shell_name == 'custom', then all rules regarding shells are
         ignored and gumi shell defines are not thrown, allowing the user great
@@ -383,19 +382,19 @@ verilog_rtl_unit_test = rule(
         "deps": attr.label_list(
             mandatory = True,
             doc = "Other verilog libraries this target is dependent upon.\n" +
-            "All Labels specified here must provide a VerilogInfo provider.",
+                  "All Labels specified here must provide a VerilogInfo provider.",
         ),
         "ut_sim_template": attr.label(
             allow_single_file = True,
             default = Label("@verilog_tools//vendors/cadence:verilog_rtl_unit_test.sh.template"),
-            doc = "The template to generate the script to run the test.\n" + 
-            "Also available is a [SVUnit](http://agilesoc.com/open-source-projects/svunit/) test template: @verilog_tools//vendors/cadence:verilog_rtl_unit_test_svunit.sh.template\n" +
-            "If using the SVUnit template, you may also want to throw:\n" + 
-            "```" + 
-            "    post_flist_args = [\n" +
-            "    \"--directory <path_to_test_directory_from_workspace>\",\n" + 
-            " ]," +
-            "```",
+            doc = "The template to generate the script to run the test.\n" +
+                  "Also available is a [SVUnit](http://agilesoc.com/open-source-projects/svunit/) test template: @verilog_tools//vendors/cadence:verilog_rtl_unit_test_svunit.sh.template\n" +
+                  "If using the SVUnit template, you may also want to throw:\n" +
+                  "```" +
+                  "    post_flist_args = [\n" +
+                  "    \"--directory <path_to_test_directory_from_workspace>\",\n" +
+                  " ]," +
+                  "```",
         ),
         "_command_override": attr.label(
             default = Label("@verilog_tools//:verilog_rtl_unit_test_command"),
@@ -412,12 +411,12 @@ verilog_rtl_unit_test = rule(
         ),
         "pre_flist_args": attr.string_list(
             doc = "Additional command line arguments to be placed after the simulator binary but before the flist arguments.\n" +
-            "See ut_sim_template attribute for exact layout." + 
-            "For defines to have effect, they must be declared in pre_flist_args not post_flist_args.",
+                  "See ut_sim_template attribute for exact layout." +
+                  "For defines to have effect, they must be declared in pre_flist_args not post_flist_args.",
         ),
         "post_flist_args": attr.string_list(
             doc = "Additional command line arguments to be placed after the flist arguments\n" +
-            "See ut_sim_template attribute for exact layout.",
+                  "See ut_sim_template attribute for exact layout.",
         ),
     },
     test = True,
@@ -507,17 +506,17 @@ verilog_rtl_lint_test = rule(
         "deps": attr.label_list(
             mandatory = True,
             doc = "Other verilog libraries this target is dependent upon.\n" +
-            "All Labels specified here must provide a VerilogInfo provider.",
+                  "All Labels specified here must provide a VerilogInfo provider.",
         ),
         "rulefile": attr.label(
             allow_single_file = True,
             mandatory = True,
             doc = "The Cadence rulefile for HAL.\n" +
-            "Suggested one per project.\n" +
-            "Example: https://github.com/freecores/t6507lp/blob/ca7d7ea779082900699310db459a544133fe258a/lint/run/hal.def",
+                  "Suggested one per project.\n" +
+                  "Example: https://github.com/freecores/t6507lp/blob/ca7d7ea779082900699310db459a544133fe258a/lint/run/hal.def",
         ),
         "shells": attr.label_list(
-            doc = _SHELLS_DOC
+            doc = _SHELLS_DOC,
         ),
         "top": attr.string(
             doc = "The name of the top module.",
@@ -630,7 +629,7 @@ verilog_rtl_cdc_test = rule(
         "deps": attr.label_list(
             mandatory = True,
             doc = "Other verilog libraries this target is dependent upon.\n" +
-            "All Labels specified here must provide a VerilogInfo provider.",
+                  "All Labels specified here must provide a VerilogInfo provider.",
         ),
         "shells": attr.label_list(
             doc = _SHELLS_DOC,
