@@ -1,3 +1,6 @@
 package(default_visibility = ["//visibility:public"])
 
-exports_files(glob(["*.template", "*.f"]))
+exports_files(glob([
+    "*.template",
+    "*.f",
+]))
