@@ -1,4 +1,4 @@
-load("@verilog_tools//verilog:defs.bzl", "verilog_rtl_library", "verilog_dv_library", "verilog_dv_unit_test")
+load("@verilog_tools//verilog:defs.bzl", "verilog_dv_library", "verilog_dv_unit_test", "verilog_rtl_library")
 load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
 
 cc_library(
