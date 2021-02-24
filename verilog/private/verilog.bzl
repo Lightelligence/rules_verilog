@@ -2,6 +2,10 @@
 
 CUSTOM_SHELL = "custom"
 
+_SHELLS_DOC = """List of verilog_rtl_shell Labels.
+For each Label, a gumi define will be placed on the command line to use this shell instead of the original module.
+This requires that the original module was instantiated using `gumi_<module_name> instead of just <module_name>."""
+
 VerilogInfo = provider(fields = {
     "transitive_sources": "All source source files needed by a target. This flow is not currently setup to do partioned compile, so all files need to be carried through to the final step for compilation as a whole.",
     "transitive_flists": "All flists which specify ordering of transitive sources.",
@@ -129,13 +133,19 @@ verilog_test = rule(
     doc = """Provides a way to run a test against a set of libs.""",
     implementation = _verilog_test_impl,
     attrs = {
-        "deps": attr.label_list(mandatory = True),
-        "pre_flist_args": attr.string_list(doc = "commands and arguments before flist arguments"),
-        "post_flist_args": attr.string_list(doc = "commands and arguments after flist arguments"),
-        "shells": attr.label_list(),
+        "deps": attr.label_list(
+            mandatory = True,
+            doc = "Other verilog libraries this target is dependent upon.\n" +
+                  "All Labels specified here must provide a VerilogInfo provider.",
+        ),
+        "pre_flist_args": attr.string_list(doc = "Commands and arguments before flist arguments"),
+        "post_flist_args": attr.string_list(doc = "Commands and arguments after flist arguments"),
+        "shells": attr.label_list(
+            doc = _SHELLS_DOC,
+        ),
         "data": attr.label_list(
             allow_files = True,
-            doc = "None-verilog dependencies",
+            doc = "Non-verilog dependencies",
         ),
         "tool": attr.label(doc = "Label to a single tool to run. Inserted at before pre_flist_args if set. Do not duplicate in pre_flist_args"),
     },
