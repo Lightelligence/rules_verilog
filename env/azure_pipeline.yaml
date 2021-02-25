@@ -27,8 +27,8 @@ stages:
 
       - script: |
           source activate digital
-          bazel run --nokeep_state_after_build //:buildifier_format_diff
-          bazel run --nokeep_state_after_build //:buildifier_lint
+          bazel run --nokeep_state_after_build //tests:buildifier_format_diff
+          bazel run --nokeep_state_after_build //tests:buildifier_lint
         displayName: 'BUILD Lint Check'
        
       - script: |
