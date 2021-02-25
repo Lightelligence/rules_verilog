@@ -81,8 +81,8 @@ verilog_dv_test_cfg = rule(
         "abstract": attr.bool(
             default = False,
             doc = "When True, this configuration is abstract and does not represent a complete configuration.\n" +
-                  "It is not intended to be executed, but only to be used as a base for other test configurations to inherit from.\n" +
-                  "See inherits attribute.\n",
+                  "It is not intended to be executed. It is only intended to be used as a base for other test configurations to inherit from.\n" +
+                  "See 'inherits' attribute.\n",
         ),
         "inherits": attr.label_list(
             doc = "Inherit configurations from other verilog_dv_test_cfg targets.\n" +
@@ -101,11 +101,12 @@ verilog_dv_test_cfg = rule(
         ),
         "sim_opts": attr.string_dict(
             doc = "Additional simulation options. These are 'runtime' arguments. Preprocessor or compiler directives will not take effect.\n" +
-                  "The key, value pairs are joined without additional characters. If it is a unary flag, set the value portion to be the empty string.\n" +
-                  "For binary flags, add an '=' as a suffix to the key.\n" +
+                  "The (key, value) pairs are joined without additional characters." +
+                  "For unary arguments (e.g. +DISABLE_SCOREBOARD), set the value to be the empty string.\n" +
+                  "For arguments with a value (e.g. +UVM_VERBOSITY=UVM_MEDIUM), add an '=' as a suffix to the key.\n" +
                   "This attribute is inheritable. See 'inherits' attribute.\n" +
-                  "Unlike other inheritable attributes, simopts are not entirely overridden. Instead, the dictionary is 'updated' with new values at each successive level.\n" +
-                  "This allows for the override of individual simopts for finer grain control.",
+                  "Unlike other inheritable attributes, values in sim_opts are not entirely overridden. Instead, the dictionary is 'updated' with new values at each successive level.\n" +
+                  "This allows for the override of individual simopts for finer-grained control.",
         ),
         "no_run": attr.bool(
             default = False,
@@ -116,10 +117,10 @@ verilog_dv_test_cfg = rule(
         "sockets": attr.string_dict(
             doc = "Dictionary mapping of socket_name to socket_command.\n" +
                   "Simmer has the ability to spawn parallel processes to the primary simulation that are connected via sockets.\n" +
-                  "For each entry in the list, simmer will create a separate process and pass a unique temporary file path to both the simulator and the socket_command.\n" +
+                  "For each entry in the dictionary, simmer will create a separate process and pass a unique temporary file path to both the simulator and the socket_command.\n" +
                   "The socket name is a short identifier that will be passed as \"+SOCKET__<socket_name>=<socket_file>\" to the simulator.\n" +
-                  "The socket_file is just a file path to a temporary file in the simulation results directory (for uniqueness)\n." +
-                  "The socket_command is a bash command that must use a python string formatter of \"{socket_file}\" somewhere in the command.\n" +
+                  "The socket_file is a path to a unique temporary file in the simulation results directory created by simmer.\n" +
+                  "The socket_command is a bash command that must contain a python string formatter of \"{socket_file}\".\n" +
                   "The socket_command will be run from the root of the project tree.",
         ),
     },
@@ -269,11 +270,12 @@ def _verilog_dv_tb_impl(ctx):
 verilog_dv_tb = rule(
     doc = """A DV Testbench.
     
-    To strongly differentiate between a compilation and a simulation, there
-    exist separate rules: verilog_dv_tb and verilog_dv_test_cg respectively.
+    verilog_tools uses two separate rules to strongly differentiate between
+    compilation and simulation. verilog_dv_tb is used for compilation and    
+    verilog_dv_test_cfg is used for simulation.
 
     A verilog_dv_tb describes how to compile a testbench. It is not a
-    standalone executable rule by bazel. It is intended to provide simmer (a
+    standalone executable bazel rule. It is intended to provide simmer (a
     higher level simulation spawning tool) hooks to execute the compile and
     subsequent simulations.
     """,
@@ -281,8 +283,8 @@ verilog_dv_tb = rule(
     attrs = {
         "deps": attr.label_list(
             mandatory = True,
-            doc = "verilog_dv_library or verilog_rtl_library labels that the testbench is dependent on.\n" +
-                  "Ordering should not matter here if dependencies are consistently declared in all other rules.",
+            doc = "A list of verilog_dv_library or verilog_rtl_library labels that the testbench is dependent on.\n" +
+                  "Dependency ordering within this label list is not necessary if dependencies are consistently declared in all other rules.",
         ),
         "defines": attr.string_dict(
             doc = "Additional preprocessor defines to throw for this testbench compile.\n" +
@@ -311,14 +313,14 @@ verilog_dv_tb = rule(
             doc = "Coverage configuration file to provider to simmer.",
         ),
         "extra_compile_args": attr.string_list(
-            doc = "Additional flags to throw to pass to the compile.",
+            doc = "Additional flags to pass to the compiler.",
         ),
         "extra_runtime_args": attr.string_list(
-            doc = "Additional flags to throw to simulation run. These flags will not be provided to the compilation, but only to subsequent simulation invocations.",
+            doc = "Additional flags to throw to simulation run. These flags will not be provided to the compilation, but will be passed to subsequent simulation invocations.",
         ),
         "extra_runfiles": attr.label_list(
             allow_files = True,
-            doc = "Additional files that need to be passed as runfiles to bazel. Most commonly it is used for files referred to by extra_compile_args or extra_runtime_args.",
+            doc = "Additional files that need to be passed as runfiles to bazel. Most commonly used for files referred to by extra_compile_args or extra_runtime_args.",
         ),
         "_default_sim_opts": attr.label(
             allow_single_file = True,
@@ -374,8 +376,8 @@ verilog_dv_unit_test = rule(
     # TODO this could just be a specific use case of verilog_test
     doc = """Compiles and runs a small unit test for DV.
     
-    Typically a single verilog_dv_library (and its dependencies).
-    Additional sim options may be passed after --
+    This is typically a unit test for a single verilog_dv_library and its dependencies.
+    Additional sim options may be passed after '--' in the bazel command.
     Interactive example:
       bazel run //digital/dv/interfaces/apb_pkg:test -- -gui
     For ci testing purposes:
@@ -386,7 +388,7 @@ verilog_dv_unit_test = rule(
         "deps": attr.label_list(
             mandatory = True,
             doc = "verilog_dv_library or verilog_rtl_library labels that the testbench is dependent on.\n" +
-                  "Ordering should not matter here if dependencies are consistently declared in all other rules.",
+                  "Dependency ordering within this label list is not necessary if dependencies are consistently declared in all other rules.",
         ),
         "ut_sim_template": attr.label(
             allow_single_file = True,
@@ -396,12 +398,12 @@ verilog_dv_unit_test = rule(
         "default_sim_opts": attr.label(
             allow_single_file = True,
             default = "@verilog_tools//vendors/cadence:verilog_dv_default_sim_opts.f",
-            doc = "Default simulator options to be passed in to the simulation.",
+            doc = "Default simulator options to pass to the simulator.",
             # TODO remove this and just make it part of the template?
         ),
         "sim_args": attr.string_list(
-            doc = "Additional arguments to passed to command line to the simulator.\n" +
-                  "Both compile and runtime arguments are allowed (single step flow).",
+            doc = "Additional arguments to pass on command line to the simulator.\n" +
+                  "Both compile and runtime arguments are allowed because dv_unit_test runs as a single step flow.",
         ),
         "_command_override": attr.label(
             default = Label("@verilog_tools//:verilog_dv_unit_test_command"),
