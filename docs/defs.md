@@ -37,11 +37,12 @@ verilog_dv_tb(<a href="#verilog_dv_tb-name">name</a>, <a href="#verilog_dv_tb-cc
 
 A DV Testbench.
     
-    To strongly differentiate between a compilation and a simulation, there
-    exist separate rules: verilog_dv_tb and verilog_dv_test_cg respectively.
+    verilog_tools uses two separate rules to strongly differentiate between
+    compilation and simulation. verilog_dv_tb is used for compilation and    
+    verilog_dv_test_cfg is used for simulation.
 
     A verilog_dv_tb describes how to compile a testbench. It is not a
-    standalone executable rule by bazel. It is intended to provide simmer (a
+    standalone executable bazel rule. It is intended to provide simmer (a
     higher level simulation spawning tool) hooks to execute the compile and
     subsequent simulations.
     
@@ -54,10 +55,10 @@ A DV Testbench.
 | name |  A unique name for this target.   | <a href="https://bazel.build/docs/build-ref.html#name">Name</a> | required |  |
 | ccf |  Coverage configuration file to provider to simmer.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
 | defines |  Additional preprocessor defines to throw for this testbench compile. Key, value pairs are joined without additional characters. If it is a unary flag, set the value portion to be the empty string. For binary flags, add an '=' as a suffix to the key.   | <a href="https://bazel.build/docs/skylark/lib/dict.html">Dictionary: String -> String</a> | optional | {} |
-| deps |  verilog_dv_library or verilog_rtl_library labels that the testbench is dependent on. Ordering should not matter here if dependencies are consistently declared in all other rules.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | required |  |
-| extra_compile_args |  Additional flags to throw to pass to the compile.   | List of strings | optional | [] |
-| extra_runfiles |  Additional files that need to be passed as runfiles to bazel. Most commonly it is used for files referred to by extra_compile_args or extra_runtime_args.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
-| extra_runtime_args |  Additional flags to throw to simulation run. These flags will not be provided to the compilation, but only to subsequent simulation invocations.   | List of strings | optional | [] |
+| deps |  A list of verilog_dv_library or verilog_rtl_library labels that the testbench is dependent on. Dependency ordering within this label list is not necessary if dependencies are consistently declared in all other rules.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | required |  |
+| extra_compile_args |  Additional flags to pass to the compiler.   | List of strings | optional | [] |
+| extra_runfiles |  Additional files that need to be passed as runfiles to bazel. Most commonly used for files referred to by extra_compile_args or extra_runtime_args.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
+| extra_runtime_args |  Additional flags to throw to simulation run. These flags will not be provided to the compilation, but will be passed to subsequent simulation invocations.   | List of strings | optional | [] |
 | shells |  List of shells to use. Each label must be a verilog_rtl_shell instance. Each shell thrown will create two defines:  \<code>define gumi_{module} {module}_shell  \</code>define gumi_use_{module}_shell The shell module declaration must be guarded by the gumi_use_{module}_shell define:  \<code>ifdef gumi_use_{module}_shell     module {module}_shell(/*AUTOARGS*/);       ...     endmodule  \</code>endif   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
 | warning_waivers |  Waive warnings in the compile. By default, simmer promotes all compile warnings to errors. This list is converted to python regular expressions which are imported by simmer to waive warning. All warnings may be waived by using '\*W'   | List of strings | optional | [] |
 
@@ -82,11 +83,11 @@ A DV test configuration.
 | Name  | Description | Type | Mandatory | Default |
 | :-------------: | :-------------: | :-------------: | :-------------: | :-------------: |
 | name |  A unique name for this target.   | <a href="https://bazel.build/docs/build-ref.html#name">Name</a> | required |  |
-| abstract |  When True, this configuration is abstract and does not represent a complete configuration. It is not intended to be executed, but only to be used as a base for other test configurations to inherit from. See inherits attribute.   | Boolean | optional | False |
+| abstract |  When True, this configuration is abstract and does not represent a complete configuration. It is not intended to be executed. It is only intended to be used as a base for other test configurations to inherit from. See 'inherits' attribute.   | Boolean | optional | False |
 | inherits |  Inherit configurations from other verilog_dv_test_cfg targets. Entries later in the list will override arguments set by previous inherits entries. Only attributes noted as inheritable in documentation may be inherited. Any field explicitly set in this rule will override values set via inheritance.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
 | no_run |  Set to True to skip running this test. This flag is not used by bazel but is used as a query filter by simmer.TODO: Deprecate this flag in favor of using built-in tags.   | Boolean | optional | False |
-| sim_opts |  Additional simulation options. These are 'runtime' arguments. Preprocessor or compiler directives will not take effect. The key, value pairs are joined without additional characters. If it is a unary flag, set the value portion to be the empty string. For binary flags, add an '=' as a suffix to the key. This attribute is inheritable. See 'inherits' attribute. Unlike other inheritable attributes, simopts are not entirely overridden. Instead, the dictionary is 'updated' with new values at each successive level. This allows for the override of individual simopts for finer grain control.   | <a href="https://bazel.build/docs/skylark/lib/dict.html">Dictionary: String -> String</a> | optional | {} |
-| sockets |  Dictionary mapping of socket_name to socket_command. Simmer has the ability to spawn parallel processes to the primary simulation that are connected via sockets. For each entry in the list, simmer will create a separate process and pass a unique temporary file path to both the simulator and the socket_command. The socket name is a short identifier that will be passed as "+SOCKET__&lt;socket_name&gt;=&lt;socket_file&gt;" to the simulator. The socket_file is just a file path to a temporary file in the simulation results directory (for uniqueness) .The socket_command is a bash command that must use a python string formatter of "{socket_file}" somewhere in the command. The socket_command will be run from the root of the project tree.   | <a href="https://bazel.build/docs/skylark/lib/dict.html">Dictionary: String -> String</a> | optional | {} |
+| sim_opts |  Additional simulation options. These are 'runtime' arguments. Preprocessor or compiler directives will not take effect. The (key, value) pairs are joined without additional characters.For unary arguments (e.g. +DISABLE_SCOREBOARD), set the value to be the empty string. For arguments with a value (e.g. +UVM_VERBOSITY=UVM_MEDIUM), add an '=' as a suffix to the key. This attribute is inheritable. See 'inherits' attribute. Unlike other inheritable attributes, values in sim_opts are not entirely overridden. Instead, the dictionary is 'updated' with new values at each successive level. This allows for the override of individual simopts for finer-grained control.   | <a href="https://bazel.build/docs/skylark/lib/dict.html">Dictionary: String -> String</a> | optional | {} |
+| sockets |  Dictionary mapping of socket_name to socket_command. Simmer has the ability to spawn parallel processes to the primary simulation that are connected via sockets. For each entry in the dictionary, simmer will create a separate process and pass a unique temporary file path to both the simulator and the socket_command. The socket name is a short identifier that will be passed as "+SOCKET__&lt;socket_name&gt;=&lt;socket_file&gt;" to the simulator. The socket_file is a path to a unique temporary file in the simulation results directory created by simmer. The socket_command is a bash command that must contain a python string formatter of "{socket_file}". The socket_command will be run from the root of the project tree.   | <a href="https://bazel.build/docs/skylark/lib/dict.html">Dictionary: String -> String</a> | optional | {} |
 | tb |  The testbench to run this test on. This label must be a 'verilog_dv_tb' target.This attribute is inheritable. See 'inherits' attribute. Future: Allow tb to be a list of labels to allow a test to run on multiple verilog_dv_tb   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | None |
 | uvm_testname |  UVM testname eventually passed to simulator via plusarg +UVM_TESTNAME. This attribute is inheritable. See 'inherits' attribute.   | String | optional | "" |
 
@@ -101,8 +102,8 @@ verilog_dv_unit_test(<a href="#verilog_dv_unit_test-name">name</a>, <a href="#ve
 
 Compiles and runs a small unit test for DV.
     
-    Typically a single verilog_dv_library (and its dependencies).
-    Additional sim options may be passed after --
+    This is typically a unit test for a single verilog_dv_library and its dependencies.
+    Additional sim options may be passed after '--' in the bazel command.
     Interactive example:
       bazel run //digital/dv/interfaces/apb_pkg:test -- -gui
     For ci testing purposes:
@@ -115,9 +116,9 @@ Compiles and runs a small unit test for DV.
 | Name  | Description | Type | Mandatory | Default |
 | :-------------: | :-------------: | :-------------: | :-------------: | :-------------: |
 | name |  A unique name for this target.   | <a href="https://bazel.build/docs/build-ref.html#name">Name</a> | required |  |
-| default_sim_opts |  Default simulator options to be passed in to the simulation.   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | @verilog_tools//vendors/cadence:verilog_dv_default_sim_opts.f |
-| deps |  verilog_dv_library or verilog_rtl_library labels that the testbench is dependent on. Ordering should not matter here if dependencies are consistently declared in all other rules.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | required |  |
-| sim_args |  Additional arguments to passed to command line to the simulator. Both compile and runtime arguments are allowed (single step flow).   | List of strings | optional | [] |
+| default_sim_opts |  Default simulator options to pass to the simulator.   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | @verilog_tools//vendors/cadence:verilog_dv_default_sim_opts.f |
+| deps |  verilog_dv_library or verilog_rtl_library labels that the testbench is dependent on. Dependency ordering within this label list is not necessary if dependencies are consistently declared in all other rules.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | required |  |
+| sim_args |  Additional arguments to pass on command line to the simulator. Both compile and runtime arguments are allowed because dv_unit_test runs as a single step flow.   | List of strings | optional | [] |
 | ut_sim_template |  The template to generate the bash script to run the simulation.   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | @verilog_tools//vendors/cadence:verilog_dv_unit_test.sh.template |
 
 

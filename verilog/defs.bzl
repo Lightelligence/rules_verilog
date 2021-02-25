@@ -2,8 +2,8 @@
 
 load(
     "//verilog/private:verilog.bzl",
-    _verilog_tool_encapsulation = "verilog_tool_encapsulation",
     _verilog_test = "verilog_test",
+    _verilog_tool_encapsulation = "verilog_tool_encapsulation",
 )
 load(
     "//verilog/private:rtl.bzl",

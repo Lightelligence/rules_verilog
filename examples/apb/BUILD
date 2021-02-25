@@ -29,4 +29,3 @@ verilog_rtl_unit_test(
     ],
     deps = [":unit_test_top"],
 )
-
