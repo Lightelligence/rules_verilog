@@ -36,26 +36,26 @@ pip_install(
 ## Rules
 
 ### RTL
-Load rules into your `BUILD` files from [@verilog_tools//verilog:rtl.bzl](verilog/rtl.bzl)
+Load rules into your `BUILD` files from [@verilog_tools//verilog:deps.bzl](verilog/deps.bzl)
 
-- [verilog_rtl_library](docs/rtl.md#verilog_rtl_library)
-- [verilog_rtl_pkg](docs/rtl.md#verilog_rtl_pkg)
-- [verilog_rtl_shell](docs/rtl.md#verilog_rtl_shell)
-- [verilog_rtl_unit_test](docs/rtl.md#verilog_rtl_unit_test)
-- [verilog_rtl_lint_test](docs/rtl.md#verilog_rtl_lint_test)
-- [verilog_rtl_cdc_test](docs/rtl.md#verilog_rtl_cdc_test)
+- [verilog_rtl_library](docs/deps.md#verilog_rtl_library)
+- [verilog_rtl_pkg](docs/deps.md#verilog_rtl_pkg)
+- [verilog_rtl_shell](docs/deps.md#verilog_rtl_shell)
+- [verilog_rtl_unit_test](docs/deps.md#verilog_rtl_unit_test)
+- [verilog_rtl_lint_test](docs/deps.md#verilog_rtl_lint_test)
+- [verilog_rtl_cdc_test](docs/deps.md#verilog_rtl_cdc_test)
 
 
 ### DV
-Load rules into your `BUILD` files from [@verilog_tools//:dv.bzl](dv.bzl)
+Load rules into your `BUILD` files from [@verilog_tools//verilog:deps.bzl](verilog/deps.bzl)
 
-- [verilog_dv_library](docs/dv.md#verilog_dv_library)
-- [verilog_dv_unit_test](docs/dv.md#verilog_dv_unit_test)
-- [verilog_dv_tb](docs/dv.md#verilog_dv_tb)
-- [verilog_dv_test_cfg](docs/dv.md#verilog_dv_test_cfg)
+- [verilog_dv_library](docs/deps.md#verilog_dv_library)
+- [verilog_dv_unit_test](docs/deps.md#verilog_dv_unit_test)
+- [verilog_dv_tb](docs/deps.md#verilog_dv_tb)
+- [verilog_dv_test_cfg](docs/deps.md#verilog_dv_test_cfg)
 
 
 ### Generic Verilog
-Load rules into your `BUILD` files from [@verilog_tools//:verilog.bzl](verilog.bzl)
+Load rules into your `BUILD` files from [@verilog_tools//verilog:deps.bzl](verilog/deps.bzl)
 
-- [verilog_test](docs/verilog.md#verilog_test)
+- [verilog_test](docs/deps.md#verilog_test)
