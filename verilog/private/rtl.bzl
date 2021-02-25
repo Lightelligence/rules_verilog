@@ -67,10 +67,10 @@ def _create_flist_content(ctx, gumi_path, allow_library_discovery, no_synth = Fa
 def _verilog_rtl_library_impl(ctx):
     srcs = ctx.files.headers + ctx.files.modules + ctx.files.lib_files + ctx.files.direct
 
-    if ctx.attr._is_pkg:
+    if ctx.attr.is_pkg:
         # FIXME opu_tx_rx is failing this check
         # for dep in ctx.attr.deps:
-        #     if ShellInfo in dep and not dep[ShellInfo]._is_pkg:
+        #     if ShellInfo in dep and not dep[ShellInfo].is_pkg:
         #         fail("verilog_rtl_pkg may only depend on other verilog_rtl_pkg instances")
         pass
     else:
@@ -78,8 +78,8 @@ def _verilog_rtl_library_impl(ctx):
             if "_pkg" in src.basename:
                 fail("Package files should not declared in a verilog_rtl_library. Use a verilog_rtl_pkg instead. {} is declared in {}".format(src, ctx.label))
 
-    if ctx.attr._is_shell_of:
-        if len(ctx.attr.modules) != 1 and not ctx.attr._is_shell_of == CUSTOM_SHELL:
+    if ctx.attr.is_shell_of:
+        if len(ctx.attr.modules) != 1 and not ctx.attr.is_shell_of == CUSTOM_SHELL:
             fail("Shells must specify exactly one module")
 
         # if len(ctx.attr.deps) != 0:
@@ -209,13 +209,13 @@ verilog_rtl_library = rule(
                   "TODO: This currently enforced via an Aspect which is not included in this repository.\n" +
                   "The aspect creates a parallel set of 'synth__*.f' which have the filtered views which are passed to the synthesis tool.",
         ),
-        "_is_pkg": attr.bool(
+        "is_pkg": attr.bool(
             default = False,
             doc = "INTERNAL: Do not set in verilog_rtl_library instances.\n" +
                   "Used for internal bookkeeping for macros derived from verilog_rtl_library.\n" +
                   "Used to enforce naming conventions related to packages to encourage simple dependency graphs",
         ),
-        "_is_shell_of": attr.string(
+        "is_shell_of": attr.string(
             default = "",
             doc = "INTERNAL: Do not set in verilog_rtl_library instances.\n" +
                   "Used for internal bookkeeping for macros derived from verilog_rtl_library.\n" +
@@ -271,7 +271,7 @@ def verilog_rtl_pkg(
         name = name,
         direct = direct,
         deps = deps,
-        _is_pkg = True,
+        is_pkg = True,
         no_synth = no_synth,
         enable_gumi = False,
     )
@@ -316,7 +316,7 @@ def verilog_rtl_shell(
         name = name,
         modules = [shell_module_label],
         # Intentionally do not set deps here
-        _is_shell_of = module_to_shell_name,
+        is_shell_of = module_to_shell_name,
         no_synth = True,
         enable_gumi = False,
         deps = deps,
