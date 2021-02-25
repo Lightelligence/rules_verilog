@@ -37,7 +37,7 @@ verilog_dv_tb(<a href="#verilog_dv_tb-name">name</a>, <a href="#verilog_dv_tb-cc
 
 A DV Testbench.
     
-    verilog_tools uses two separate rules to strongly differentiate between
+    rules_verilog uses two separate rules to strongly differentiate between
     compilation and simulation. verilog_dv_tb is used for compilation and    
     verilog_dv_test_cfg is used for simulation.
 
@@ -116,10 +116,10 @@ Compiles and runs a small unit test for DV.
 | Name  | Description | Type | Mandatory | Default |
 | :-------------: | :-------------: | :-------------: | :-------------: | :-------------: |
 | name |  A unique name for this target.   | <a href="https://bazel.build/docs/build-ref.html#name">Name</a> | required |  |
-| default_sim_opts |  Default simulator options to pass to the simulator.   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | @verilog_tools//vendors/cadence:verilog_dv_default_sim_opts.f |
+| default_sim_opts |  Default simulator options to pass to the simulator.   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | @rules_verilog//vendors/cadence:verilog_dv_default_sim_opts.f |
 | deps |  verilog_dv_library or verilog_rtl_library labels that the testbench is dependent on. Dependency ordering within this label list is not necessary if dependencies are consistently declared in all other rules.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | required |  |
 | sim_args |  Additional arguments to pass on command line to the simulator. Both compile and runtime arguments are allowed because dv_unit_test runs as a single step flow.   | List of strings | optional | [] |
-| ut_sim_template |  The template to generate the bash script to run the simulation.   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | @verilog_tools//vendors/cadence:verilog_dv_unit_test.sh.template |
+| ut_sim_template |  The template to generate the bash script to run the simulation.   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | @rules_verilog//vendors/cadence:verilog_dv_unit_test.sh.template |
 
 
 <a name="#verilog_rtl_cdc_test"></a>
@@ -208,7 +208,7 @@ Compile and run lint on target
 | defines |  List of additional \<code>defines for this lint run   | <a href="https://bazel.build/docs/skylark/lib/dict.html">Dictionary: String -> String</a> | optional | {} |
 | deps |  Other verilog libraries this target is dependent upon. All Labels specified here must provide a VerilogInfo provider.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | required |  |
 | design_info |  A Cadence design_info file to add additional lint rule/waivers   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
-| lint_parser |  Post processor for lint logs allowing for easier waiving of warnings.   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | @verilog_tools//:lint_parser_hal |
+| lint_parser |  Post processor for lint logs allowing for easier waiving of warnings.   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | @rules_verilog//:lint_parser_hal |
 | rulefile |  The Cadence rulefile for HAL. Suggested one per project. Example: https://github.com/freecores/t6507lp/blob/ca7d7ea779082900699310db459a544133fe258a/lint/run/hal.def   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | required |  |
 | shells |  List of verilog_rtl_shell Labels. For each Label, a gumi define will be placed on the command line to use this shell instead of the original module. This requires that the original module was instantiated using \<code>gumi_&lt;module_name&gt; instead of just &lt;module_name&gt;.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
 | top |  The name of the top-level module for this lint run   | String | required |  |
@@ -247,7 +247,7 @@ Compile and simulate a verilog_rtl_library.
 | post_flist_args |  Additional command line arguments to be placed after the flist arguments See ut_sim_template attribute for exact layout.   | List of strings | optional | [] |
 | pre_flist_args |  Additional command line arguments to be placed after the simulator binary but before the flist arguments. See ut_sim_template attribute for exact layout.For defines to have effect, they must be declared in pre_flist_args not post_flist_args.   | List of strings | optional | [] |
 | shells |  List of verilog_rtl_shell Labels. For each Label, a gumi define will be placed on the command line to use this shell instead of the original module. This requires that the original module was instantiated using \<code>gumi_&lt;module_name&gt; instead of just &lt;module_name&gt;.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
-| ut_sim_template |  The template to generate the script to run the test. Also available is a [SVUnit](http://agilesoc.com/open-source-projects/svunit/) test template: @verilog_tools//vendors/cadence:verilog_rtl_unit_test_svunit.sh.template If using the SVUnit template, you may also want to throw: <pre><code>    post_flist_args = [     "--directory &lt;path_to_test_directory_from_workspace&gt;",  ],</code></pre>   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | @verilog_tools//vendors/cadence:verilog_rtl_unit_test.sh.template |
+| ut_sim_template |  The template to generate the script to run the test. Also available is a [SVUnit](http://agilesoc.com/open-source-projects/svunit/) test template: @rules_verilog//vendors/cadence:verilog_rtl_unit_test_svunit.sh.template If using the SVUnit template, you may also want to throw: <pre><code>    post_flist_args = [     "--directory &lt;path_to_test_directory_from_workspace&gt;",  ],</code></pre>   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | @rules_verilog//vendors/cadence:verilog_rtl_unit_test.sh.template |
 
 
 <a name="#verilog_test"></a>

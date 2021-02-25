@@ -6,7 +6,7 @@ objects to xrun via the -sv_lib flag.
 
 Example usage in another WORKSPACE file:
 
-load("@verilog_tools//:simulator.bzl", "xcelium_setup")
+load("@rules_verilog//:simulator.bzl", "xcelium_setup")
 xcelium_setup(name="xcelium")
 """
 

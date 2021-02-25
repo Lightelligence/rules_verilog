@@ -1,5 +1,5 @@
 load("@rules_python//python:defs.bzl", "py_binary", "py_library")
-load("@verilog_tools//verilog:defs.bzl", "verilog_tool_encapsulation")
+load("@rules_verilog//verilog:defs.bzl", "verilog_tool_encapsulation")
 
 package(default_visibility = ["//visibility:public"])
 

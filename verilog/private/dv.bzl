@@ -270,7 +270,7 @@ def _verilog_dv_tb_impl(ctx):
 verilog_dv_tb = rule(
     doc = """A DV Testbench.
     
-    verilog_tools uses two separate rules to strongly differentiate between
+    rules_verilog uses two separate rules to strongly differentiate between
     compilation and simulation. verilog_dv_tb is used for compilation and    
     verilog_dv_test_cfg is used for simulation.
 
@@ -324,16 +324,16 @@ verilog_dv_tb = rule(
         ),
         "_default_sim_opts": attr.label(
             allow_single_file = True,
-            default = "@verilog_tools//vendors/cadence:verilog_dv_default_sim_opts.f",
+            default = "@rules_verilog//vendors/cadence:verilog_dv_default_sim_opts.f",
             doc = "Default simulator options.",
         ),
         "_compile_args_template": attr.label(
-            default = Label("@verilog_tools//vendors/cadence:verilog_dv_tb_compile_args.f.template"),
+            default = Label("@rules_verilog//vendors/cadence:verilog_dv_tb_compile_args.f.template"),
             allow_single_file = True,
             doc = "Template to generate compilation arguments flist.",
         ),
         "_runtime_args_template": attr.label(
-            default = Label("@verilog_tools//vendors/cadence:verilog_dv_tb_runtime_args.f.template"),
+            default = Label("@rules_verilog//vendors/cadence:verilog_dv_tb_runtime_args.f.template"),
             allow_single_file = True,
             doc = "Template to generate runtime args form the 'extra_runtime_args' attribute.",
         ),
@@ -392,12 +392,12 @@ verilog_dv_unit_test = rule(
         ),
         "ut_sim_template": attr.label(
             allow_single_file = True,
-            default = Label("@verilog_tools//vendors/cadence:verilog_dv_unit_test.sh.template"),
+            default = Label("@rules_verilog//vendors/cadence:verilog_dv_unit_test.sh.template"),
             doc = "The template to generate the bash script to run the simulation.",
         ),
         "default_sim_opts": attr.label(
             allow_single_file = True,
-            default = "@verilog_tools//vendors/cadence:verilog_dv_default_sim_opts.f",
+            default = "@rules_verilog//vendors/cadence:verilog_dv_default_sim_opts.f",
             doc = "Default simulator options to pass to the simulator.",
             # TODO remove this and just make it part of the template?
         ),
@@ -406,7 +406,7 @@ verilog_dv_unit_test = rule(
                   "Both compile and runtime arguments are allowed because dv_unit_test runs as a single step flow.",
         ),
         "_command_override": attr.label(
-            default = Label("@verilog_tools//:verilog_dv_unit_test_command"),
+            default = Label("@rules_verilog//:verilog_dv_unit_test_command"),
             doc = "Allows custom override of simulator command in the event of wrapping via modulefiles.\n" +
                   "Example override in project's .bazelrc:\n" +
                   '  build --//:verilog_dv_unit_test_command="runmod -t xrun --"',

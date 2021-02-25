@@ -386,9 +386,9 @@ verilog_rtl_unit_test = rule(
         ),
         "ut_sim_template": attr.label(
             allow_single_file = True,
-            default = Label("@verilog_tools//vendors/cadence:verilog_rtl_unit_test.sh.template"),
+            default = Label("@rules_verilog//vendors/cadence:verilog_rtl_unit_test.sh.template"),
             doc = "The template to generate the script to run the test.\n" +
-                  "Also available is a [SVUnit](http://agilesoc.com/open-source-projects/svunit/) test template: @verilog_tools//vendors/cadence:verilog_rtl_unit_test_svunit.sh.template\n" +
+                  "Also available is a [SVUnit](http://agilesoc.com/open-source-projects/svunit/) test template: @rules_verilog//vendors/cadence:verilog_rtl_unit_test_svunit.sh.template\n" +
                   "If using the SVUnit template, you may also want to throw:\n" +
                   "```" +
                   "    post_flist_args = [\n" +
@@ -397,7 +397,7 @@ verilog_rtl_unit_test = rule(
                   "```",
         ),
         "_command_override": attr.label(
-            default = Label("@verilog_tools//:verilog_rtl_unit_test_command"),
+            default = Label("@rules_verilog//:verilog_rtl_unit_test_command"),
             doc = "Allows custom override of simulator command in the event of wrapping via modulefiles.\n" +
                   "Example override in project's .bazelrc:\n" +
                   '  build --//:verilog_rtl_unit_test_command="runmod -t xrun --"',
@@ -532,14 +532,14 @@ verilog_rtl_lint_test = rule(
         ),
         "lint_parser": attr.label(
             allow_files = True,
-            default = "@verilog_tools//:lint_parser_hal",
+            default = "@rules_verilog//:lint_parser_hal",
             doc = "Post processor for lint logs allowing for easier waiving of warnings.",
         ),
         "waiver_hack": attr.string(
             doc = "Lint waiver python regex to hack around cases when HAL has formatting errors in xrun.log.xml that cause problems for the lint parser",
         ),
         "_command_override": attr.label(
-            default = Label("@verilog_tools//:verilog_rtl_lint_test_command"),
+            default = Label("@rules_verilog//:verilog_rtl_lint_test_command"),
             doc = "Allows custom override of simulator command in the event of wrapping via modulefiles\n" +
                   "Example override in project's .bazelrc:\n" +
                   '  build --//:verilog_rtl_lint_test_command="runmod -t xrun --"',
@@ -601,7 +601,7 @@ def _verilog_rtl_cdc_test_impl(ctx):
         "if {$return_value} {",
         "puts \"$num_violas errors\"",
         "}",
-        "if { $::VERILOG_TOOLS_GUI == 0 } {",
+        "if { $::RULES_VERILOG_GUI == 0 } {",
         "exit $return_value",
         "}        ",
     ]
@@ -659,7 +659,7 @@ verilog_rtl_cdc_test = rule(
             doc = "The template for the generated bash script which will run the case.",
         ),
         "_command_override": attr.label(
-            default = Label("@verilog_tools//:verilog_verilog_rtl_cdc_test_command"),
+            default = Label("@rules_verilog//:verilog_verilog_rtl_cdc_test_command"),
             doc = "Allows custom override of simulator command in the event of wrapping via modulefiles\n" +
                   "Example override in project's .bazelrc:\n" +
                   '  build --//:rtl_cdc_test_command="runmod -t jg --"',

@@ -7,7 +7,7 @@ Add the following to your `WORKSPACE` file:
 ```skylark                                                                                                                                             |      #     source env/env.sh                  
 FIXME implement after first release using https://docs.bazel.build/versions/master/skylark/deploying.html#readme as template.
 
-load("@verilog_tools//:deps.bzl", "verilog_dependencies")
+load("@rules_verilog//:deps.bzl", "verilog_dependencies")
 
 verilog_dependencies()
 ```
@@ -22,21 +22,21 @@ test --action_env=LM_LICENSE_FILE
 ```
 
 ### Python Dependencies
-verilog_tools is also dependent on several python libraries. These are defined in requirements.txt and maybe installed in the package manager of your choice. The recommended flow is to install them via the pip_install rule in your `WORKSPACE` file:
+rules_verilog is also dependent on several python libraries. These are defined in requirements.txt and maybe installed in the package manager of your choice. The recommended flow is to install them via the pip_install rule in your `WORKSPACE` file:
 
 ```skylark
 load("@rules_python//python:pip.bzl", "pip_install")
 
 pip_install(
     name = "pip_deps",
-    requirements = "@verilog_tools//:requirements.txt",
+    requirements = "@rules_verilog//:requirements.txt",
 )
 ```
 
 ## Rules
 
 ### RTL
-Load rules into your `BUILD` files from [@verilog_tools//verilog:deps.bzl](verilog/deps.bzl)
+Load rules into your `BUILD` files from [@rules_verilog//verilog:deps.bzl](verilog/deps.bzl)
 
 - [verilog_rtl_library](docs/deps.md#verilog_rtl_library)
 - [verilog_rtl_pkg](docs/deps.md#verilog_rtl_pkg)
@@ -47,7 +47,7 @@ Load rules into your `BUILD` files from [@verilog_tools//verilog:deps.bzl](veril
 
 
 ### DV
-Load rules into your `BUILD` files from [@verilog_tools//verilog:deps.bzl](verilog/deps.bzl)
+Load rules into your `BUILD` files from [@rules_verilog//verilog:deps.bzl](verilog/deps.bzl)
 
 - [verilog_dv_library](docs/deps.md#verilog_dv_library)
 - [verilog_dv_unit_test](docs/deps.md#verilog_dv_unit_test)
@@ -56,6 +56,6 @@ Load rules into your `BUILD` files from [@verilog_tools//verilog:deps.bzl](veril
 
 
 ### Generic Verilog
-Load rules into your `BUILD` files from [@verilog_tools//verilog:deps.bzl](verilog/deps.bzl)
+Load rules into your `BUILD` files from [@rules_verilog//verilog:deps.bzl](verilog/deps.bzl)
 
 - [verilog_test](docs/deps.md#verilog_test)

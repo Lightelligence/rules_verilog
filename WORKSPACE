@@ -1,8 +1,8 @@
-workspace(name = "verilog_tools")
+workspace(name = "rules_verilog")
 
 load("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
-load("@verilog_tools//:deps.bzl", "verilog_dependencies")
+load("@rules_verilog//:deps.bzl", "verilog_dependencies")
 
 verilog_dependencies()
 
@@ -10,7 +10,7 @@ load("@rules_python//python:pip.bzl", "pip_install")
 
 pip_install(
     name = "pip_deps",
-    requirements = "@verilog_tools//:requirements.txt",
+    requirements = "@rules_verilog//:requirements.txt",
 )
 
 # buildifier is written in Go and hence needs rules_go to be built.
