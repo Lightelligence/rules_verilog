@@ -2,13 +2,36 @@
 
 ## Setup
                                                                                                   
-Add the following to you `WORKSPACE`:
+Add the following to your `WORKSPACE` file:
 
 ```skylark                                                                                                                                             |      #     source env/env.sh                  
 FIXME implement after first release using https://docs.bazel.build/versions/master/skylark/deploying.html#readme as template.
+
+load("@verilog_tools//:deps.bzl", "verilog_dependencies")
+
+verilog_dependencies()
+```
+**Note**: Update commit and sha256 as needed.
+
+
+Cadence Xcelium needs both HOME and LM_LICENESE_FILE environment variables, add them to your `.bazelrc` file:
+
+```
+test --action_env=HOME
+test --action_env=LM_LICENSE_FILE
 ```
 
-** Note**: Update commit and sha256 as needed.
+### Python Dependencies
+verilog_tools is also dependent on several python libraries. These are defined in requirements.txt and maybe installed in the package manager of your choice. The recommended flow is to install them via the pip_install rule in your `WORKSPACE` file:
+
+```skylark
+load("@rules_python//python:pip.bzl", "pip_install")
+
+pip_install(
+    name = "pip_deps",
+    requirements = "@verilog_tools//:requirements.txt",
+)
+```
 
 ## Rules
 
