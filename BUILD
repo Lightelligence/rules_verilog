@@ -1,5 +1,5 @@
 load("@rules_python//python:defs.bzl", "py_binary", "py_library")
-load("//verilog:verilog.bzl", "tool_encapsulation")
+load("@verilog_tools//verilog:defs.bzl", "verilog_tool_encapsulation")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -14,22 +14,22 @@ py_binary(
     deps = [":cmn_logging"],
 )
 
-tool_encapsulation(
+verilog_tool_encapsulation(
     name = "verilog_dv_unit_test_command",
     build_setting_default = "xrun",
 )
 
-tool_encapsulation(
+verilog_tool_encapsulation(
     name = "verilog_rtl_cdc_test_command",
     build_setting_default = "jg",
 )
 
-tool_encapsulation(
+verilog_tool_encapsulation(
     name = "verilog_rtl_lint_test_command",
     build_setting_default = "xrun",
 )
 
-tool_encapsulation(
+verilog_tool_encapsulation(
     name = "verilog_rtl_unit_test_command",
     build_setting_default = "xrun",
 )

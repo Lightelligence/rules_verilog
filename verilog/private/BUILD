@@ -1,5 +1,7 @@
 package(default_visibility = ["//visibility:public"])
 
 exports_files([
-    "defs.bzl",
+    "rtl.bzl",
+    "dv.bzl",
+    "verilog.bzl",
 ])

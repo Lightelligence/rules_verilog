@@ -21,9 +21,9 @@
 
 src_files=$(find -name BUILD -o -name '*.bzl' -o BUILD_template)
 
-echo $src_files | xargs sed -i 's/load("@verilog_tools\/\/:rtl.bzl/load("@verilog_tools\/\/verilog:rtl.bzl/g'
-echo $src_files | xargs sed -i 's/load("@verilog_tools\/\/:dv.bzl/load("@verilog_tools\/\/verilog:dv.bzl/g'
-echo $src_files | xargs sed -i 's/load("@verilog_tools\/\/:verilog.bzl/load("@verilog_tools\/\/verilog:verilog.bzl/g'
+echo $src_files | xargs sed -i 's/load("@verilog_tools\/\/:rtl.bzl/load("@verilog_tools\/\/verilog:defs.bzl/g'
+echo $src_files | xargs sed -i 's/load("@verilog_tools\/\/:dv.bzl/load("@verilog_tools\/\/verilog:defs.bzl/g'
+echo $src_files | xargs sed -i 's/load("@verilog_tools\/\/:verilog.bzl/load("@verilog_tools\/\/verilog:defs.bzl/g'
 
 echo $src_files | xargs sed -i 's/rtl_lib/verilog_rtl_library/g'
 echo $src_files | xargs sed -i 's/rtl_cdc/verilog_rtl_cdc_test/g'
