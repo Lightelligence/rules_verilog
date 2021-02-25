@@ -4,7 +4,7 @@ load(":verilog.bzl", "CUSTOM_SHELL", "ShellInfo", "ToolEncapsulationInfo", "Veri
 
 _SHELLS_DOC = """List of verilog_rtl_shell Labels.
 For each Label, a gumi define will be placed on the command line to use this shell instead of the original module.
-This requires that the original module was instantiated using `gumi_<module_name> instead of just <module_name>."""
+This requires that the original module was instantiated using \\`gumi_<module_name> instead of just <module_name>."""
 
 def _create_flist_content(ctx, gumi_path, allow_library_discovery, no_synth = False):
     """Create the content of a '.f' file.
@@ -184,7 +184,7 @@ verilog_rtl_library = rule(
         ),
         "modules": attr.label_list(
             allow_files = True,
-            doc = "Files containing a single module which matches the filename may be found via library.\n" +
+            doc = "Verilog files containing a single module where the module name matches the file name.\n" +
                   "A '-y' flag will be added for each source file's directory.\n" +
                   "This is the preferred mechanism for specifying RTL modules.",
         ),
@@ -192,12 +192,12 @@ verilog_rtl_library = rule(
             allow_files = True,
             doc = "Verilog library files containing multiple modules.\n" +
                   "A '-v' flag will be added for each file in this attribute.\n" +
-                  "It is preferable to used the 'modules' attribute when possible because library files require reading in entirely to discover all modules.",
+                  "It is preferable to used the 'modules' attribute when possible because library files require parsing entire files to discover all modules.",
         ),
         "direct": attr.label_list(
             allow_files = True,
             doc = "Verilog files that must be put directly onto the command line.\n" +
-                  "Avoid using 'direct' with preference towards 'modules'.",
+                  "'modules' should be used instead of 'direct' wherever possible",
         ),
         "deps": attr.label_list(
             doc = "Other verilog libraries this target is dependent upon.\n" +
@@ -205,7 +205,7 @@ verilog_rtl_library = rule(
         ),
         "no_synth": attr.bool(
             default = False,
-            doc = "When True, do not allow the content of this library to be exposed to synthesis.\n" +
+            doc = "When True, do not allow the contents of this library to be exposed to synthesis.\n" +
                   "TODO: This currently enforced via an Aspect which is not included in this repository.\n" +
                   "The aspect creates a parallel set of 'synth__*.f' which have the filtered views which are passed to the synthesis tool.",
         ),
@@ -281,13 +281,13 @@ def verilog_rtl_shell(
         module_to_shell_name,
         shell_module_label,
         deps = []):
-    """A RTL shell has the same ports as another module.
+    """An RTL shell has the same ports as another module.
 
     This rule is a specialized case of verilog_rtl_library.
     A 'shell' is similar to a 'stub' (empty module), but a shell may contain
     limited functionality. Frequent uses include:
       * Blackboxing hierarchy that will not be the target of testing
-      * Replacing functionality with a simpler model (simulation-only memory models)
+      * Replacing functionality with a simpler model (e.g. simulation-only memory models)
 
     Args:
       name: A unique name for this target.
@@ -519,16 +519,16 @@ verilog_rtl_lint_test = rule(
             doc = _SHELLS_DOC,
         ),
         "top": attr.string(
-            doc = "The name of the top module.",
+            doc = "The name of the top-level module for this lint run",
             mandatory = True,
         ),
         "design_info": attr.label_list(
             allow_files = True,
-            doc = "A Cadence design info file to add additional lint rule/waivers",
+            doc = "A Cadence design_info file to add additional lint rule/waivers",
         ),
         "defines": attr.string_dict(
             allow_empty = True,
-            doc = "List of additional `defines for this lint run",
+            doc = "List of additional \\`defines for this lint run",
         ),
         "lint_parser": attr.label(
             allow_files = True,
@@ -536,7 +536,7 @@ verilog_rtl_lint_test = rule(
             doc = "Post processor for lint logs allowing for easier waiving of warnings.",
         ),
         "waiver_hack": attr.string(
-            doc = "Lint waiver python regex to hack around cases when HAL has formatting errors in xrun.log.xml that cause problems for our lint parser",
+            doc = "Lint waiver python regex to hack around cases when HAL has formatting errors in xrun.log.xml that cause problems for the lint parser",
         ),
         "_command_override": attr.label(
             default = Label("@verilog_tools//:verilog_rtl_lint_test_command"),
@@ -635,13 +635,13 @@ verilog_rtl_cdc_test = rule(
             doc = _SHELLS_DOC,
         ),
         "top": attr.string(
-            doc = "The name of the top module",
+            doc = "The name of the top-level module for this cdc run",
             mandatory = True,
         ),
         "defines": attr.string_list(
             allow_empty = True,
             default = [],
-            doc = "List of additional `defines for this cdc run",
+            doc = "List of additional \\`defines for this cdc run",
         ),
         "bbox": attr.string_list(
             allow_empty = True,
