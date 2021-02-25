@@ -22,7 +22,7 @@ ToolEncapsulationInfo = provider(fields = {
 def _toolencapsulation_impl(ctx):
     return ToolEncapsulationInfo(command = ctx.build_setting_value)
 
-tool_encapsulation = rule(
+verilog_tool_encapsulation = rule(
     implementation = _toolencapsulation_impl,
     build_setting = config.string(flag = True),
 )

@@ -1,23 +1,5 @@
 <!-- Generated with Stardoc: http://skydoc.bazel.build -->
 
-<a name="#tool_encapsulation"></a>
-
-## tool_encapsulation
-
-<pre>
-tool_encapsulation(<a href="#tool_encapsulation-name">name</a>)
-</pre>
-
-
-
-**ATTRIBUTES**
-
-
-| Name  | Description | Type | Mandatory | Default |
-| :-------------: | :-------------: | :-------------: | :-------------: | :-------------: |
-| name |  A unique name for this target.   | <a href="https://bazel.build/docs/build-ref.html#name">Name</a> | required |  |
-
-
 <a name="#verilog_dv_library"></a>
 
 ## verilog_dv_library
@@ -289,5 +271,23 @@ Provides a way to run a test against a set of libs.
 | pre_flist_args |  commands and arguments before flist arguments   | List of strings | optional | [] |
 | shells |  -   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
 | tool |  Label to a single tool to run. Inserted at before pre_flist_args if set. Do not duplicate in pre_flist_args   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | None |
+
+
+<a name="#verilog_tool_encapsulation"></a>
+
+## verilog_tool_encapsulation
+
+<pre>
+verilog_tool_encapsulation(<a href="#verilog_tool_encapsulation-name">name</a>)
+</pre>
+
+
+
+**ATTRIBUTES**
+
+
+| Name  | Description | Type | Mandatory | Default |
+| :-------------: | :-------------: | :-------------: | :-------------: | :-------------: |
+| name |  A unique name for this target.   | <a href="https://bazel.build/docs/build-ref.html#name">Name</a> | required |  |
 
 

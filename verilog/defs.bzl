@@ -2,7 +2,7 @@
 
 load(
     "//verilog/private:verilog.bzl",
-    _tool_encapsulation = "tool_encapsulation",
+    _verilog_tool_encapsulation = "verilog_tool_encapsulation",
     _verilog_test = "verilog_test",
 )
 load(
@@ -20,7 +20,7 @@ load(
     _verilog_dv_unit_test = "verilog_dv_unit_test",
 )
 
-tool_encapsulation = _tool_encapsulation
+verilog_tool_encapsulation = _verilog_tool_encapsulation
 verilog_test = _verilog_test
 
 verilog_rtl_library = _verilog_rtl_library
