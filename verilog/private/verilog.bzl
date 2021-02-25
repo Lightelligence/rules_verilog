@@ -4,7 +4,7 @@ CUSTOM_SHELL = "custom"
 
 _SHELLS_DOC = """List of verilog_rtl_shell Labels.
 For each Label, a gumi define will be placed on the command line to use this shell instead of the original module.
-This requires that the original module was instantiated using `gumi_<module_name> instead of just <module_name>."""
+This requires that the original module was instantiated using \\`gumi_<module_name> instead of just <module_name>."""
 
 VerilogInfo = provider(fields = {
     "transitive_sources": "All source source files needed by a target. This flow is not currently setup to do partioned compile, so all files need to be carried through to the final step for compilation as a whole.",

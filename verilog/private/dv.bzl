@@ -193,7 +193,7 @@ verilog_dv_library = rule(
             allow_files = True,
             mandatory = True,
             doc = "Systemverilog source files.\n" +
-                  "Files are assumed to be `included inside another file (i.e. the package file) and will not be placed on directly in the flist unless declared in the 'in_flist' attribute.",
+                  "Files are assumed to be \\`included inside another file (e.g. the package file) and will not be placed on directly in the flist unless declared in the 'in_flist' attribute.",
         ),
         "deps": attr.label_list(
             doc = "verilog_dv_library targets that this target is dependent on.",
@@ -202,10 +202,10 @@ verilog_dv_library = rule(
             allow_files = True,
             doc = "Files to be placed directly in the generated flist.\n" +
                   "Best practice recommends 'pkg' and 'interface' files be declared here.\n" +
-                  "If this entry is empty (default), all srcs will put into the flist instead.",
+                  "If this attribute is empty (default), all srcs will put into the flist instead.",
         ),
         "dpi": attr.label_list(
-            doc = "cc_libraries to link in through the DPI. Currently, cc_import is not support for precompiled shared libraries.",
+            doc = "cc_libraries to link in through the DPI. Currently, cc_import is not supported for precompiled shared libraries.",
         ),
         "incdir": attr.bool(
             default = True,
@@ -297,14 +297,14 @@ verilog_dv_tb = rule(
         "shells": attr.label_list(
             doc = "List of shells to use. Each label must be a verilog_rtl_shell instance.\n" +
                   "Each shell thrown will create two defines:\n" +
-                  " `define gumi_{module} {module}_shell\n" +
-                  " `define gumi_use_{module}_shell\n" +
+                  " \\`define gumi_{module} {module}_shell\n" +
+                  " \\`define gumi_use_{module}_shell\n" +
                   "The shell module declaration must be guarded by the gumi_use_{module}_shell define:\n" +
-                  " `ifdef gumi_use_{module}_shell\n" +
+                  " \\`ifdef gumi_use_{module}_shell\n" +
                   "    module {module}_shell(/*AUTOARGS*/);\n" +
                   "      ...\n" +
                   "    endmodule\n" +
-                  " `endif\n",
+                  " \\`endif\n",
         ),
         "ccf": attr.label_list(
             allow_files = True,

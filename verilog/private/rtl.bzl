@@ -4,7 +4,7 @@ load(":verilog.bzl", "CUSTOM_SHELL", "ShellInfo", "ToolEncapsulationInfo", "Veri
 
 _SHELLS_DOC = """List of verilog_rtl_shell Labels.
 For each Label, a gumi define will be placed on the command line to use this shell instead of the original module.
-This requires that the original module was instantiated using `gumi_<module_name> instead of just <module_name>."""
+This requires that the original module was instantiated using \\`gumi_<module_name> instead of just <module_name>."""
 
 def _create_flist_content(ctx, gumi_path, allow_library_discovery, no_synth = False):
     """Create the content of a '.f' file.
@@ -528,7 +528,7 @@ verilog_rtl_lint_test = rule(
         ),
         "defines": attr.string_dict(
             allow_empty = True,
-            doc = "List of additional \`defines for this lint run",
+            doc = "List of additional \\`defines for this lint run",
         ),
         "lint_parser": attr.label(
             allow_files = True,
@@ -641,7 +641,7 @@ verilog_rtl_cdc_test = rule(
         "defines": attr.string_list(
             allow_empty = True,
             default = [],
-            doc = "List of additional \`defines for this cdc run",
+            doc = "List of additional \\`defines for this cdc run",
         ),
         "bbox": attr.string_list(
             allow_empty = True,
