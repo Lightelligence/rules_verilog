@@ -32,7 +32,7 @@ stages:
         displayName: 'BUILD Lint Check'
        
       - script: |
-          bazel clean --expunge
+         bazel clean --expunge
          ./tests/doc_test.sh
         displayName: 'Doc Generation Check'
 
