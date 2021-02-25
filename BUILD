@@ -15,10 +15,6 @@ py_binary(
     deps = [":cmn_logging"],
 )
 
-exports_files([
-    "default_sim_opts.f",
-])
-
 buildifier(
     name = "buildifier_format_diff",
     mode = "diff",
