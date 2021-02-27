@@ -4,12 +4,13 @@
                                                                                                   
 Add the following to your `WORKSPACE` file:
 
-```skylark                                                                                                                                             |      #     
+```skylark
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
-http_archive(
+http_archive(                                                                                                                                                                            
     name = "rules_verilog",
-    urls = ["https://github.com/lightelligence/rules_verilog/releases/download/0.0.0/rules_verilog-0.0.0.tar.gz"],
-    sha256 = "???",
+    urls = ["https://github.com/Lightelligence/rules_verilog/archive/v0.0.0.tar.gz"],
+    sha256 = "ab64a872410d22accb383c7ffc6d42e90f4de40a7cd92f43f4c26471c4f14908",
+    strip_prefix = "rules_verilog-0.0.0",
 )
 load("@rules_verilog//:deps.bzl", "verilog_dependencies")
 verilog_dependencies()
