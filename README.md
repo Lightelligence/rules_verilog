@@ -4,11 +4,14 @@
                                                                                                   
 Add the following to your `WORKSPACE` file:
 
-```skylark                                                                                                                                             |      #     source env/env.sh                  
-FIXME implement after first release using https://docs.bazel.build/versions/master/skylark/deploying.html#readme as template.
-
+```skylark                                                                                                                                             |      #     
+load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+http_archive(
+    name = "rules_verilog",
+    urls = ["https://github.com/lightelligence/rules_verilog/releases/download/0.0.0/rules_verilog-0.0.0.tar.gz"],
+    sha256 = "???",
+)
 load("@rules_verilog//:deps.bzl", "verilog_dependencies")
-
 verilog_dependencies()
 ```
 **Note**: Update commit and sha256 as needed.
