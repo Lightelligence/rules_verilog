@@ -9,4 +9,4 @@ jobs:
       - name: Run YAPF python style checks
         uses: AlexanderMelde/yapf-action@master
         with:
-          args: --diff --recursive --style env/.style.yapf .
+          args: --diff --recursive --style env/.style.yapf
