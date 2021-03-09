@@ -50,6 +50,7 @@ def parse_args(argv):
     options = parser.parse_args(argv)
     return options
 
+
 def find_bazel_runfiles(relpath, bazel_target):
     p = subprocess.Popen("bazel info", shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     p.wait()
