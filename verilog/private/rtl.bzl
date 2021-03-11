@@ -6,7 +6,7 @@ _SHELLS_DOC = """List of verilog_rtl_shell Labels.
 For each Label, a gumi define will be placed on the command line to use this shell instead of the original module.
 This requires that the original module was instantiated using \\`gumi_<module_name> instead of just <module_name>."""
 
-def _create_flist_content(ctx, gumi_path, allow_library_discovery, no_synth = False):
+def create_flist_content(ctx, gumi_path, allow_library_discovery, no_synth = False):
     """Create the content of a '.f' file.
 
     Args:
@@ -130,7 +130,7 @@ def _verilog_rtl_library_impl(ctx):
     elif not (ctx.attr.gumi_file_override == None):
         gumi_path = ctx.file.gumi_file_override.short_path
 
-    flist_content = _create_flist_content(ctx, gumi_path = gumi_path, allow_library_discovery = True)
+    flist_content = create_flist_content(ctx, gumi_path = gumi_path, allow_library_discovery = True)
 
     last_module = None
     for m in ctx.files.modules:
