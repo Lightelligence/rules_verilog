@@ -14,7 +14,7 @@ buildifier(
         "-function-docstring",
     ],
     mode = "fix",
-    )
+)
 
 buildifier(
     name = "buildifier_fix",
