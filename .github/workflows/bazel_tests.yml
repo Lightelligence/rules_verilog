@@ -1,0 +1,19 @@
+name: Run Bazel Tests
+on: [push]
+jobs:
+  bazel-tests:
+    name: Bazel Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout
+        uses: actions/checkout@main
+      
+      - name: install-bazelisk
+        uses: vsco/bazelisk-action@master
+        with:
+          version: '1.7.5'
+          bazel-install-path: './.local/bin'
+          os: 'linux'
+
+      - name: run-buildifier-diff
+        run: bazel run //tests:buildifier_format_diff
