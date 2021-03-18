@@ -400,7 +400,7 @@ verilog_rtl_unit_test = rule(
             default = Label("@rules_verilog//:verilog_rtl_unit_test_command"),
             doc = "Allows custom override of simulator command in the event of wrapping via modulefiles.\n" +
                   "Example override in project's .bazelrc:\n" +
-                  '  build --//:verilog_rtl_unit_test_command="runmod -t xrun --"',
+                  '  build --@rules_verilog//:verilog_rtl_unit_test_command="runmod -t xrun --"',
         ),
         "data": attr.label_list(
             allow_files = True,
@@ -427,7 +427,7 @@ def _verilog_rtl_lint_test_impl(ctx):
 
     content = [
         "#!/usr/bin/bash",
-        "{} \\".format(ctx._command_override[ToolEncapsulationInfo].command),
+        "{} \\".format(ctx.attr._command_override[ToolEncapsulationInfo].command),
         "  -define LINT \\",
         "  -sv \\",
         "  -hal  \\",
@@ -542,7 +542,7 @@ verilog_rtl_lint_test = rule(
             default = Label("@rules_verilog//:verilog_rtl_lint_test_command"),
             doc = "Allows custom override of simulator command in the event of wrapping via modulefiles\n" +
                   "Example override in project's .bazelrc:\n" +
-                  '  build --//:verilog_rtl_lint_test_command="runmod -t xrun --"',
+                  '  build --@rules_verilog//:verilog_rtl_lint_test_command="runmod -t xrun --"',
         ),
     },
     test = True,
@@ -662,7 +662,7 @@ verilog_rtl_cdc_test = rule(
             default = Label("@rules_verilog//:verilog_verilog_rtl_cdc_test_command"),
             doc = "Allows custom override of simulator command in the event of wrapping via modulefiles\n" +
                   "Example override in project's .bazelrc:\n" +
-                  '  build --//:rtl_cdc_test_command="runmod -t jg --"',
+                  '  build --@rules_verilog//:rtl_cdc_test_command="runmod -t jg --"',
         ),
     },
     outputs = {
