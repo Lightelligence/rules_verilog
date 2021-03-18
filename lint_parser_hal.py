@@ -16,6 +16,7 @@ import bs4
 ################################################################################
 # Checkout specific libraries
 import cmn_logging
+
 log = None
 
 LOG_INDENT = ' ' * 9
