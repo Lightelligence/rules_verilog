@@ -409,7 +409,7 @@ verilog_dv_unit_test = rule(
             default = Label("@rules_verilog//:verilog_dv_unit_test_command"),
             doc = "Allows custom override of simulator command in the event of wrapping via modulefiles.\n" +
                   "Example override in project's .bazelrc:\n" +
-                  '  build --//:verilog_dv_unit_test_command="runmod -t xrun --"',
+                  '  build --@rules_verilog//:verilog_dv_unit_test_command="runmod -t xrun --"',
         ),
     },
     outputs = {"out": "%{name}_run.sh"},
