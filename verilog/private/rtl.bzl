@@ -557,7 +557,7 @@ def _verilog_rtl_cdc_test_impl(ctx):
         template = ctx.file.bash_template,
         output = ctx.outputs.executable,
         substitutions = {
-            "{CDC_COMMAND}": ctx._command_override[ToolEncapsulationInfo].command,
+            "{CDC_COMMAND}": ctx.attr._command_override[ToolEncapsulationInfo].command,
             "{PREAMBLE_CMDS}": ctx.outputs.cdc_preamble_cmds.short_path,
             "{CMD_FILE}": ctx.outputs.cdc_epilogue_cmds.short_path,
             "{EPILOGUE_CMDS}": ctx.outputs.cdc_epilogue_cmds.short_path,
@@ -659,7 +659,7 @@ verilog_rtl_cdc_test = rule(
             doc = "The template for the generated bash script which will run the case.",
         ),
         "_command_override": attr.label(
-            default = Label("@rules_verilog//:verilog_verilog_rtl_cdc_test_command"),
+            default = Label("@rules_verilog//:verilog_rtl_cdc_test_command"),
             doc = "Allows custom override of simulator command in the event of wrapping via modulefiles\n" +
                   "Example override in project's .bazelrc:\n" +
                   '  build --@rules_verilog//:rtl_cdc_test_command="runmod -t jg --"',
