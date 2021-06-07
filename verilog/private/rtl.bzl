@@ -425,8 +425,13 @@ verilog_rtl_unit_test = rule(
 def _verilog_rtl_lint_test_impl(ctx):
     trans_flists = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_flists", allow_other_outputs = False)
 
+    # Move the previous .log and .log.xml to .bak files
+    # If the lint run doesn't produce a logfile, the lint parser script will try to parse the old log files instead of failing out
+    # Moving the previous logs prevents the parser script from parsing stale files and giving incorrect results
     content = [
         "#!/usr/bin/bash",
+        "mv xrun.log xrun.log.bak 2> /dev/null",
+        "mv xrun.log.xml xrun.log.xml.bak 2> /dev/null",
         "{} \\".format(ctx.attr._command_override[ToolEncapsulationInfo].command),
         "  -define LINT \\",
         "  -sv \\",
