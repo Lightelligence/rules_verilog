@@ -222,6 +222,14 @@ def _verilog_dv_tb_impl(ctx):
     defines.update(gather_shell_defines(ctx.attr.shells))
 
     ctx.actions.expand_template(
+        template = ctx.file._compile_args_template_vcs,
+        output = ctx.outputs.compile_args_vcs,
+        substitutions = {
+            "{DEFINES}": "\n".join(["+define+{}{}".format(key, value) for key, value in defines.items()]),
+            "{FLISTS}": flists_to_arguments(ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_flists", "\n-f"),
+        },
+    )
+    ctx.actions.expand_template(
         template = ctx.file._compile_args_template,
         output = ctx.outputs.compile_args,
         substitutions = {
@@ -254,7 +262,7 @@ def _verilog_dv_tb_impl(ctx):
     trans_srcs = get_transitive_srcs([], ctx.attr.deps + ctx.attr.shells, VerilogInfo, "transitive_sources", allow_other_outputs = True)
     trans_flists = get_transitive_srcs([], ctx.attr.deps + ctx.attr.shells, VerilogInfo, "transitive_flists", allow_other_outputs = False)
 
-    out_deps = depset([ctx.outputs.compile_args, ctx.outputs.runtime_args, ctx.outputs.compile_warning_waivers, ctx.outputs.executable])
+    out_deps = depset([ctx.outputs.compile_args_vcs, ctx.outputs.compile_args, ctx.outputs.runtime_args, ctx.outputs.compile_warning_waivers, ctx.outputs.executable])
 
     all_files = depset([], transitive = [trans_srcs, trans_flists, out_deps])
     return [
@@ -332,6 +340,11 @@ verilog_dv_tb = rule(
             allow_single_file = True,
             doc = "Template to generate compilation arguments flist.",
         ),
+        "_compile_args_template_vcs": attr.label(
+            default = Label("@rules_verilog//vendors/synopsys:verilog_dv_tb_compile_args.f.template"),
+            allow_single_file = True,
+            doc = "Template to generate VCS compilation arguments flist.",
+        ),
         "_runtime_args_template": attr.label(
             default = Label("@rules_verilog//vendors/cadence:verilog_dv_tb_runtime_args.f.template"),
             allow_single_file = True,
@@ -339,6 +352,7 @@ verilog_dv_tb = rule(
         ),
     },
     outputs = {
+        "compile_args_vcs": "%{name}_compile_args_vcs.f",
         "compile_args": "%{name}_compile_args.f",
         "compile_warning_waivers": "%{name}_compile_warning_waivers",
         "runtime_args": "%{name}_runtime_args.f",
