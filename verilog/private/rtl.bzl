@@ -564,7 +564,7 @@ def _verilog_rtl_cdc_test_impl(ctx):
         substitutions = {
             "{CDC_COMMAND}": ctx.attr._command_override[ToolEncapsulationInfo].command,
             "{PREAMBLE_CMDS}": ctx.outputs.cdc_preamble_cmds.short_path,
-            "{CMD_FILE}": ctx.files.cmd_file[0].short_path,
+            "{CMD_FILE}": ctx.outputs.cdc_epilogue_cmds.short_path,
             "{EPILOGUE_CMDS}": ctx.outputs.cdc_epilogue_cmds.short_path,
         },
     )
@@ -593,7 +593,7 @@ def _verilog_rtl_cdc_test_impl(ctx):
         "set elaborate_single_run_mode True",
         "analyze -sv09 +libext+.v+.sv {} +define+LINT+CDC{} {} {}".format(bbox_cmd, "".join(defines), flists, top_mod),
         "elaborate {} -top {} {}".format(bbox_cmd, ctx.attr.top, bbox_a_cmd),
-        "check_cdc -check -rule -set {{cdc_pair_logic wire}}"
+        "check_cdc -check -rule -set {{treat_boundaries_as_unclocked true}}",
     ]
 
     epilogue_cmds_content = [
