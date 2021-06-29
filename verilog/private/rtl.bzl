@@ -593,7 +593,7 @@ def _verilog_rtl_cdc_test_impl(ctx):
         "set elaborate_single_run_mode True",
         "analyze -sv09 +libext+.v+.sv {} +define+LINT+CDC{} {} {}".format(bbox_cmd, "".join(defines), flists, top_mod),
         "elaborate {} -top {} {}".format(bbox_cmd, ctx.attr.top, bbox_a_cmd),
-        "check_cdc -check -rule -set {{cdc_pair_logic wire}}"
+        "check_cdc -check -rule -set {{cdc_pair_logic wire}}",
     ]
 
     epilogue_cmds_content = [
