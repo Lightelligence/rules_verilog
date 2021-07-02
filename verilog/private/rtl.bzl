@@ -574,9 +574,9 @@ def _verilog_rtl_cdc_test_impl(ctx):
     for key, value in gather_shell_defines(ctx.attr.shells).items():
         defines.append("+{}{}".format(key, value))
 
-    bbox_cmd = ""
-    if ctx.attr.bbox:
-        bbox_cmd = "-bbox_m {" + "{}".format(" ".join(ctx.attr.bbox)) + "}"
+    bbox_modules_cmd = ""
+    if ctx.attr.bbox_modules:
+        bbox_modules_cmd = "-bbox_m {" + "{}".format(" ".join(ctx.attr.bbox_modules)) + "}"
 
     top_mod = ""
     for dep in ctx.attr.deps:
@@ -586,17 +586,28 @@ def _verilog_rtl_cdc_test_impl(ctx):
     if top_mod == "":
         fail("verilog_rtl_cdc_test could not determine top_module from last_module variable")
 
-    bbox_a_cmd = "-bbox_a 4096"
+    bbox_size_cmd = ""
+    if ctx.attr.bbox_size < 0:
+        fail("verilog_rtl_cdc_test was specified with a negative bbox_size")
+    elif ctx.attr.bbox_size > 0:
+        bbox_size_cmd = "-bbox_a {}".format(ctx.attr.bbox_size)
 
     premable_cmds_content = [
         "clear -all",
         "set elaborate_single_run_mode True",
-        "analyze -sv09 +libext+.v+.sv {} +define+LINT+CDC{} {} {}".format(bbox_cmd, "".join(defines), flists, top_mod),
-        "elaborate {} -top {} {}".format(bbox_cmd, ctx.attr.top, bbox_a_cmd),
-        "check_cdc -check -rule -set {{cdc_pair_logic wire}}",
+        "analyze -sv09 +libext+.v+.sv {} +define+LINT+CDC{} {} {}".format(bbox_modules_cmd, "".join(defines), flists, top_mod),
+        "elaborate {} -top {} {}".format(bbox_modules_cmd, ctx.attr.top, bbox_size_cmd),
+        "config_rtlds -rule -parameter {automatic_scheme_detection = false}",
+        "config_rtlds -rule -parameter {ignore_non_resettable_flop = true} -tag RDC_RS_DFRS",
     ]
 
     epilogue_cmds_content = [
+        "check_cdc -init",
+        "check_cdc -clock_domain -find",
+        "check_cdc -pair -find",
+        "check_cdc -scheme -find",
+        "check_cdc -group -find",
+        "check_cdc -reset -find",
         "set all_violas [check_cdc -list violations]",
         "set num_violas [llength $all_violas]",
         "for {set viola_idx 0} {$viola_idx < $num_violas} {incr viola_idx} {",
@@ -648,10 +659,14 @@ verilog_rtl_cdc_test = rule(
             default = [],
             doc = "List of additional \\`defines for this cdc run",
         ),
-        "bbox": attr.string_list(
+        "bbox_modules": attr.string_list(
             allow_empty = True,
             default = [],
             doc = "List of modules to black box",
+        ),
+        "bbox_size": attr.int(
+            default = 0,
+            doc = "Black box any RTL array greater than the specified size. If this attribute is not set, the CDC tool will use the default size",
         ),
         "cmd_file": attr.label(
             allow_files = True,
