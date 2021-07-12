@@ -586,17 +586,17 @@ def _verilog_rtl_cdc_test_impl(ctx):
     if top_mod == "":
         fail("verilog_rtl_cdc_test could not determine top_module from last_module variable")
 
-    bbox_size_cmd = ""
-    if ctx.attr.bbox_size < 0:
-        fail("verilog_rtl_cdc_test was specified with a negative bbox_size")
-    elif ctx.attr.bbox_size > 0:
-        bbox_size_cmd = "-bbox_a {}".format(ctx.attr.bbox_size)
+    bbox_array_size_cmd = ""
+    if ctx.attr.bbox_array_size < 0:
+        fail("verilog_rtl_cdc_test was specified with a negative bbox_array_size")
+    elif ctx.attr.bbox_array_size > 0:
+        bbox_array_size_cmd = "-bbox_a {}".format(ctx.attr.bbox_array_size)
 
     premable_cmds_content = [
         "clear -all",
         "set elaborate_single_run_mode True",
         "analyze -sv09 +libext+.v+.sv {} +define+LINT+CDC{} {} {}".format(bbox_modules_cmd, "".join(defines), flists, top_mod),
-        "elaborate {} -top {} {}".format(bbox_modules_cmd, ctx.attr.top, bbox_size_cmd),
+        "elaborate {} -top {} {}".format(bbox_modules_cmd, ctx.attr.top, bbox_array_size_cmd),
     ]
 
     epilogue_cmds_content = [
@@ -662,7 +662,7 @@ verilog_rtl_cdc_test = rule(
             default = [],
             doc = "List of modules to black box",
         ),
-        "bbox_size": attr.int(
+        "bbox_array_size": attr.int(
             default = 0,
             doc = "Black box any RTL array greater than the specified size. If this attribute is not set, the CDC tool will use the default size",
         ),
