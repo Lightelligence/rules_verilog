@@ -564,7 +564,7 @@ def _verilog_rtl_cdc_test_impl(ctx):
         substitutions = {
             "{CDC_COMMAND}": ctx.attr._command_override[ToolEncapsulationInfo].command,
             "{PREAMBLE_CMDS}": ctx.outputs.cdc_preamble_cmds.short_path,
-            "{CMD_FILE}": ctx.files.cmd_file[0].short_path,
+            "{CMD_FILES}": " ".join([cmd_file.short_path for cmd_file in ctx.files.cmd_files]),
             "{EPILOGUE_CMDS}": ctx.outputs.cdc_epilogue_cmds.short_path,
         },
     )
@@ -597,8 +597,6 @@ def _verilog_rtl_cdc_test_impl(ctx):
         "set elaborate_single_run_mode True",
         "analyze -sv09 +libext+.v+.sv {} +define+LINT+CDC{} {} {}".format(bbox_modules_cmd, "".join(defines), flists, top_mod),
         "elaborate {} -top {} {}".format(bbox_modules_cmd, ctx.attr.top, bbox_size_cmd),
-        "config_rtlds -rule -parameter {automatic_scheme_detection = false}",
-        "config_rtlds -rule -parameter {ignore_non_resettable_flop = true} -tag RDC_RS_DFRS",
     ]
 
     epilogue_cmds_content = [
@@ -619,10 +617,10 @@ def _verilog_rtl_cdc_test_impl(ctx):
         "}",
         "if { $::RULES_VERILOG_GUI == 0 } {",
         "exit $return_value",
-        "}        ",
+        "}",
     ]
 
-    runfiles = ctx.runfiles(files = [ctx.outputs.cdc_preamble_cmds, ctx.outputs.cdc_epilogue_cmds] + trans_srcs.to_list() + trans_flists.to_list() + ctx.files.cmd_file)
+    runfiles = ctx.runfiles(files = [ctx.outputs.cdc_preamble_cmds, ctx.outputs.cdc_epilogue_cmds] + trans_srcs.to_list() + trans_flists.to_list() + ctx.files.cmd_files)
 
     ctx.actions.write(
         output = ctx.outputs.cdc_preamble_cmds,
@@ -668,9 +666,9 @@ verilog_rtl_cdc_test = rule(
             default = 0,
             doc = "Black box any RTL array greater than the specified size. If this attribute is not set, the CDC tool will use the default size",
         ),
-        "cmd_file": attr.label(
+        "cmd_files": attr.label_list(
             allow_files = True,
-            doc = "A tcl file containing commands to run in JG",
+            doc = "A list of tcl files containing commands to run. Multiple files are allowed to facilitate separating common project commands and block-specific commands.",
             mandatory = True,
         ),
         "bash_template": attr.label(

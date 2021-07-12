@@ -29,7 +29,7 @@ fi
   -proj cdc_run \
   -define RULES_VERILOG_GUI $use_gui \
   {PREAMBLE_CMDS} \
-  {CMD_FILE} \
+  {CMD_FILES} \
   {EPILOGUE_CMDS} \
   $@
 ! grep "^\[*ERROR" cdc_run/jg.log
