@@ -564,7 +564,7 @@ def _verilog_rtl_cdc_test_impl(ctx):
         substitutions = {
             "{CDC_COMMAND}": ctx.attr._command_override[ToolEncapsulationInfo].command,
             "{PREAMBLE_CMDS}": ctx.outputs.cdc_preamble_cmds.short_path,
-            "{CMD_FILE}": ctx.outputs.cdc_epilogue_cmds.short_path,
+            "{CMD_FILES}": " ".join([cmd_file.short_path for cmd_file in ctx.files.cmd_files]),
             "{EPILOGUE_CMDS}": ctx.outputs.cdc_epilogue_cmds.short_path,
         },
     )
@@ -574,9 +574,9 @@ def _verilog_rtl_cdc_test_impl(ctx):
     for key, value in gather_shell_defines(ctx.attr.shells).items():
         defines.append("+{}{}".format(key, value))
 
-    bbox_cmd = ""
-    if ctx.attr.bbox:
-        bbox_cmd = "-bbox_m {" + "{}".format(" ".join(ctx.attr.bbox)) + "}"
+    bbox_modules_cmd = ""
+    if ctx.attr.bbox_modules:
+        bbox_modules_cmd = "-bbox_m {" + "{}".format(" ".join(ctx.attr.bbox_modules)) + "}"
 
     top_mod = ""
     for dep in ctx.attr.deps:
@@ -586,17 +586,26 @@ def _verilog_rtl_cdc_test_impl(ctx):
     if top_mod == "":
         fail("verilog_rtl_cdc_test could not determine top_module from last_module variable")
 
-    bbox_a_cmd = "-bbox_a 4096"
+    bbox_array_size_cmd = ""
+    if ctx.attr.bbox_array_size < 0:
+        fail("verilog_rtl_cdc_test was specified with a negative bbox_array_size")
+    elif ctx.attr.bbox_array_size > 0:
+        bbox_array_size_cmd = "-bbox_a {}".format(ctx.attr.bbox_array_size)
 
     premable_cmds_content = [
         "clear -all",
         "set elaborate_single_run_mode True",
-        "analyze -sv09 +libext+.v+.sv {} +define+LINT+CDC{} {} {}".format(bbox_cmd, "".join(defines), flists, top_mod),
-        "elaborate {} -top {} {}".format(bbox_cmd, ctx.attr.top, bbox_a_cmd),
-        "check_cdc -check -rule -set {{treat_boundaries_as_unclocked true}}",
+        "analyze -sv09 +libext+.v+.sv {} +define+LINT+CDC{} {} {}".format(bbox_modules_cmd, "".join(defines), flists, top_mod),
+        "elaborate {} -top {} {}".format(bbox_modules_cmd, ctx.attr.top, bbox_array_size_cmd),
     ]
 
     epilogue_cmds_content = [
+        "check_cdc -init",
+        "check_cdc -clock_domain -find",
+        "check_cdc -pair -find",
+        "check_cdc -scheme -find",
+        "check_cdc -group -find",
+        "check_cdc -reset -find",
         "set all_violas [check_cdc -list violations]",
         "set num_violas [llength $all_violas]",
         "for {set viola_idx 0} {$viola_idx < $num_violas} {incr viola_idx} {",
@@ -608,10 +617,10 @@ def _verilog_rtl_cdc_test_impl(ctx):
         "}",
         "if { $::RULES_VERILOG_GUI == 0 } {",
         "exit $return_value",
-        "}        ",
+        "}",
     ]
 
-    runfiles = ctx.runfiles(files = [ctx.outputs.cdc_preamble_cmds, ctx.outputs.cdc_epilogue_cmds] + trans_srcs.to_list() + trans_flists.to_list() + ctx.files.cmd_file)
+    runfiles = ctx.runfiles(files = [ctx.outputs.cdc_preamble_cmds, ctx.outputs.cdc_epilogue_cmds] + trans_srcs.to_list() + trans_flists.to_list() + ctx.files.cmd_files)
 
     ctx.actions.write(
         output = ctx.outputs.cdc_preamble_cmds,
@@ -648,14 +657,18 @@ verilog_rtl_cdc_test = rule(
             default = [],
             doc = "List of additional \\`defines for this cdc run",
         ),
-        "bbox": attr.string_list(
+        "bbox_modules": attr.string_list(
             allow_empty = True,
             default = [],
             doc = "List of modules to black box",
         ),
-        "cmd_file": attr.label(
+        "bbox_array_size": attr.int(
+            default = 0,
+            doc = "Black box any RTL array greater than the specified size. If the value of this attribute is 0, the CDC tool will use the default size",
+        ),
+        "cmd_files": attr.label_list(
             allow_files = True,
-            doc = "A tcl file containing commands to run in JG",
+            doc = "A list of tcl files containing commands to run. Multiple files are allowed to facilitate separating common project commands and block-specific commands.",
             mandatory = True,
         ),
         "bash_template": attr.label(

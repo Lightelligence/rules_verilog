@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# This is a template for the bazel verilog_rtl_cdc_test rule
+# It is not intended to be run stand-alone
 set -e
 
 use_gui=0
@@ -21,13 +23,13 @@ then
     no_gui_flag=""
 fi
 
-runmod -t jg -- \
+{CDC_COMMAND} \
   -cdc \
   $no_gui_flag \
   -proj cdc_run \
   -define RULES_VERILOG_GUI $use_gui \
   {PREAMBLE_CMDS} \
-  {CMD_FILE} \
+  {CMD_FILES} \
   {EPILOGUE_CMDS} \
   $@
 ! grep "^\[*ERROR" cdc_run/jg.log
