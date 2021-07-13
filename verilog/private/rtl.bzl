@@ -664,7 +664,7 @@ verilog_rtl_cdc_test = rule(
         ),
         "bbox_array_size": attr.int(
             default = 0,
-            doc = "Black box any RTL array greater than the specified size. If this attribute is not set, the CDC tool will use the default size",
+            doc = "Black box any RTL array greater than the specified size. If the value of this attribute is 0, the CDC tool will use the default size",
         ),
         "cmd_files": attr.label_list(
             allow_files = True,
