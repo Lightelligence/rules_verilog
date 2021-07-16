@@ -49,6 +49,7 @@ def create_flist_content(ctx, gumi_path, allow_library_discovery, no_synth = Fal
             for d in libdir:
                 if d == "":
                     d = "."
+                ##flist_content.append("-y {}".format(d))
                 flist_content.append("+incdir+{}".format(d))
             for h in lib:
                 flist_content.append("{}".format(h))
