@@ -38,6 +38,7 @@ def create_flist_content(ctx, gumi_path, allow_library_discovery, no_synth = Fal
         flist_content.append("+incdir+{}".format(d))
 
     # Using dirname may result in bazel-out included in path
+    lib    = depset([f.short_path for f in ctx.files.modules]).to_list()
     libdir = depset([f.short_path[:-len(f.basename) - 1] for f in ctx.files.modules]).to_list()
 
     #if len(libdir):
@@ -48,8 +49,9 @@ def create_flist_content(ctx, gumi_path, allow_library_discovery, no_synth = Fal
             for d in libdir:
                 if d == "":
                     d = "."
-                ##flist_content.append("-y {}".format(d))
                 flist_content.append("+incdir+{}".format(d))
+            for h in lib:
+                flist_content.append("{}".format(h))
         else:
             flist_content += [f.short_path for f in ctx.files.modules]
 

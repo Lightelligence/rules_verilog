@@ -230,6 +230,14 @@ def _verilog_dv_tb_impl(ctx):
         },
     )
     ctx.actions.expand_template(
+        template = ctx.file._runtime_args_template_vcs,
+        output = ctx.outputs.runtime_args_vcs,
+        substitutions = {
+            ##"{RUNTIME_ARGS}": ctx.expand_location("\n".join(ctx.attr.extra_runtime_args), targets = ctx.attr.extra_runfiles),
+            "{DPI_LIBS}": flists_to_arguments(ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_dpi", "-sv_lib"),
+        },
+    )
+    ctx.actions.expand_template(
         template = ctx.file._compile_args_template,
         output = ctx.outputs.compile_args,
         substitutions = {
@@ -262,7 +270,7 @@ def _verilog_dv_tb_impl(ctx):
     trans_srcs = get_transitive_srcs([], ctx.attr.deps + ctx.attr.shells, VerilogInfo, "transitive_sources", allow_other_outputs = True)
     trans_flists = get_transitive_srcs([], ctx.attr.deps + ctx.attr.shells, VerilogInfo, "transitive_flists", allow_other_outputs = False)
 
-    out_deps = depset([ctx.outputs.compile_args_vcs, ctx.outputs.compile_args, ctx.outputs.runtime_args, ctx.outputs.compile_warning_waivers, ctx.outputs.executable])
+    out_deps = depset([ctx.outputs.compile_args_vcs, ctx.outputs.runtime_args_vcs, ctx.outputs.compile_args, ctx.outputs.runtime_args, ctx.outputs.compile_warning_waivers, ctx.outputs.executable])
 
     all_files = depset([], transitive = [trans_srcs, trans_flists, out_deps])
     return [
@@ -350,9 +358,15 @@ verilog_dv_tb = rule(
             allow_single_file = True,
             doc = "Template to generate runtime args form the 'extra_runtime_args' attribute.",
         ),
+        "_runtime_args_template_vcs": attr.label(
+            default = Label("@rules_verilog//vendors/synopsys:verilog_dv_tb_runtime_args.f.template"),
+            allow_single_file = True,
+            doc = "Template to generate VCS runtime args form the 'extra_runtime_args' attribute.",
+        ),
     },
     outputs = {
         "compile_args_vcs": "%{name}_compile_args_vcs.f",
+        "runtime_args_vcs": "%{name}_runtime_args_vcs.f",
         "compile_args": "%{name}_compile_args.f",
         "compile_warning_waivers": "%{name}_compile_warning_waivers",
         "runtime_args": "%{name}_runtime_args.f",
