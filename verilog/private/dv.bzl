@@ -171,15 +171,17 @@ def _verilog_dv_library_impl(ctx):
 
     trans_srcs = get_transitive_srcs(ctx.files.srcs, ctx.attr.deps + ctx.attr.dpi, VerilogInfo, "transitive_sources", allow_other_outputs = True)
     trans_flists = get_transitive_srcs([out], ctx.attr.deps, VerilogInfo, "transitive_flists", allow_other_outputs = False)
+    trans_flists_vcs = get_transitive_srcs([out], ctx.attr.deps, VerilogInfo, "transitive_flists_vcs", allow_other_outputs = False)
     trans_dpi = get_transitive_srcs(all_sos, ctx.attr.deps, VerilogInfo, "transitive_dpi", allow_other_outputs = False)
 
-    all_files = depset(trans_srcs.to_list() + trans_flists.to_list())
+    #all_files = depset(trans_srcs.to_list() + trans_flists.to_list())
+    all_files = depset(trans_srcs.to_list() + trans_flists.to_list() + trans_flists_vcs.to_list())
 
     return [
-        VerilogInfo(transitive_sources = trans_srcs, transitive_flists = trans_flists, transitive_dpi = trans_dpi),
+        VerilogInfo(transitive_sources = trans_srcs, transitive_flists = trans_flists, transitive_flists_vcs = trans_flists_vcs, transitive_dpi = trans_dpi),
         DefaultInfo(
             files = all_files,
-            runfiles = ctx.runfiles(files = trans_srcs.to_list() + trans_flists.to_list()),
+            runfiles = ctx.runfiles(files = trans_srcs.to_list() + trans_flists.to_list() + trans_flists_vcs.to_list()),
         ),
     ]
 
@@ -226,7 +228,7 @@ def _verilog_dv_tb_impl(ctx):
         output = ctx.outputs.compile_args_vcs,
         substitutions = {
             "{DEFINES}": "\n".join(["+define+{}{}".format(key, value) for key, value in defines.items()]),
-            "{FLISTS}": flists_to_arguments(ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_flists", "\n-f"),
+            "{FLISTS}": flists_to_arguments(ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_flists_vcs", "\n-f"),
         },
     )
     ctx.actions.expand_template(
@@ -247,11 +249,6 @@ def _verilog_dv_tb_impl(ctx):
         },
     )
 
-    ctx.actions.write(
-        output = ctx.outputs.compile_warning_waivers,
-        content = "[\n" + "\n".join(["re.compile('{}'),".format(ww) for ww in ctx.attr.warning_waivers]) + "\n]\n",
-    )
-
     ctx.actions.expand_template(
         template = ctx.file._runtime_args_template,
         output = ctx.outputs.runtime_args,
@@ -259,6 +256,11 @@ def _verilog_dv_tb_impl(ctx):
             "{RUNTIME_ARGS}": ctx.expand_location("\n".join(ctx.attr.extra_runtime_args), targets = ctx.attr.extra_runfiles),
             "{DPI_LIBS}": flists_to_arguments(ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_dpi", "-sv_lib"),
         },
+    )
+
+    ctx.actions.write(
+        output = ctx.outputs.compile_warning_waivers,
+        content = "[\n" + "\n".join(["re.compile('{}'),".format(ww) for ww in ctx.attr.warning_waivers]) + "\n]\n",
     )
 
     # Null action to trigger run?
@@ -269,14 +271,15 @@ def _verilog_dv_tb_impl(ctx):
 
     trans_srcs = get_transitive_srcs([], ctx.attr.deps + ctx.attr.shells, VerilogInfo, "transitive_sources", allow_other_outputs = True)
     trans_flists = get_transitive_srcs([], ctx.attr.deps + ctx.attr.shells, VerilogInfo, "transitive_flists", allow_other_outputs = False)
+    trans_flists_vcs = get_transitive_srcs([], ctx.attr.deps + ctx.attr.shells, VerilogInfo, "transitive_flists_vcs", allow_other_outputs = False)
 
     out_deps = depset([ctx.outputs.compile_args_vcs, ctx.outputs.runtime_args_vcs, ctx.outputs.compile_args, ctx.outputs.runtime_args, ctx.outputs.compile_warning_waivers, ctx.outputs.executable])
 
-    all_files = depset([], transitive = [trans_srcs, trans_flists, out_deps])
+    all_files = depset([], transitive = [trans_srcs, trans_flists, trans_flists_vcs, out_deps])
     return [
         DefaultInfo(
             files = all_files,
-            runfiles = ctx.runfiles(files = trans_srcs.to_list() + trans_flists.to_list() + out_deps.to_list() + ctx.files.ccf + ctx.files.extra_runfiles + [ctx.file._default_sim_opts]),
+            runfiles = ctx.runfiles(files = trans_srcs.to_list() + trans_flists.to_list() + trans_flists_vcs.to_list() + out_deps.to_list() + ctx.files.ccf + ctx.files.extra_runfiles + [ctx.file._default_sim_opts]),
         ),
         DVTBInfo(
             ccf = ctx.files.ccf,
@@ -368,8 +371,8 @@ verilog_dv_tb = rule(
         "compile_args_vcs": "%{name}_compile_args_vcs.f",
         "runtime_args_vcs": "%{name}_runtime_args_vcs.f",
         "compile_args": "%{name}_compile_args.f",
-        "compile_warning_waivers": "%{name}_compile_warning_waivers",
         "runtime_args": "%{name}_runtime_args.f",
+        "compile_warning_waivers": "%{name}_compile_warning_waivers",
     },
     # TODO does this still need to be executable with a empty command?
     executable = True,
