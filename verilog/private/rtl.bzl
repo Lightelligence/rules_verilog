@@ -38,7 +38,6 @@ def create_flist_content(ctx, gumi_path, allow_library_discovery, no_synth = Fal
         flist_content.append("+incdir+{}".format(d))
 
     # Using dirname may result in bazel-out included in path
-    lib    = depset([f.short_path for f in ctx.files.modules]).to_list()
     libdir = depset([f.short_path[:-len(f.basename) - 1] for f in ctx.files.modules]).to_list()
 
     #if len(libdir):
@@ -51,67 +50,8 @@ def create_flist_content(ctx, gumi_path, allow_library_discovery, no_synth = Fal
                     d = "."
                 flist_content.append("-y {}".format(d))
         else:
-            flist_content += [f.short_path for f in ctx.files.modules]
-
-        for f in ctx.files.lib_files:
-            if allow_library_discovery:
-                flist_content.append("-v {}".format(f.short_path))
-            else:
-                flist_content.append(f.short_path)
-
-        for f in ctx.files.direct:
-            flist_content.append(f.short_path)
-
-    flist_content.append("")
-    return flist_content
-
-def create_flist_content_vcs(ctx, gumi_path, allow_library_discovery, no_synth = False):
-    """Create the content of a '.f' file for VCS.
-
-    Args:
-      gumi_path: The path to the dynamically created gumi file to include.
-
-        The gumi file is put directly on the command line to ensure that the
-        defines are always used.
-      allow_library_discovery: When false, modules are placed directly on the command line.
-
-        Preference is to use the -y (modules in this directory can be found by
-        searching for a file with the same name) and -v (file is a library file
-        containing multiple modules) flags. Some tools, e.g. Genus, do not
-        handle -y correctly when invoked many times. As a workaround for these
-        tools, setting allow_library_discovery to false will put all module
-        files and library files directly onto the command line.
-      no_synth: When true, filter any target that sets no_synth=True
-
-        This is an extra precaution to ensure that nonsynthesizable libraries
-        are not passed to the synthesis tool.
-
-    Returns:
-      List of strings representing flist content.
-    """
-    flist_content = []
-
-    # Using dirname may result in bazel-out included in path
-    incdir = depset([f.short_path[:-len(f.basename) - 1] for f in ctx.files.headers]).to_list()
-    for d in incdir:
-        flist_content.append("+incdir+{}".format(d))
-
-    # Using dirname may result in bazel-out included in path
-    lib    = depset([f.short_path for f in ctx.files.modules]).to_list()
-    libdir = depset([f.short_path[:-len(f.basename) - 1] for f in ctx.files.modules]).to_list()
-
-    #if len(libdir):
-    flist_content.append(gumi_path)
-
-    if not no_synth:
-        if allow_library_discovery:
             for d in libdir:
-                if d == "":
-                    d = "."
                 flist_content.append("+incdir+{}".format(d))
-            for h in lib:
-                flist_content.append("{}".format(h))
-        else:
             flist_content += [f.short_path for f in ctx.files.modules]
 
         for f in ctx.files.lib_files:
@@ -192,8 +132,8 @@ def _verilog_rtl_library_impl(ctx):
     elif not (ctx.attr.gumi_file_override == None):
         gumi_path = ctx.file.gumi_file_override.short_path
 
-    flist_content = create_flist_content(ctx, gumi_path = gumi_path, allow_library_discovery = True)
-    flist_content_vcs = create_flist_content_vcs(ctx, gumi_path = gumi_path, allow_library_discovery = True)
+    flist_content     = create_flist_content(ctx, gumi_path = gumi_path, allow_library_discovery = True)
+    flist_content_vcs = create_flist_content(ctx, gumi_path = gumi_path, allow_library_discovery = False)
 
     last_module = None
     for m in ctx.files.modules:
