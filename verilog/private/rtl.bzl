@@ -361,7 +361,7 @@ def _verilog_rtl_unit_test_impl(ctx):
         template = ctx.file.ut_sim_template,
         output = ctx.outputs.executable,
         substitutions = {
-            "{SIMULATOR_COMMAND}": ctx.attr._command_override[ToolEncapsulationInfo].command,
+            "{SIMULATOR_COMMAND}": ctx.attr.command_override[ToolEncapsulationInfo].command,
             "{FLISTS}": " ".join(["-f {}".format(f.short_path) for f in flists_list]),
             "{TOP}": top,
             "{PRE_FLIST_ARGS}": "\n".join(pre_fa),
@@ -407,7 +407,7 @@ verilog_rtl_unit_test = rule(
                   " ]," +
                   "```",
         ),
-        "_command_override": attr.label(
+        "command_override": attr.label(
             default = Label("@rules_verilog//:verilog_rtl_unit_test_command"),
             doc = "Allows custom override of simulator command in the event of wrapping via modulefiles.\n" +
                   "Example override in project's .bazelrc:\n" +
