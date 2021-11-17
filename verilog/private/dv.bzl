@@ -137,7 +137,7 @@ verilog_dv_test_cfg = rule(
         ),
         "timeout": attr.int(
             default = -1,
-            doc = "Duration in seconds before the test will be killed due to timeout.\n" +
+            doc = "Duration in minutes before the test will be killed due to timeout.\n" +
                   "This option is inheritable.",
         ),
     },
