@@ -7,7 +7,7 @@ DVTestInfo = provider(fields = {
     "uvm_testname": "UVM Test Name; passed to simulator via plusarg +UVM_TESTNAME.",
     "tb": "The verilog_dv_tb (verilog compile) associated with this test. Must be a Label of type verilog_dv_tb.",
     "tags": "Additional tags to be able to filter in simmer.",
-    "timeout" : "Duration in seconds before the test will be killed due to timeout.",
+    "timeout": "Duration in seconds before the test will be killed due to timeout.",
 })
 
 DVTBInfo = provider(fields = {
