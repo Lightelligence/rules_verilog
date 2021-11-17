@@ -7,6 +7,7 @@ DVTestInfo = provider(fields = {
     "uvm_testname": "UVM Test Name; passed to simulator via plusarg +UVM_TESTNAME.",
     "tb": "The verilog_dv_tb (verilog compile) associated with this test. Must be a Label of type verilog_dv_tb.",
     "tags": "Additional tags to be able to filter in simmer.",
+    "timeout" : "Duration in seconds before the test will be killed due to timeout.",
 })
 
 DVTBInfo = provider(fields = {
@@ -16,6 +17,7 @@ DVTBInfo = provider(fields = {
 def _verilog_dv_test_cfg_impl(ctx):
     parent_uvm_testnames = [dep[DVTestInfo].uvm_testname for dep in reversed(ctx.attr.inherits) if hasattr(dep[DVTestInfo], "uvm_testname")]
     parent_tbs = [dep[DVTestInfo].tb for dep in reversed(ctx.attr.inherits) if hasattr(dep[DVTestInfo], "tb")]
+    parent_timeouts = [dep[DVTestInfo].timeout for dep in reversed(ctx.attr.inherits) if hasattr(dep[DVTestInfo], "timeout")]
 
     sim_opts = {}
 
@@ -36,6 +38,12 @@ def _verilog_dv_test_cfg_impl(ctx):
     else:
         uvm_testname = ctx.attr.name
 
+    timeout = None
+    if ctx.attr.timeout:
+        timeout = ctx.attr.timeout
+    elif len(parent_timeouts):
+        timeout = parent_timeouts[0]
+
     tb = None
     if ctx.attr.tb:
         tb = ctx.attr.tb
@@ -44,6 +52,7 @@ def _verilog_dv_test_cfg_impl(ctx):
 
     provider_args["uvm_testname"] = uvm_testname
     provider_args["tb"] = tb
+    provider_args["timeout"] = timeout
     provider_args["sim_opts"] = sim_opts
     provider_args["tags"] = ctx.attr.tags
 
@@ -62,7 +71,10 @@ def _verilog_dv_test_cfg_impl(ctx):
         if "{socket_file}" not in socket_command:
             fail("socket {} did not have {{socket_file}} in socket_command".format(socket_name))
 
-    dynamic_args = {"sockets": ctx.attr.sockets}
+    dynamic_args = {
+        "sockets": ctx.attr.sockets,
+        "timeout": timeout,
+    }
     out = ctx.outputs.dynamic_args
     ctx.actions.write(
         output = out,
@@ -122,6 +134,11 @@ verilog_dv_test_cfg = rule(
                   "The socket_file is a path to a unique temporary file in the simulation results directory created by simmer.\n" +
                   "The socket_command is a bash command that must contain a python string formatter of \"{socket_file}\".\n" +
                   "The socket_command will be run from the root of the project tree.",
+        ),
+        "timeout": attr.int(
+            default = -1,
+            doc = "Duration in seconds before the test will be killed due to timeout.\n" +
+                  "This option is inheritable.",
         ),
     },
     outputs = {
