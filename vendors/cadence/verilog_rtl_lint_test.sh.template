@@ -1,0 +1,21 @@
+#!/usr/bin/bash
+set -e
+
+mv xrun.log xrun.log.bak 2> /dev/null
+mv xrun.log.xml xrun.log.xml.bak 2> /dev/null
+{SIMULATOR_COMMAND} \
+  -define LINT \
+  -sv \
+  -hal  \
+  -licqueue \
+  -libext .v \
+  -libext .sv \
+  -enable_single_yvlib \
+  -timescale 100fs/100fs \
+  {DEFINES} \
+  {FLISTS} \
+  {TOP_PATH} \
+  -halargs '"-RULEFILE {RULEFILE} -inst_top {INST_TOP} -design_info {DESIGN_INFO} -XML xrun.log.xml"' \
+  -logfile xrun.log
+
+python {LINT_PARSER} $@ --waiver-direct "{WAIVER_DIRECT}"

@@ -448,63 +448,35 @@ verilog_rtl_unit_test = rule(
 def _verilog_rtl_lint_test_impl(ctx):
     trans_flists = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_flists", allow_other_outputs = False)
 
-    # Move the previous .log and .log.xml to .bak files
-    # If the lint run doesn't produce a logfile, the lint parser script will try to parse the old log files instead of failing out
-    # Moving the previous logs prevents the parser script from parsing stale files and giving incorrect results
-    content = [
-        "#!/usr/bin/bash",
-        "mv xrun.log xrun.log.bak 2> /dev/null",
-        "mv xrun.log.xml xrun.log.xml.bak 2> /dev/null",
-        "{} \\".format(ctx.attr._command_override[ToolEncapsulationInfo].command),
-        "  -define LINT \\",
-        "  -sv \\",
-        "  -hal  \\",
-        "  -sv \\",
-        "  -licqueue \\",
-        "  -libext .v \\",
-        "  -libext .sv \\",
-        "  -enable_single_yvlib \\",
-        # "  -nowarn SPDUSD \\",
-        # "  -nowarn LIBNOU \\",
-        "  -timescale 100fs/100fs \\",
-    ]
+    defines = ["-define {}{}".format(key, value) for key, value in gather_shell_defines(ctx.attr.shells).items()]
+    defines += ["-define {} {}".format(key, value) for key, value in ctx.attr.defines.items()]
 
-    for key, value in gather_shell_defines(ctx.attr.shells).items():
-        content.append("  -define {}{} \\".format(key, value))
-
-    for key, value in ctx.attr.defines.items():
-        content.append("  -define {}{} \\".format(key, value))
-
-    for f in trans_flists.to_list():
-        content.append("  -f {} \\".format(f.short_path))
+    top_path = ""
     for dep in ctx.attr.deps:
         if VerilogInfo in dep and dep[VerilogInfo].last_module:
-            content.append("  {} \\".format(dep[VerilogInfo].last_module.short_path))
+            top_path = dep[VerilogInfo].last_module.short_path
 
-    design_info_arg = ""
-
-    # design_info_arg = " -design_info {}".format(ctx.files._design_info_common.short_path)
-    for design_info in ctx.files.design_info:
-        design_info_arg += " -design_info {}".format(design_info.short_path)
-
+    if top_path == "":
+        fail("verilog_rtl_cdc_test could not determine top_module from last_module variable")
+    
     if len(ctx.files.rulefile) > 1:
         fail("Only one rulefile allowed")
-    rulefile = "".join([f.short_path for f in ctx.files.rulefile])
 
-    content.append("  -halargs '\"-RULEFILE {rulefile} -inst_top {top} {design_info_arg} -XML xrun.log.xml\"' \\".format(
-        rulefile = rulefile,
-        top = ctx.attr.top,
-        design_info_arg = design_info_arg,
-    ))
-    content.append("  -logfile xrun.log")
-    parser_location = ctx.files.lint_parser[0].short_path
-
-    content.append("")
-    content.append("python {} $@ --waiver-hack \"{}\"".format(parser_location, ctx.attr.waiver_hack))
-
-    ctx.actions.write(
+    ctx.actions.expand_template(
+        template = ctx.file.lint_template,
         output = ctx.outputs.executable,
-        content = "\n".join(content),
+        substitutions = {
+            "{SIMULATOR_COMMAND}": ctx.attr._command_override[ToolEncapsulationInfo].command,
+            "{DEFINES}": " ".join(defines),
+            "{FLISTS}": " ".join(["-f {}".format(f.short_path) for f in trans_flists.to_list()]),
+            "{TOP_PATH}": top_path,
+            "{DESIGN_INFO}": " ".join([" -design_info {}".format(design_info.short_path) for design_info in ctx.files.design_info]),
+            "{RULEFILE}": "".join([f.short_path for f in ctx.files.rulefile]),
+            "{INST_TOP}": ctx.attr.top,
+            "{LINT_PARSER}": ctx.files.lint_parser[0].short_path,
+            "{WAIVER_DIRECT}": ctx.attr.waiver_direct,
+            
+        },
     )
 
     trans_flists = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_flists", allow_other_outputs = False)
@@ -536,6 +508,11 @@ verilog_rtl_lint_test = rule(
             doc = "Other verilog libraries this target is dependent upon.\n" +
                   "All Labels specified here must provide a VerilogInfo provider.",
         ),
+        "lint_template": attr.label(
+            allow_single_file = True,
+            default = Label("@rules_verilog//vendors/cadence:verilog_rtl_lint_test.sh.template"),
+            doc = "The template to generate the script to run the lint test.\n",
+        ),
         "rulefile": attr.label(
             allow_single_file = True,
             mandatory = True,
@@ -563,8 +540,8 @@ verilog_rtl_lint_test = rule(
             default = "@rules_verilog//:lint_parser_hal",
             doc = "Post processor for lint logs allowing for easier waiving of warnings.",
         ),
-        "waiver_hack": attr.string(
-            doc = "Lint waiver python regex to hack around cases when HAL has formatting errors in xrun.log.xml that cause problems for the lint parser",
+        "waiver_direct": attr.string(
+            doc = "Lint waiver python regex to apply directly to a lint message. This is sometimes needed to work around cases when HAL has formatting errors in xrun.log.xml that cause problems for the lint parser",
         ),
         "_command_override": attr.label(
             default = Label("@rules_verilog//:verilog_rtl_lint_test_command"),
