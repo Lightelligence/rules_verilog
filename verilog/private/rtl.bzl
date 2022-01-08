@@ -332,6 +332,7 @@ def _verilog_rtl_unit_test_impl(ctx):
     for dep in ctx.attr.deps:
         if VerilogInfo in dep and dep[VerilogInfo].last_module:
             top = dep[VerilogInfo].last_module.short_path
+            top_base_name = dep[VerilogInfo].last_module.basename.split('.')[0]
 
     pre_fa = ["    \\"]
     for key, value in gather_shell_defines(ctx.attr.shells).items():
@@ -339,12 +340,23 @@ def _verilog_rtl_unit_test_impl(ctx):
 
     if len(ctx.attr.pre_flist_args):
         pre_fa.extend(["{} \\".format(pfa) for pfa in ctx.attr.pre_flist_args])
+    # Adding -access r always is technically only needed for waves, but the sim performance shouldn't be noticable
+    pre_fa.append("   -access r \\")
     pre_fa.append("   \\")
 
     if len(ctx.attr.post_flist_args):
         post_fa = "\n".join(["{} \\".format(pfa) for pfa in ctx.attr.post_flist_args]) + "\n"
     else:
         post_fa = " \\"
+
+    waves_cmd = ctx.actions.declare_file(ctx.label.name + "_waves.tcl")
+    ctx.actions.expand_template(
+        template = ctx.file.ut_sim_waves_template,
+        output = waves_cmd,
+        substitutions = {
+            "{TOP_BASE_NAME}": top_base_name
+        },
+    )
 
     ctx.actions.expand_template(
         template = ctx.file.ut_sim_template,
@@ -355,10 +367,11 @@ def _verilog_rtl_unit_test_impl(ctx):
             "{TOP}": top,
             "{PRE_FLIST_ARGS}": "\n".join(pre_fa),
             "{POST_FLIST_ARGS}": post_fa,
+            "{WAVES_RENDER_CMD_PATH}": waves_cmd.short_path,
         },
     )
 
-    runfiles = ctx.runfiles(files = flists_list + srcs_list + ctx.files.data + ctx.files.shells)
+    runfiles = ctx.runfiles(files = flists_list + srcs_list + ctx.files.data + ctx.files.shells + [waves_cmd])
     return [DefaultInfo(
         runfiles = runfiles,
     )]
@@ -372,6 +385,11 @@ verilog_rtl_unit_test = rule(
     This rule is capable of running SVUnit regressions as well. See ut_sim_template attribute.
 
     Additional sim options may be passed after --.
+
+    This unit test can either immediately launch a waveform viewer, or it can render a waveform database which can be loaded separately.
+    To launch the waveform viewer after the test completes, run the following: 'bazel run <target> -- --launch &'.
+    To render a database without launching a viewer, run the following: 'bazel run <target> -- --waves'.
+    These arguments can be combined with passing addition sim options to the simular, for example: 'bazel run <target> -- --waves +my_arg=4'.
 
     Typically, an additional verilog_rtl_library containing 'unit_test_top.sv'
     is created. This unit_test_top will be dependent on the DUT top, and will
@@ -395,6 +413,11 @@ verilog_rtl_unit_test = rule(
                   "    \"--directory <path_to_test_directory_from_workspace>\",\n" +
                   " ]," +
                   "```",
+        ),
+        "ut_sim_waves_template": attr.label(
+            allow_single_file = True,
+            default = Label("@rules_verilog//vendors/cadence:verilog_rtl_unit_test_waves.tcl.template"),
+            doc = "The template to generate the waves command script to run in the test.\n",
         ),
         "command_override": attr.label(
             default = Label("@rules_verilog//:verilog_rtl_unit_test_command"),
