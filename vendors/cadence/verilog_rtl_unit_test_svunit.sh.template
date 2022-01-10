@@ -18,6 +18,7 @@
     -c "-libext\ .vams" \
     -c "-disable_sem2009" \
     -c "-enable_single_yvlib" \
+    -c "-licqueue" \
     -c "-timescale\ 100fs/100fs" \
     -c "-vtimescale\ 100fs/100fs" \
     -c "-define\ TIMESCALE_STEP_FS=100" \
