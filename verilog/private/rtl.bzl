@@ -533,7 +533,7 @@ verilog_rtl_lint_test = rule(
         ),
         "defines": attr.string_dict(
             allow_empty = True,
-            doc = "List of additional \\`defines for this lint run.\nIf a define has no value, " +
+            doc = "List of additional \\`defines for this lint run.\nIf a define is only for control and has no value, " +
                   "e.g. \\`define LINT, the dictionary entry key should be \"LINT\" and the value should be the empty string.\n" +
                   "If a define needs a value, e.g. \\`define WIDTH 8, the dictionary value must start with '=', e.g. '=8'",
         ),
@@ -572,7 +572,8 @@ def _verilog_rtl_cdc_test_impl(ctx):
     )
 
     defines = ["+define+LINT+CDC"]
-    defines.extend(["+{}".format(define) for define in ctx.attr.defines])
+
+    defines.extend(["+{}{}".format(key, value) for key, value in ctx.attr.defines.items()])
     for key, value in gather_shell_defines(ctx.attr.shells).items():
         defines.append("+{}{}".format(key, value))
 
@@ -649,10 +650,11 @@ verilog_rtl_cdc_test = rule(
             doc = "The name of the top-level module for this cdc run",
             mandatory = True,
         ),
-        "defines": attr.string_list(
+        "defines": attr.string_dict(
             allow_empty = True,
-            default = [],
-            doc = "List of additional \\`defines for this cdc run",
+            doc = "List of additional \\`defines for this cdc run.\nIf a define is only for control and has no value, " +
+                  "e.g. \\`define CDC, the dictionary entry key should be \"CDC\" and the value should be the empty string.\n" +
+                  "If a define needs a value, e.g. \\`define WIDTH 8, the dictionary value must start with '=', e.g. '=8'",
         ),
         "bbox_modules": attr.string_list(
             allow_empty = True,
