@@ -1,0 +1,18 @@
+check_cdc -init
+check_cdc -clock_domain -find
+check_cdc -pair -find
+check_cdc -scheme -find
+check_cdc -group -find
+check_cdc -reset -find
+set all_violas [check_cdc -list violations]
+set num_violas [llength $all_violas]
+for {set viola_idx 0} {$viola_idx < $num_violas} {incr viola_idx} {
+  puts "[lindex $all_violas $viola_idx]"
+}
+set return_value [expr {$num_violas > 0}]
+if {$return_value} {
+  puts "$num_violas errors"
+}
+if { $::RULES_VERILOG_GUI == 0 } {
+  exit $return_value
+}

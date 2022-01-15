@@ -1,0 +1,4 @@
+clear -all
+set elaborate_single_run_mode True
+analyze -sv09 +libext+.v+.sv {BBOX_MODULES_CMD} {DEFINES} {FLISTS} {TOP_PATH}
+elaborate {BBOX_MODULES_CMD} -top {INST_TOP} {BBOX_ARRAY_SIZE_CMD}

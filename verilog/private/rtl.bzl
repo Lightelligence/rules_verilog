@@ -449,7 +449,7 @@ def _verilog_rtl_lint_test_impl(ctx):
     trans_flists = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_flists", allow_other_outputs = False)
 
     defines = ["-define {}{}".format(key, value) for key, value in gather_shell_defines(ctx.attr.shells).items()]
-    defines += ["-define {} {}".format(key, value) for key, value in ctx.attr.defines.items()]
+    defines.extend(["-define {}{}".format(key, value) for key, value in ctx.attr.defines.items()])
 
     top_path = ""
     for dep in ctx.attr.deps:
@@ -457,13 +457,13 @@ def _verilog_rtl_lint_test_impl(ctx):
             top_path = dep[VerilogInfo].last_module.short_path
 
     if top_path == "":
-        fail("verilog_rtl_cdc_test could not determine top_module from last_module variable")
+        fail("verilog_rtl_lint_test could not determine the top module from the target's dependencies")
     
     if len(ctx.files.rulefile) > 1:
         fail("Only one rulefile allowed")
 
     ctx.actions.expand_template(
-        template = ctx.file.lint_template,
+        template = ctx.file.run_template,
         output = ctx.outputs.executable,
         substitutions = {
             "{SIMULATOR_COMMAND}": ctx.attr._command_override[ToolEncapsulationInfo].command,
@@ -508,7 +508,7 @@ verilog_rtl_lint_test = rule(
             doc = "Other verilog libraries this target is dependent upon.\n" +
                   "All Labels specified here must provide a VerilogInfo provider.",
         ),
-        "lint_template": attr.label(
+        "run_template": attr.label(
             allow_single_file = True,
             default = Label("@rules_verilog//vendors/cadence:verilog_rtl_lint_test.sh.template"),
             doc = "The template to generate the script to run the lint test.\n",
@@ -533,7 +533,9 @@ verilog_rtl_lint_test = rule(
         ),
         "defines": attr.string_dict(
             allow_empty = True,
-            doc = "List of additional \\`defines for this lint run",
+            doc = "List of additional \\`defines for this lint run.\nIf a define has no value, " +
+                  "e.g. \\`define LINT, the dictionary entry key should be \"LINT\" and the value should be the empty string.\n" +
+                  "If a define needs a value, e.g. \\`define WIDTH 8, the dictionary value must start with '=', e.g. '=8'",
         ),
         "lint_parser": attr.label(
             allow_files = True,
@@ -563,28 +565,27 @@ def _verilog_rtl_cdc_test_impl(ctx):
         output = ctx.outputs.executable,
         substitutions = {
             "{CDC_COMMAND}": ctx.attr._command_override[ToolEncapsulationInfo].command,
-            "{PREAMBLE_CMDS}": ctx.outputs.cdc_preamble_cmds.short_path,
+            "{PREAMBLE_CMDS}": ctx.outputs.preamble_cmds.short_path,
             "{CMD_FILES}": " ".join([cmd_file.short_path for cmd_file in ctx.files.cmd_files]),
-            "{EPILOGUE_CMDS}": ctx.outputs.cdc_epilogue_cmds.short_path,
+            "{EPILOGUE_CMDS}": ctx.outputs.epilogue_cmds.short_path,
         },
     )
 
-    flists = " ".join(["-f {}".format(f.short_path) for f in trans_flists.to_list()])
-    defines = ["+{}".format(define) for define in ctx.attr.defines]
+    defines = ["+define+LINT+CDC"]
+    defines.extend(["+{}".format(define) for define in ctx.attr.defines])
     for key, value in gather_shell_defines(ctx.attr.shells).items():
         defines.append("+{}{}".format(key, value))
+
+    top_path = ""
+    for dep in ctx.attr.deps:
+        if VerilogInfo in dep and dep[VerilogInfo].last_module:
+            top_path = "  {}".format(dep[VerilogInfo].last_module.short_path)
+    if top_path == "":
+        fail("verilog_rtl_cdc_test could not determine the top module from the target's dependencies")
 
     bbox_modules_cmd = ""
     if ctx.attr.bbox_modules:
         bbox_modules_cmd = "-bbox_m {" + "{}".format(" ".join(ctx.attr.bbox_modules)) + "}"
-
-    top_mod = ""
-    for dep in ctx.attr.deps:
-        if VerilogInfo in dep and dep[VerilogInfo].last_module:
-            top_mod = "  {}".format(dep[VerilogInfo].last_module.short_path)
-
-    if top_mod == "":
-        fail("verilog_rtl_cdc_test could not determine top_module from last_module variable")
 
     bbox_array_size_cmd = ""
     if ctx.attr.bbox_array_size < 0:
@@ -592,45 +593,26 @@ def _verilog_rtl_cdc_test_impl(ctx):
     elif ctx.attr.bbox_array_size > 0:
         bbox_array_size_cmd = "-bbox_a {}".format(ctx.attr.bbox_array_size)
 
-    premable_cmds_content = [
-        "clear -all",
-        "set elaborate_single_run_mode True",
-        "analyze -sv09 +libext+.v+.sv {} +define+LINT+CDC{} {} {}".format(bbox_modules_cmd, "".join(defines), flists, top_mod),
-        "elaborate {} -top {} {}".format(bbox_modules_cmd, ctx.attr.top, bbox_array_size_cmd),
-    ]
-
-    epilogue_cmds_content = [
-        "check_cdc -init",
-        "check_cdc -clock_domain -find",
-        "check_cdc -pair -find",
-        "check_cdc -scheme -find",
-        "check_cdc -group -find",
-        "check_cdc -reset -find",
-        "set all_violas [check_cdc -list violations]",
-        "set num_violas [llength $all_violas]",
-        "for {set viola_idx 0} {$viola_idx < $num_violas} {incr viola_idx} {",
-        "puts \"[lindex $all_violas $viola_idx]\n\"",
-        "}",
-        "set return_value [expr {$num_violas > 0}]",
-        "if {$return_value} {",
-        "puts \"$num_violas errors\"",
-        "}",
-        "if { $::RULES_VERILOG_GUI == 0 } {",
-        "exit $return_value",
-        "}",
-    ]
-
-    runfiles = ctx.runfiles(files = [ctx.outputs.cdc_preamble_cmds, ctx.outputs.cdc_epilogue_cmds] + trans_srcs.to_list() + trans_flists.to_list() + ctx.files.cmd_files)
-
-    ctx.actions.write(
-        output = ctx.outputs.cdc_preamble_cmds,
-        content = "\n".join(premable_cmds_content),
+    ctx.actions.expand_template(
+        template = ctx.file.preamble_template,
+        output = ctx.outputs.preamble_cmds,
+        substitutions = {
+            "{DEFINES}": "".join(defines),
+            "{FLISTS}": " ".join(["-f {}".format(f.short_path) for f in trans_flists.to_list()]),
+            "{TOP_PATH}": top_path,
+            "{INST_TOP}": ctx.attr.top,
+            "{BBOX_MODULES_CMD}": bbox_modules_cmd,
+            "{BBOX_ARRAY_SIZE_CMD}": bbox_array_size_cmd,
+        },
     )
 
-    ctx.actions.write(
-        output = ctx.outputs.cdc_epilogue_cmds,
-        content = "\n".join(epilogue_cmds_content),
+    ctx.actions.expand_template(
+        template = ctx.file.epilogue_template,
+        output = ctx.outputs.epilogue_cmds,
+        substitutions = {},
     )
+
+    runfiles = ctx.runfiles(files = [ctx.outputs.preamble_cmds, ctx.outputs.epilogue_cmds] + trans_srcs.to_list() + trans_flists.to_list() + ctx.files.cmd_files)
 
     return [
         DefaultInfo(runfiles = runfiles),
@@ -644,6 +626,21 @@ verilog_rtl_cdc_test = rule(
             mandatory = True,
             doc = "Other verilog libraries this target is dependent upon.\n" +
                   "All Labels specified here must provide a VerilogInfo provider.",
+        ),
+        "run_template": attr.label(
+            allow_single_file = True,
+            default = Label("@rules_verilog//vendors/cadence:verilog_rtl_cdc_test.sh.template"),
+            doc = "The template to generate the script to run the cdc test.\n",
+        ),
+        "preamble_template": attr.label(
+            allow_single_file = True,
+            default = Label("@rules_verilog//vendors/cadence:verilog_rtl_cdc_preamble_cmds.tcl.template"),
+            doc = "The template to generate the initial commands (the preamble) for this cdc test.\n",
+        ),
+        "epilogue_template": attr.label(
+            allow_single_file = True,
+            default = Label("@rules_verilog//vendors/cadence:verilog_rtl_cdc_epilogue_cmds.tcl.template"),
+            doc = "The template to generate the final reporting commands for this cdc test.\n",
         ),
         "shells": attr.label_list(
             doc = _SHELLS_DOC,
@@ -684,8 +681,8 @@ verilog_rtl_cdc_test = rule(
         ),
     },
     outputs = {
-        "cdc_preamble_cmds": "%{name}_cdc_preamble_cmds.tcl",
-        "cdc_epilogue_cmds": "%{name}_cdc_epilogue_cmds.tcl",
+        "preamble_cmds": "%{name}_preamble_cmds.tcl",
+        "epilogue_cmds": "%{name}_epilogue_cmds.tcl",
     },
     test = True,
 )
