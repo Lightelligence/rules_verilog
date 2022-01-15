@@ -332,7 +332,10 @@ def _verilog_rtl_unit_test_impl(ctx):
     for dep in ctx.attr.deps:
         if VerilogInfo in dep and dep[VerilogInfo].last_module:
             top = dep[VerilogInfo].last_module.short_path
-            top_base_name = dep[VerilogInfo].last_module.basename.split('.')[0]
+            top_base_name = dep[VerilogInfo].last_module.basename.split(".")[0]
+
+    if top == "":
+        fail("verilog_rtl_unit_test could not determine the top module from the target's dependencies")
 
     pre_fa = ["    \\"]
     for key, value in gather_shell_defines(ctx.attr.shells).items():
@@ -340,6 +343,7 @@ def _verilog_rtl_unit_test_impl(ctx):
 
     if len(ctx.attr.pre_flist_args):
         pre_fa.extend(["{} \\".format(pfa) for pfa in ctx.attr.pre_flist_args])
+
     # Adding -access r always is technically only needed for waves, but the sim performance shouldn't be noticable
     pre_fa.append("   -access r \\")
     pre_fa.append("   \\")
@@ -354,7 +358,7 @@ def _verilog_rtl_unit_test_impl(ctx):
         template = ctx.file.ut_sim_waves_template,
         output = waves_cmd,
         substitutions = {
-            "{TOP_BASE_NAME}": top_base_name
+            "{TOP_BASE_NAME}": top_base_name,  # buildifier: disable=uninitialized
         },
     )
 
@@ -458,7 +462,7 @@ def _verilog_rtl_lint_test_impl(ctx):
 
     if top_path == "":
         fail("verilog_rtl_lint_test could not determine the top module from the target's dependencies")
-    
+
     if len(ctx.files.rulefile) > 1:
         fail("Only one rulefile allowed")
 
@@ -475,7 +479,6 @@ def _verilog_rtl_lint_test_impl(ctx):
             "{INST_TOP}": ctx.attr.top,
             "{LINT_PARSER}": ctx.files.lint_parser[0].short_path,
             "{WAIVER_DIRECT}": ctx.attr.waiver_direct,
-            
         },
     )
 
