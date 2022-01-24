@@ -26,13 +26,13 @@ done
 waves_render_cmd=""
 if [ $use_waves -eq 1 ]
 then
-    waves_render_cmd="-input {WAVES_RENDER_CMD_PATH}"
+    waves_render_cmd="-input {WAVES_RENDER_CMD_PATH} -access r"
 fi
 
 waves_launch_cmd=""
 if [ $launch_waves -eq 1 ]
 then
-    waves_render_cmd="-input {WAVES_RENDER_CMD_PATH}"
+    waves_render_cmd="-input {WAVES_RENDER_CMD_PATH} -access r"
     waves_launch_cmd="simvision waves.shm"
 fi
 

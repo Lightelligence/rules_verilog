@@ -1,0 +1,4 @@
+database -open -shm mydb -into waves.shm -default
+probe -database mydb testrunner -all -dynamic -memories -depth all -packed 2048 -unpacked 2048
+puts [string map {"\"" ""} [format {"Waves Available: %s/%s"} [pwd] "waves.shm"]]
+run

@@ -344,8 +344,6 @@ def _verilog_rtl_unit_test_impl(ctx):
     if len(ctx.attr.pre_flist_args):
         pre_fa.extend(["{} \\".format(pfa) for pfa in ctx.attr.pre_flist_args])
 
-    # Adding -access r always is technically only needed for waves, but the sim performance shouldn't be noticable
-    pre_fa.append("   -access r \\")
     pre_fa.append("   \\")
 
     if len(ctx.attr.post_flist_args):
@@ -421,7 +419,10 @@ verilog_rtl_unit_test = rule(
         "ut_sim_waves_template": attr.label(
             allow_single_file = True,
             default = Label("@rules_verilog//vendors/cadence:verilog_rtl_unit_test_waves.tcl.template"),
-            doc = "The template to generate the waves command script to run in the test.\n",
+            doc = "The template to generate the waves command script to run in the test.\n" +
+                  "If using the SVUnit ut_sim_template or a custom SVUnit invocation, you must either write your own waves script or use the SVUnit waves template: " +
+                  "@rules_verilog//vendors/cadence:verilog_rtl_unit_test_svunit_waves.tcl.template\n" +
+                  "```",
         ),
         "command_override": attr.label(
             default = Label("@rules_verilog//:verilog_rtl_unit_test_command"),

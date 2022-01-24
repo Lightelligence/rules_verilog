@@ -1,29 +1,67 @@
 #!/usr/bin/bash
 # This is a template for the bazel verilog_rtl_unit_test rule in order to run a SVUnit testbench
-# See http://agilesoc.com/open-source-projects/svunit/
 # It is not intended to be run stand-alone
-# Execute by doing:
-#   bazel run <path>:<target>
+# See http://agilesoc.com/open-source-projects/svunit/
+set -e
+
+use_waves=0
+launch_waves=0
+remaining_args=()
+
+while (( $# ))
+do
+    case $1 in
+        "--waves" )
+            use_waves=1
+            ;;
+        "--launch" )
+            launch_waves=1
+            ;;
+        *)
+            remaining_args+=($1)
+            ;;    
+    esac
+    shift
+done
+
+waves_render_cmd=""
+if [ $use_waves -eq 1 ]
+then
+    waves_render_cmd="-r '-input {WAVES_RENDER_CMD_PATH}' -r '-access r'"
+fi
+
+waves_launch_cmd=""
+if [ $launch_waves -eq 1 ]
+then
+    waves_render_cmd="-r '-input {WAVES_RENDER_CMD_PATH}' -r '-access r'"
+    waves_launch_cmd="simvision waves.shm"
+fi
+
+echo $waves_render_cmd
+
 {SIMULATOR_COMMAND} \
-    runSVUnit \
+    "runSVUnit \
     -s xcelium \
     --no_abs_path_flist \
     --no_feedback \
     {PRE_FLIST_ARGS} \
     -o . \
-    -c "-define\ TBV" \
-    -c "-libext\ .sv" \
-    -c "-libext\ .svh" \
-    -c "-libext\ .v" \
-    -c "-libext\ .vams" \
-    -c "-disable_sem2009" \
-    -c "-enable_single_yvlib" \
-    -c "-licqueue" \
-    -c "-timescale\ 100fs/100fs" \
-    -c "-vtimescale\ 100fs/100fs" \
-    -c "-define\ TIMESCALE_STEP_FS=100" \
-    -c "-define\ TIMESCALE_PREC_FS=100" \
+    -c '-define TBV' \
+    -c '-libext .sv' \
+    -c '-libext .svh' \
+    -c '-libext .v' \
+    -c '-libext .vams' \
+    -c '-disable_sem2009' \
+    -c '-enable_single_yvlib' \
+    -c '-licqueue' \
+    -c '-timescale\ 100fs/100fs' \
+    -c '-vtimescale\ 100fs/100fs' \
+    -c '-define\ TIMESCALE_STEP_FS=100' \
+    -c '-define\ TIMESCALE_PREC_FS=100' \
     {FLISTS} \
-    {POST_FLIST_ARGS} \
-    $@
+    $waves_render_cmd \
+    {POST_FLIST_ARGS}
+    ${remaining_args[@]}; \
+    $waves_launch_cmd
+    "   
 grep -q "\[testrunner\]: PASSED" run.log
