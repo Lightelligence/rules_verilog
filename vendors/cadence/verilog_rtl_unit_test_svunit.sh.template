@@ -4,18 +4,18 @@
 # See http://agilesoc.com/open-source-projects/svunit/
 set -e
 
-use_waves=0
-launch_waves=0
+generate_waves=0
+launch_wave_viewer=0
 remaining_args=()
 
 while (( $# ))
 do
     case $1 in
         "--waves" )
-            use_waves=1
+            generate_waves=1
             ;;
         "--launch" )
-            launch_waves=1
+            launch_wave_viewer=1
             ;;
         *)
             remaining_args+=($1)
@@ -25,13 +25,13 @@ do
 done
 
 waves_render_cmd=""
-if [ $use_waves -eq 1 ]
+if [ $generate_waves -eq 1 ]
 then
     waves_render_cmd="-r '-input {WAVES_RENDER_CMD_PATH}' -r '-access r'"
 fi
 
 waves_launch_cmd=""
-if [ $launch_waves -eq 1 ]
+if [ $launch_wave_viewer -eq 1 ]
 then
     waves_render_cmd="-r '-input {WAVES_RENDER_CMD_PATH}' -r '-access r'"
     waves_launch_cmd="simvision waves.shm"
