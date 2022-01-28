@@ -1,3 +1,6 @@
+# This is a template used in the bazel verilog_rtl_cdc_test rule
+# These commands perform common error reporting and determine the exit code of the CDC tool
+# They execute after the command_files have all been executed
 check_cdc -init
 check_cdc -clock_domain -find
 check_cdc -pair -find
