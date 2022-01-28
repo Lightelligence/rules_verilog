@@ -47,7 +47,7 @@ def parse_args(argv):
                         action='store_true',
                         help="Display the help message from hal for each individual issue")
     parser.add_argument("--waiver-direct",
-                        help="Direct waiver regex for when inline pragmas and design_info don't work")
+                        help="Direct waiver regex for when inline pragmas and design_info are insufficient")
     options = parser.parse_args(argv)
     return options
 

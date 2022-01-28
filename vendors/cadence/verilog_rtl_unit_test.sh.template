@@ -4,7 +4,7 @@
 set -e
 
 generate_waves=0
-launch_waves=0
+launch_wave_viewer=0
 remaining_args=()
 
 while (( $# ))
@@ -14,7 +14,7 @@ do
             generate_waves=1
             ;;
         "--launch" )
-            launch_waves=1
+            launch_wave_viewer=1
             ;;
         *)
             remaining_args+=($1)
@@ -30,7 +30,7 @@ then
 fi
 
 waves_launch_cmd=""
-if [ $launch_waves -eq 1 ]
+if [ $launch_wave_viewer -eq 1 ]
 then
     waves_render_cmd="-input {WAVES_RENDER_CMD_PATH} -access r"
     waves_launch_cmd="simvision waves.shm"

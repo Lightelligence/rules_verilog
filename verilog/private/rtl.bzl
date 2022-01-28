@@ -335,7 +335,7 @@ def _verilog_rtl_unit_test_impl(ctx):
             top_base_name = dep[VerilogInfo].last_module.basename.split(".")[0]
 
     if top == "":
-        fail("verilog_rtl_unit_test could not determine the top module from the target's dependencies")
+        fail("verilog_rtl_unit_test {} could not determine the top module from the target's dependencies".format(ctx.label))
 
     pre_fa = ["    \\"]
     for key, value in gather_shell_defines(ctx.attr.shells).items():
@@ -386,16 +386,14 @@ verilog_rtl_unit_test = rule(
 
     This rule is capable of running SVUnit regressions as well. See ut_sim_template attribute.
 
-    Additional sim options may be passed after --.
-
     This unit test can either immediately launch a waveform viewer, or it can render a waveform database which can be loaded separately.
     To launch the waveform viewer after the test completes, run the following: 'bazel run <target> -- --launch &'.
     To render a database without launching a viewer, run the following: 'bazel run <target> -- --waves'.
-    These arguments can be combined with passing addition sim options to the simular, for example: 'bazel run <target> -- --waves +my_arg=4'.
+    Any other unknown options will be passed directly to the simulator, for example: 'bazel run <target> -- --waves +my_arg=4'.
 
     Typically, an additional verilog_rtl_library containing 'unit_test_top.sv'
     is created. This unit_test_top will be dependent on the DUT top, and will
-    be the only dep provided to verilog_rtl_unit_test.
+    be the only entry in the `deps` attribute list provided to verilog_rtl_unit_test.
     """,
     implementation = _verilog_rtl_unit_test_impl,
     attrs = {
@@ -420,9 +418,9 @@ verilog_rtl_unit_test = rule(
             allow_single_file = True,
             default = Label("@rules_verilog//vendors/cadence:verilog_rtl_unit_test_waves.tcl.template"),
             doc = "The template to generate the waves command script to run in the test.\n" +
-                  "If using the SVUnit ut_sim_template or a custom SVUnit invocation, you must either write your own waves script or use the SVUnit waves template: " +
-                  "@rules_verilog//vendors/cadence:verilog_rtl_unit_test_svunit_waves.tcl.template\n" +
-                  "```",
+                  "When using the SVUnit ut_sim_template or a custom SVUnit invocation, the default verilog_rtl_unit_test_waves.tcl.template will not work. " +
+                  "You must either write your own waves script or use the SVUnit waves template: " +
+                  "@rules_verilog//vendors/cadence:verilog_rtl_unit_test_svunit_waves.tcl.template\n"
         ),
         "command_override": attr.label(
             default = Label("@rules_verilog//:verilog_rtl_unit_test_command"),
@@ -462,10 +460,10 @@ def _verilog_rtl_lint_test_impl(ctx):
             top_path = dep[VerilogInfo].last_module.short_path
 
     if top_path == "":
-        fail("verilog_rtl_lint_test could not determine the top module from the target's dependencies")
+        fail("verilog_rtl_lint_test {} could not determine the top module from the target's dependencies".format(ctx.label()))
 
     if len(ctx.files.rulefile) > 1:
-        fail("Only one rulefile allowed")
+        fail("Only one rulefile allowed, but {} has several rulefiles".format(ctx.label))
 
     ctx.actions.expand_template(
         template = ctx.file.run_template,
@@ -586,7 +584,7 @@ def _verilog_rtl_cdc_test_impl(ctx):
         if VerilogInfo in dep and dep[VerilogInfo].last_module:
             top_path = "  {}".format(dep[VerilogInfo].last_module.short_path)
     if top_path == "":
-        fail("verilog_rtl_cdc_test could not determine the top module from the target's dependencies")
+        fail("verilog_rtl_cdc_test {} could not determine the top module from the target's dependencies".format(ctx.label))
 
     bbox_modules_cmd = ""
     if ctx.attr.bbox_modules:
@@ -594,7 +592,7 @@ def _verilog_rtl_cdc_test_impl(ctx):
 
     bbox_array_size_cmd = ""
     if ctx.attr.bbox_array_size < 0:
-        fail("verilog_rtl_cdc_test was specified with a negative bbox_array_size")
+        fail("verilog_rtl_cdc_test {} was specified with a negative bbox_array_size".format(ctx.label))
     elif ctx.attr.bbox_array_size > 0:
         bbox_array_size_cmd = "-bbox_a {}".format(ctx.attr.bbox_array_size)
 
