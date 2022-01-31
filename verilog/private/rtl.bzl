@@ -420,7 +420,7 @@ verilog_rtl_unit_test = rule(
             doc = "The template to generate the waves command script to run in the test.\n" +
                   "When using the SVUnit ut_sim_template or a custom SVUnit invocation, the default verilog_rtl_unit_test_waves.tcl.template will not work. " +
                   "You must either write your own waves script or use the SVUnit waves template: " +
-                  "@rules_verilog//vendors/cadence:verilog_rtl_unit_test_svunit_waves.tcl.template\n"
+                  "@rules_verilog//vendors/cadence:verilog_rtl_unit_test_svunit_waves.tcl.template\n",
         ),
         "command_override": attr.label(
             default = Label("@rules_verilog//:verilog_rtl_unit_test_command"),
