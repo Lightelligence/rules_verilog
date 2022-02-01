@@ -38,3 +38,8 @@ verilog_tool_encapsulation(
     name = "verilog_rtl_svunit_test_command",
     build_setting_default = "xrun",
 )
+
+verilog_tool_encapsulation(
+    name = "verilog_rtl_wave_viewer_command",
+    build_setting_default = "simvision",
+)

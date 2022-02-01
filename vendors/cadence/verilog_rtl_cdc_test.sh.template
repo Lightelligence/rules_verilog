@@ -25,6 +25,9 @@ then
     no_gui_flag=""
 fi
 
+# The contents run by CDC_COMMAND need to be wrapped in double quotes to account for how JapserGold processes command line arguments
+# Without the double quotes, JapserGold doesn't treat all the command line arguments as a single unit. Instead it drops into a shell
+# and doesn't run the specified commands.
 {CDC_COMMAND} \
     "-cdc \
     $no_gui_flag \
@@ -34,6 +37,5 @@ fi
     {PREAMBLE_CMDS} \
     {CMD_FILES} \
     {EPILOGUE_CMDS} \
-    ${remaining_args[@]}
-    "
+    ${remaining_args[@]}"
 ! grep "^\[*ERROR" cdc_run/jg.log

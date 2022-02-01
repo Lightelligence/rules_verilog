@@ -34,23 +34,23 @@ waves_launch_cmd=""
 if [ $launch_wave_viewer -eq 1 ]
 then
     waves_render_cmd="-r '-input {WAVES_RENDER_CMD_PATH}' -r '-access r'"
-    waves_launch_cmd="simvision waves.shm"
+    waves_launch_cmd="{WAVE_VIEWER_COMMAND} waves.shm"
 fi
 
 echo $waves_render_cmd
 
 {SIMULATOR_COMMAND} \
-    "runSVUnit \
+    runSVUnit \
     -s xcelium \
     --no_abs_path_flist \
     --no_feedback \
     {PRE_FLIST_ARGS} \
     -o . \
-    -c '-define TBV' \
-    -c '-libext .sv' \
-    -c '-libext .svh' \
-    -c '-libext .v' \
-    -c '-libext .vams' \
+    -c '-define\ TBV' \
+    -c '-libext\ .sv' \
+    -c '-libext\ .svh' \
+    -c '-libext\ .v' \
+    -c '-libext\ .vams' \
     -c '-disable_sem2009' \
     -c '-enable_single_yvlib' \
     -c '-licqueue' \
@@ -61,7 +61,7 @@ echo $waves_render_cmd
     {FLISTS} \
     $waves_render_cmd \
     {POST_FLIST_ARGS}
-    ${remaining_args[@]}; \
-    $waves_launch_cmd
-    "   
+    ${remaining_args[@]};
+$waves_launch_cmd
+
 grep -q "\[testrunner\]: PASSED" run.log

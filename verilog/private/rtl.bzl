@@ -365,6 +365,7 @@ def _verilog_rtl_unit_test_impl(ctx):
         output = ctx.outputs.executable,
         substitutions = {
             "{SIMULATOR_COMMAND}": ctx.attr.command_override[ToolEncapsulationInfo].command,
+            "{WAVE_VIEWER_COMMAND}": ctx.attr.wave_viewer_command[ToolEncapsulationInfo].command,
             "{FLISTS}": " ".join(["-f {}".format(f.short_path) for f in flists_list]),
             "{TOP}": top,
             "{PRE_FLIST_ARGS}": "\n".join(pre_fa),
@@ -427,6 +428,12 @@ verilog_rtl_unit_test = rule(
             doc = "Allows custom override of simulator command in the event of wrapping via modulefiles.\n" +
                   "Example override in project's .bazelrc:\n" +
                   '  build --@rules_verilog//:verilog_rtl_unit_test_command="runmod -t xrun --"',
+        ),
+        "wave_viewer_command": attr.label(
+            default = Label("@rules_verilog//:verilog_rtl_wave_viewer_command"),
+            doc = "Allows custom override of waveform viewer command in the event of wrapping via modulefiles.\n" +
+                  "Example override in project's .bazelrc:\n" +
+                  '  build --@rules_verilog//:verilog_rtl_wave_viewer_command="runmod xrun --"',
         ),
         "data": attr.label_list(
             allow_files = True,
