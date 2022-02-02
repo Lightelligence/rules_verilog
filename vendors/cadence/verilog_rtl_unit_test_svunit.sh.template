@@ -37,8 +37,6 @@ then
     waves_launch_cmd="{WAVE_VIEWER_COMMAND} waves.shm"
 fi
 
-echo $waves_render_cmd
-
 {SIMULATOR_COMMAND} \
     runSVUnit \
     -s xcelium \
