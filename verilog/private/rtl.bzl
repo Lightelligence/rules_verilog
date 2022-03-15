@@ -332,6 +332,10 @@ def _verilog_rtl_unit_test_impl(ctx):
     for dep in ctx.attr.deps:
         if VerilogInfo in dep and dep[VerilogInfo].last_module:
             top = dep[VerilogInfo].last_module.short_path
+            top_base_name = dep[VerilogInfo].last_module.basename.split(".")[0]
+
+    if top == "":
+        fail("verilog_rtl_unit_test {} could not determine the top module from the target's dependencies".format(ctx.label))
 
     pre_fa = ["    \\"]
     for key, value in gather_shell_defines(ctx.attr.shells).items():
@@ -339,6 +343,7 @@ def _verilog_rtl_unit_test_impl(ctx):
 
     if len(ctx.attr.pre_flist_args):
         pre_fa.extend(["{} \\".format(pfa) for pfa in ctx.attr.pre_flist_args])
+
     pre_fa.append("   \\")
 
     if len(ctx.attr.post_flist_args):
@@ -346,19 +351,30 @@ def _verilog_rtl_unit_test_impl(ctx):
     else:
         post_fa = " \\"
 
+    waves_cmd = ctx.actions.declare_file(ctx.label.name + "_waves.tcl")
+    ctx.actions.expand_template(
+        template = ctx.file.ut_sim_waves_template,
+        output = waves_cmd,
+        substitutions = {
+            "{TOP_BASE_NAME}": top_base_name,  # buildifier: disable=uninitialized
+        },
+    )
+
     ctx.actions.expand_template(
         template = ctx.file.ut_sim_template,
         output = ctx.outputs.executable,
         substitutions = {
             "{SIMULATOR_COMMAND}": ctx.attr.command_override[ToolEncapsulationInfo].command,
+            "{WAVE_VIEWER_COMMAND}": ctx.attr.wave_viewer_command[ToolEncapsulationInfo].command,
             "{FLISTS}": " ".join(["-f {}".format(f.short_path) for f in flists_list]),
             "{TOP}": top,
             "{PRE_FLIST_ARGS}": "\n".join(pre_fa),
             "{POST_FLIST_ARGS}": post_fa,
+            "{WAVES_RENDER_CMD_PATH}": waves_cmd.short_path,
         },
     )
 
-    runfiles = ctx.runfiles(files = flists_list + srcs_list + ctx.files.data + ctx.files.shells)
+    runfiles = ctx.runfiles(files = flists_list + srcs_list + ctx.files.data + ctx.files.shells + [waves_cmd])
     return [DefaultInfo(
         runfiles = runfiles,
     )]
@@ -371,11 +387,14 @@ verilog_rtl_unit_test = rule(
 
     This rule is capable of running SVUnit regressions as well. See ut_sim_template attribute.
 
-    Additional sim options may be passed after --.
+    This unit test can either immediately launch a waveform viewer, or it can render a waveform database which can be loaded separately.
+    To launch the waveform viewer after the test completes, run the following: 'bazel run <target> -- --launch &'.
+    To render a database without launching a viewer, run the following: 'bazel run <target> -- --waves'.
+    Any other unknown options will be passed directly to the simulator, for example: 'bazel run <target> -- --waves +my_arg=4'.
 
     Typically, an additional verilog_rtl_library containing 'unit_test_top.sv'
     is created. This unit_test_top will be dependent on the DUT top, and will
-    be the only dep provided to verilog_rtl_unit_test.
+    be the only entry in the `deps` attribute list provided to verilog_rtl_unit_test.
     """,
     implementation = _verilog_rtl_unit_test_impl,
     attrs = {
@@ -396,11 +415,25 @@ verilog_rtl_unit_test = rule(
                   " ]," +
                   "```",
         ),
+        "ut_sim_waves_template": attr.label(
+            allow_single_file = True,
+            default = Label("@rules_verilog//vendors/cadence:verilog_rtl_unit_test_waves.tcl.template"),
+            doc = "The template to generate the waves command script to run in the test.\n" +
+                  "When using the SVUnit ut_sim_template or a custom SVUnit invocation, the default verilog_rtl_unit_test_waves.tcl.template will not work. " +
+                  "You must either write your own waves script or use the SVUnit waves template: " +
+                  "@rules_verilog//vendors/cadence:verilog_rtl_unit_test_svunit_waves.tcl.template\n",
+        ),
         "command_override": attr.label(
             default = Label("@rules_verilog//:verilog_rtl_unit_test_command"),
             doc = "Allows custom override of simulator command in the event of wrapping via modulefiles.\n" +
                   "Example override in project's .bazelrc:\n" +
                   '  build --@rules_verilog//:verilog_rtl_unit_test_command="runmod -t xrun --"',
+        ),
+        "wave_viewer_command": attr.label(
+            default = Label("@rules_verilog//:verilog_rtl_wave_viewer_command"),
+            doc = "Allows custom override of waveform viewer command in the event of wrapping via modulefiles.\n" +
+                  "Example override in project's .bazelrc:\n" +
+                  '  build --@rules_verilog//:verilog_rtl_wave_viewer_command="runmod xrun --"',
         ),
         "data": attr.label_list(
             allow_files = True,
@@ -425,63 +458,34 @@ verilog_rtl_unit_test = rule(
 def _verilog_rtl_lint_test_impl(ctx):
     trans_flists = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_flists", allow_other_outputs = False)
 
-    # Move the previous .log and .log.xml to .bak files
-    # If the lint run doesn't produce a logfile, the lint parser script will try to parse the old log files instead of failing out
-    # Moving the previous logs prevents the parser script from parsing stale files and giving incorrect results
-    content = [
-        "#!/usr/bin/bash",
-        "mv xrun.log xrun.log.bak 2> /dev/null",
-        "mv xrun.log.xml xrun.log.xml.bak 2> /dev/null",
-        "{} \\".format(ctx.attr._command_override[ToolEncapsulationInfo].command),
-        "  -define LINT \\",
-        "  -sv \\",
-        "  -hal  \\",
-        "  -sv \\",
-        "  -licqueue \\",
-        "  -libext .v \\",
-        "  -libext .sv \\",
-        "  -enable_single_yvlib \\",
-        # "  -nowarn SPDUSD \\",
-        # "  -nowarn LIBNOU \\",
-        "  -timescale 100fs/100fs \\",
-    ]
+    defines = ["-define {}{}".format(key, value) for key, value in gather_shell_defines(ctx.attr.shells).items()]
+    defines.extend(["-define {}{}".format(key, value) for key, value in ctx.attr.defines.items()])
 
-    for key, value in gather_shell_defines(ctx.attr.shells).items():
-        content.append("  -define {}{} \\".format(key, value))
-
-    for key, value in ctx.attr.defines.items():
-        content.append("  -define {}{} \\".format(key, value))
-
-    for f in trans_flists.to_list():
-        content.append("  -f {} \\".format(f.short_path))
+    top_path = ""
     for dep in ctx.attr.deps:
         if VerilogInfo in dep and dep[VerilogInfo].last_module:
-            content.append("  {} \\".format(dep[VerilogInfo].last_module.short_path))
+            top_path = dep[VerilogInfo].last_module.short_path
 
-    design_info_arg = ""
-
-    # design_info_arg = " -design_info {}".format(ctx.files._design_info_common.short_path)
-    for design_info in ctx.files.design_info:
-        design_info_arg += " -design_info {}".format(design_info.short_path)
+    if top_path == "":
+        fail("verilog_rtl_lint_test {} could not determine the top module from the target's dependencies".format(ctx.label()))
 
     if len(ctx.files.rulefile) > 1:
-        fail("Only one rulefile allowed")
-    rulefile = "".join([f.short_path for f in ctx.files.rulefile])
+        fail("Only one rulefile allowed, but {} has several rulefiles".format(ctx.label))
 
-    content.append("  -halargs '\"-RULEFILE {rulefile} -inst_top {top} {design_info_arg} -XML xrun.log.xml\"' \\".format(
-        rulefile = rulefile,
-        top = ctx.attr.top,
-        design_info_arg = design_info_arg,
-    ))
-    content.append("  -logfile xrun.log")
-    parser_location = ctx.files.lint_parser[0].short_path
-
-    content.append("")
-    content.append("python {} $@ --waiver-hack \"{}\"".format(parser_location, ctx.attr.waiver_hack))
-
-    ctx.actions.write(
+    ctx.actions.expand_template(
+        template = ctx.file.run_template,
         output = ctx.outputs.executable,
-        content = "\n".join(content),
+        substitutions = {
+            "{SIMULATOR_COMMAND}": ctx.attr._command_override[ToolEncapsulationInfo].command,
+            "{DEFINES}": " ".join(defines),
+            "{FLISTS}": " ".join(["-f {}".format(f.short_path) for f in trans_flists.to_list()]),
+            "{TOP_PATH}": top_path,
+            "{DESIGN_INFO}": " ".join([" -design_info {}".format(design_info.short_path) for design_info in ctx.files.design_info]),
+            "{RULEFILE}": "".join([f.short_path for f in ctx.files.rulefile]),
+            "{INST_TOP}": ctx.attr.top,
+            "{LINT_PARSER}": ctx.files.lint_parser[0].short_path,
+            "{WAIVER_DIRECT}": ctx.attr.waiver_direct,
+        },
     )
 
     trans_flists = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_flists", allow_other_outputs = False)
@@ -513,6 +517,11 @@ verilog_rtl_lint_test = rule(
             doc = "Other verilog libraries this target is dependent upon.\n" +
                   "All Labels specified here must provide a VerilogInfo provider.",
         ),
+        "run_template": attr.label(
+            allow_single_file = True,
+            default = Label("@rules_verilog//vendors/cadence:verilog_rtl_lint_test.sh.template"),
+            doc = "The template to generate the script to run the lint test.\n",
+        ),
         "rulefile": attr.label(
             allow_single_file = True,
             mandatory = True,
@@ -533,15 +542,17 @@ verilog_rtl_lint_test = rule(
         ),
         "defines": attr.string_dict(
             allow_empty = True,
-            doc = "List of additional \\`defines for this lint run",
+            doc = "List of additional \\`defines for this lint run.\nIf a define is only for control and has no value, " +
+                  "e.g. \\`define LINT, the dictionary entry key should be \"LINT\" and the value should be the empty string.\n" +
+                  "If a define needs a value, e.g. \\`define WIDTH 8, the dictionary value must start with '=', e.g. '=8'",
         ),
         "lint_parser": attr.label(
             allow_files = True,
             default = "@rules_verilog//:lint_parser_hal",
             doc = "Post processor for lint logs allowing for easier waiving of warnings.",
         ),
-        "waiver_hack": attr.string(
-            doc = "Lint waiver python regex to hack around cases when HAL has formatting errors in xrun.log.xml that cause problems for the lint parser",
+        "waiver_direct": attr.string(
+            doc = "Lint waiver python regex to apply directly to a lint message. This is sometimes needed to work around cases when HAL has formatting errors in xrun.log.xml that cause problems for the lint parser",
         ),
         "_command_override": attr.label(
             default = Label("@rules_verilog//:verilog_rtl_lint_test_command"),
@@ -563,74 +574,55 @@ def _verilog_rtl_cdc_test_impl(ctx):
         output = ctx.outputs.executable,
         substitutions = {
             "{CDC_COMMAND}": ctx.attr._command_override[ToolEncapsulationInfo].command,
-            "{PREAMBLE_CMDS}": ctx.outputs.cdc_preamble_cmds.short_path,
+            "{PREAMBLE_CMDS}": ctx.outputs.preamble_cmds.short_path,
             "{CMD_FILES}": " ".join([cmd_file.short_path for cmd_file in ctx.files.cmd_files]),
-            "{EPILOGUE_CMDS}": ctx.outputs.cdc_epilogue_cmds.short_path,
+            "{EPILOGUE_CMDS}": ctx.outputs.epilogue_cmds.short_path,
         },
     )
 
-    flists = " ".join(["-f {}".format(f.short_path) for f in trans_flists.to_list()])
-    defines = ["+{}".format(define) for define in ctx.attr.defines]
+    defines = ["+define+LINT+CDC"]
+
+    defines.extend(["+{}{}".format(key, value) for key, value in ctx.attr.defines.items()])
     for key, value in gather_shell_defines(ctx.attr.shells).items():
         defines.append("+{}{}".format(key, value))
+
+    top_path = ""
+    for dep in ctx.attr.deps:
+        if VerilogInfo in dep and dep[VerilogInfo].last_module:
+            top_path = "  {}".format(dep[VerilogInfo].last_module.short_path)
+    if top_path == "":
+        fail("verilog_rtl_cdc_test {} could not determine the top module from the target's dependencies".format(ctx.label))
 
     bbox_modules_cmd = ""
     if ctx.attr.bbox_modules:
         bbox_modules_cmd = "-bbox_m {" + "{}".format(" ".join(ctx.attr.bbox_modules)) + "}"
 
-    top_mod = ""
-    for dep in ctx.attr.deps:
-        if VerilogInfo in dep and dep[VerilogInfo].last_module:
-            top_mod = "  {}".format(dep[VerilogInfo].last_module.short_path)
-
-    if top_mod == "":
-        fail("verilog_rtl_cdc_test could not determine top_module from last_module variable")
-
     bbox_array_size_cmd = ""
     if ctx.attr.bbox_array_size < 0:
-        fail("verilog_rtl_cdc_test was specified with a negative bbox_array_size")
+        fail("verilog_rtl_cdc_test {} was specified with a negative bbox_array_size".format(ctx.label))
     elif ctx.attr.bbox_array_size > 0:
         bbox_array_size_cmd = "-bbox_a {}".format(ctx.attr.bbox_array_size)
 
-    premable_cmds_content = [
-        "clear -all",
-        "set elaborate_single_run_mode True",
-        "analyze -sv09 +libext+.v+.sv {} +define+LINT+CDC{} {} {}".format(bbox_modules_cmd, "".join(defines), flists, top_mod),
-        "elaborate {} -top {} {}".format(bbox_modules_cmd, ctx.attr.top, bbox_array_size_cmd),
-    ]
-
-    epilogue_cmds_content = [
-        "check_cdc -init",
-        "check_cdc -clock_domain -find",
-        "check_cdc -pair -find",
-        "check_cdc -scheme -find",
-        "check_cdc -group -find",
-        "check_cdc -reset -find",
-        "set all_violas [check_cdc -list violations]",
-        "set num_violas [llength $all_violas]",
-        "for {set viola_idx 0} {$viola_idx < $num_violas} {incr viola_idx} {",
-        "puts \"[lindex $all_violas $viola_idx]\n\"",
-        "}",
-        "set return_value [expr {$num_violas > 0}]",
-        "if {$return_value} {",
-        "puts \"$num_violas errors\"",
-        "}",
-        "if { $::RULES_VERILOG_GUI == 0 } {",
-        "exit $return_value",
-        "}",
-    ]
-
-    runfiles = ctx.runfiles(files = [ctx.outputs.cdc_preamble_cmds, ctx.outputs.cdc_epilogue_cmds] + trans_srcs.to_list() + trans_flists.to_list() + ctx.files.cmd_files)
-
-    ctx.actions.write(
-        output = ctx.outputs.cdc_preamble_cmds,
-        content = "\n".join(premable_cmds_content),
+    ctx.actions.expand_template(
+        template = ctx.file.preamble_template,
+        output = ctx.outputs.preamble_cmds,
+        substitutions = {
+            "{DEFINES}": "".join(defines),
+            "{FLISTS}": " ".join(["-f {}".format(f.short_path) for f in trans_flists.to_list()]),
+            "{TOP_PATH}": top_path,
+            "{INST_TOP}": ctx.attr.top,
+            "{BBOX_MODULES_CMD}": bbox_modules_cmd,
+            "{BBOX_ARRAY_SIZE_CMD}": bbox_array_size_cmd,
+        },
     )
 
-    ctx.actions.write(
-        output = ctx.outputs.cdc_epilogue_cmds,
-        content = "\n".join(epilogue_cmds_content),
+    ctx.actions.expand_template(
+        template = ctx.file.epilogue_template,
+        output = ctx.outputs.epilogue_cmds,
+        substitutions = {},
     )
+
+    runfiles = ctx.runfiles(files = [ctx.outputs.preamble_cmds, ctx.outputs.epilogue_cmds] + trans_srcs.to_list() + trans_flists.to_list() + ctx.files.cmd_files)
 
     return [
         DefaultInfo(runfiles = runfiles),
@@ -645,6 +637,21 @@ verilog_rtl_cdc_test = rule(
             doc = "Other verilog libraries this target is dependent upon.\n" +
                   "All Labels specified here must provide a VerilogInfo provider.",
         ),
+        "run_template": attr.label(
+            allow_single_file = True,
+            default = Label("@rules_verilog//vendors/cadence:verilog_rtl_cdc_test.sh.template"),
+            doc = "The template to generate the script to run the cdc test.\n",
+        ),
+        "preamble_template": attr.label(
+            allow_single_file = True,
+            default = Label("@rules_verilog//vendors/cadence:verilog_rtl_cdc_preamble_cmds.tcl.template"),
+            doc = "The template to generate the initial commands (the preamble) for this cdc test.\n",
+        ),
+        "epilogue_template": attr.label(
+            allow_single_file = True,
+            default = Label("@rules_verilog//vendors/cadence:verilog_rtl_cdc_epilogue_cmds.tcl.template"),
+            doc = "The template to generate the final reporting commands for this cdc test.\n",
+        ),
         "shells": attr.label_list(
             doc = _SHELLS_DOC,
         ),
@@ -652,10 +659,11 @@ verilog_rtl_cdc_test = rule(
             doc = "The name of the top-level module for this cdc run",
             mandatory = True,
         ),
-        "defines": attr.string_list(
+        "defines": attr.string_dict(
             allow_empty = True,
-            default = [],
-            doc = "List of additional \\`defines for this cdc run",
+            doc = "List of additional \\`defines for this cdc run.\nIf a define is only for control and has no value, " +
+                  "e.g. \\`define CDC, the dictionary entry key should be \"CDC\" and the value should be the empty string.\n" +
+                  "If a define needs a value, e.g. \\`define WIDTH 8, the dictionary value must start with '=', e.g. '=8'",
         ),
         "bbox_modules": attr.string_list(
             allow_empty = True,
@@ -684,8 +692,8 @@ verilog_rtl_cdc_test = rule(
         ),
     },
     outputs = {
-        "cdc_preamble_cmds": "%{name}_cdc_preamble_cmds.tcl",
-        "cdc_epilogue_cmds": "%{name}_cdc_epilogue_cmds.tcl",
+        "preamble_cmds": "%{name}_preamble_cmds.tcl",
+        "epilogue_cmds": "%{name}_epilogue_cmds.tcl",
     },
     test = True,
 )
