@@ -1,6 +1,42 @@
 #!/usr/bin/bash
 # This is a template for the bazel verilog_rtl_unit_test rule
 # It is not intended to be run stand-alone
+set -e
+
+generate_waves=0
+launch_wave_viewer=0
+remaining_args=()
+remaining_args_str=""
+
+while (( $# ))
+do
+    case $1 in
+        "--waves" )
+            generate_waves=1
+            ;;
+        "--launch" )
+            launch_wave_viewer=1
+            ;;
+        *)
+            remaining_args+=($1)
+            ;;    
+    esac
+    shift
+done
+
+waves_render_cmd=""
+if [ $generate_waves -eq 1 ]
+then
+    waves_render_cmd="-input {WAVES_RENDER_CMD_PATH} -access r"
+fi
+
+waves_launch_cmd=""
+if [ $launch_wave_viewer -eq 1 ]
+then
+    waves_render_cmd="-input {WAVES_RENDER_CMD_PATH} -access r"
+    waves_launch_cmd="{WAVE_VIEWER_COMMAND} waves.shm"
+fi
+
 {SIMULATOR_COMMAND} \
     -define TBV \
     -libext .sv \
@@ -16,6 +52,8 @@
     -define TIMESCALE_PREC_FS=100 \
     {PRE_FLIST_ARGS}
     {FLISTS} \
-    {TOP} \
-    {POST_FLIST_ARGS}
-    $@
+        {TOP} \
+    $waves_render_cmd \
+    {POST_FLIST_ARGS} \
+    ${remaining_args[@]};
+$waves_launch_cmd

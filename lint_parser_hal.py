@@ -46,8 +46,8 @@ def parse_args(argv):
                         dest="show_help",
                         action='store_true',
                         help="Display the help message from hal for each individual issue")
-    parser.add_argument("--waiver-hack",
-                        help="Hacked in waiver regex for when inline pragmas and design_info don't work")
+    parser.add_argument("--waiver-direct",
+                        help="Direct waiver regex for when inline pragmas and design_info are insufficient")
     options = parser.parse_args(argv)
     return options
 
@@ -113,11 +113,11 @@ class HalMessage(object):
 
 class HalLintLog(object):
 
-    def __init__(self, path, waiver_hack):
+    def __init__(self, path, waiver_direct):
         self.issues = []
         self.files_with_notes = {}
         self.dirs_with_notes = {}
-        self.waiver_hack_regex = re.compile(waiver_hack)
+        self.waiver_direct_regex = re.compile(waiver_direct)
 
         with open(path, 'r', encoding='utf-8', errors='replace') as logp:
             text = logp.read()
@@ -153,10 +153,10 @@ class HalLintLog(object):
                             waivers.add((filename, str(i + 1), rule.strip()))
 
         for issue in self.issues:
-            # Only apply a hack if the filename and lineno are empty, meaning HAL didn't render the error correctly
+            # Only apply a direct waiver if the filename and lineno are empty, meaning HAL didn't render the error correctly
             if (issue.filename, issue.lineno, issue.errcode) in waivers:
                 issue.waived = True
-            elif issue.filename is "" and issue.lineno is "" and self.waiver_hack_regex.search(issue.info):
+            elif issue.filename is "" and issue.lineno is "" and self.waiver_direct_regex.search(issue.info):
                 issue.waived = True
 
         self.prep_file_stats()
@@ -244,7 +244,7 @@ def main(options, log):
     log.info("XML Logfile: %s", xml_logfile)
 
     try:
-        newest_lint_log = HalLintLog(xml_logfile, options.waiver_hack)
+        newest_lint_log = HalLintLog(xml_logfile, options.waiver_direct)
         newest_lint_log.stats()
     except Exception as exc:
         log.error("Failed to parse lint log file: %s", exc)

@@ -160,7 +160,8 @@ def _simple_test():
     log.exit_if_warnings_or_errors("Will not exit due to lack of previous errors")
     log.info("Message 2 prints.")
     log.error("Message 3 is an error and it will print.")
-    log.exit_if_warnings_or_errors("Message 4: exiting due to errors. " "This is the last message to print.")
+    log.exit_if_warnings_or_errors("Message 4: exiting due to errors. "
+                                   "This is the last message to print.")
     log.info("Will not get to this point.")
     # Expected output
     # INFO:main:Message 1 prints.
