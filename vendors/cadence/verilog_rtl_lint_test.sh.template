@@ -1,8 +1,6 @@
 #!/usr/bin/bash
 # This is a template for the bazel verilog_rtl_lint_test rule
 # It is not intended to be run stand-alone
-set -e
-
 mv xrun.log xrun.log.bak 2> /dev/null
 mv xrun.log.xml xrun.log.xml.bak 2> /dev/null
 {SIMULATOR_COMMAND} \

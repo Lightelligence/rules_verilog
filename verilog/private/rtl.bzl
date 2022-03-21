@@ -480,7 +480,7 @@ def _verilog_rtl_lint_test_impl(ctx):
             "{DEFINES}": " ".join(defines),
             "{FLISTS}": " ".join(["-f {}".format(f.short_path) for f in trans_flists.to_list()]),
             "{TOP_PATH}": top_path,
-            "{DESIGN_INFO}": " ".join([" -design_info {}".format(design_info.short_path) for design_info in ctx.files.design_info]),
+            "{DESIGN_INFO}": " ".join(["{}".format(design_info.short_path) for design_info in ctx.files.design_info]),
             "{RULEFILE}": "".join([f.short_path for f in ctx.files.rulefile]),
             "{INST_TOP}": ctx.attr.top,
             "{LINT_PARSER}": ctx.files.lint_parser[0].short_path,
