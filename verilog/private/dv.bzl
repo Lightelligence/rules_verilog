@@ -66,7 +66,7 @@ def _verilog_dv_test_cfg_impl(ctx):
         "sim_opts": sim_opts,
         "uvm_testname": uvm_testname,
         "tags": ctx.attr.tags,
-}
+    }
     out = ctx.outputs.dynamic_args
     ctx.actions.write(
         output = out,
