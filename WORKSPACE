@@ -1,6 +1,5 @@
 workspace(name = "rules_verilog")
 
-load("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 load("@rules_verilog//:deps.bzl", "verilog_dependencies")
 
@@ -56,10 +55,13 @@ load("@bazel_gazelle//:deps.bzl", "gazelle_dependencies")
 
 gazelle_dependencies()
 
-git_repository(
+http_archive(
     name = "io_bazel_stardoc",
-    remote = "https://github.com/bazelbuild/stardoc.git",
-    tag = "0.4.0",
+    sha256 = "aa814dae0ac400bbab2e8881f9915c6f47c49664bf087c409a15f90438d2c23e",
+    urls = [
+        "https://mirror.bazel.build/github.com/bazelbuild/stardoc/releases/download/0.5.1/stardoc-0.5.1.tar.gz",
+        "https://github.com/bazelbuild/stardoc/releases/download/0.5.1/stardoc-0.5.1.tar.gz",
+    ],
 )
 
 load("@io_bazel_stardoc//:setup.bzl", "stardoc_repositories")
@@ -68,8 +70,9 @@ stardoc_repositories()
 
 http_archive(
     name = "com_google_protobuf",
-    strip_prefix = "protobuf-master",
-    urls = ["https://github.com/protocolbuffers/protobuf/archive/master.zip"],
+    sha256 = "b07772d38ab07e55eca4d50f4b53da2d998bb221575c60a4f81100242d4b4889",
+    strip_prefix = "protobuf-3.20.0",
+    url = "https://github.com/protocolbuffers/protobuf/archive/refs/tags/v3.20.0.tar.gz",
 )
 
 load("@com_google_protobuf//:protobuf_deps.bzl", "protobuf_deps")
@@ -78,6 +81,7 @@ protobuf_deps()
 
 http_archive(
     name = "com_github_bazelbuild_buildtools",
-    strip_prefix = "buildtools-master",
-    url = "https://github.com/bazelbuild/buildtools/archive/master.zip",
+    sha256 = "b8fc5ee8f48a0f7ff0a72f8457aaefb5807777162caf6967c5648f73ae320cf3",
+    strip_prefix = "buildtools-master-5.5.1",
+    url = "https://github.com/bazelbuild/bazel/archive/refs/tags/5.1.1.tar.gz",
 )

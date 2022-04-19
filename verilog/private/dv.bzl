@@ -56,17 +56,6 @@ def _verilog_dv_test_cfg_impl(ctx):
     provider_args["sim_opts"] = sim_opts
     provider_args["tags"] = ctx.attr.tags
 
-    sim_opts_str = "\n".join(["{}{}".format(key, value) for key, value in sim_opts.items()])
-
-    out = ctx.outputs.sim_args
-    ctx.actions.write(
-        output = out,
-        content = """+UVM_TESTNAME={uvm_testname}\n{sim_opts}""".format(
-            uvm_testname = uvm_testname,
-            sim_opts = sim_opts_str,
-        ),
-    )
-
     for socket_name, socket_command in ctx.attr.sockets.items():
         if "{socket_file}" not in socket_command:
             fail("socket {} did not have {{socket_file}} in socket_command".format(socket_name))
@@ -74,6 +63,9 @@ def _verilog_dv_test_cfg_impl(ctx):
     dynamic_args = {
         "sockets": ctx.attr.sockets,
         "timeout": timeout,
+        "sim_opts": sim_opts,
+        "uvm_testname": uvm_testname,
+        "tags": ctx.attr.tags,
     }
     out = ctx.outputs.dynamic_args
     ctx.actions.write(
@@ -142,7 +134,6 @@ verilog_dv_test_cfg = rule(
         ),
     },
     outputs = {
-        "sim_args": "%{name}_sim_args.f",
         "dynamic_args": "%{name}_dynamic_args.py",
     },
 )
