@@ -473,10 +473,22 @@ def _verilog_rtl_lint_test_impl(ctx):
         fail("Only one rulefile allowed, but {} has several rulefiles".format(ctx.label))
 
     ctx.actions.expand_template(
+        template = ctx.file.command_template,
+        output = ctx.outputs.command_script,
+        substitutions = {
+            "{RULEFILE}": "".join([f.short_path for f in ctx.files.rulefile]),
+            "{FLISTS}": " ".join(["-f {}".format(f.short_path) for f in trans_flists.to_list()]),
+            "{TOP_PATH}": top_path,
+            "{INST_TOP}": ctx.attr.top,
+        },
+    )
+
+    ctx.actions.expand_template(
         template = ctx.file.run_template,
         output = ctx.outputs.executable,
         substitutions = {
             "{SIMULATOR_COMMAND}": ctx.attr._command_override[ToolEncapsulationInfo].command,
+            "{COMMAND_SCRIPT}": ctx.outputs.command_script.short_path,
             "{DEFINES}": " ".join(defines),
             "{FLISTS}": " ".join(["-f {}".format(f.short_path) for f in trans_flists.to_list()]),
             "{TOP_PATH}": top_path,
@@ -491,7 +503,7 @@ def _verilog_rtl_lint_test_impl(ctx):
     trans_flists = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_flists", allow_other_outputs = False)
     trans_srcs = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_sources", allow_other_outputs = True)
 
-    runfiles = ctx.runfiles(files = trans_srcs.to_list() + trans_flists.to_list() + ctx.files.design_info + ctx.files.rulefile + ctx.files.lint_parser)
+    runfiles = ctx.runfiles(files = trans_srcs.to_list() + trans_flists.to_list() + ctx.files.design_info + ctx.files.rulefile + ctx.files.lint_parser + [ctx.outputs.command_script])
 
     return [
         DefaultInfo(runfiles = runfiles),
@@ -554,12 +566,20 @@ verilog_rtl_lint_test = rule(
         "waiver_direct": attr.string(
             doc = "Lint waiver python regex to apply directly to a lint message. This is sometimes needed to work around cases when HAL has formatting errors in xrun.log.xml that cause problems for the lint parser",
         ),
+        "command_template": attr.label(
+            allow_single_file = True,
+            default = Label("@rules_verilog//vendors/real_intent:verilog_rtl_lint_cmds.tcl.template"),
+            doc = "The template to generate the command script for this lint test.\n",
+        ),
         "_command_override": attr.label(
             default = Label("@rules_verilog//:verilog_rtl_lint_test_command"),
             doc = "Allows custom override of simulator command in the event of wrapping via modulefiles\n" +
                   "Example override in project's .bazelrc:\n" +
                   '  build --@rules_verilog//:verilog_rtl_lint_test_command="runmod -t xrun --"',
         ),
+    },
+    outputs = {
+        "command_script": "%{name}_cmds.tcl",
     },
     test = True,
 )
