@@ -10,7 +10,7 @@ load("@rules_verilog//:simulator.bzl", "xcelium_setup")
 xcelium_setup(name="xcelium")
 """
 
-XCELIUM_BUILD = """
+XRUN_BUILD = """
 # filegroup(
 #     name = "vpi_headers",
 #     srcs = glob(["vpi_*.h"]),
@@ -51,7 +51,7 @@ def _xcelium_setup_impl(repository_ctx):
     for hdr in DPI_HEADERS:
         hdr_path = "{}/{}".format(include, hdr)
         repository_ctx.symlink(hdr_path, hdr)
-    repository_ctx.file("BUILD", XCELIUM_BUILD)
+    repository_ctx.file("BUILD", XRUN_BUILD)
 
 xcelium_setup = repository_rule(
     implementation = _xcelium_setup_impl,
