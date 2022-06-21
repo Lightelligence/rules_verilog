@@ -9,14 +9,9 @@ import re
 import subprocess
 import sys
 
-# FIXME
-import pdb
-
 ################################################################################
 # Checkout specific libraries
 import cmn_logging
-
-LOG_INDENT = ' ' * 9
 
 ################################################################################
 # Constants
@@ -147,8 +142,8 @@ class AscentLintLog(object):
 
         for issue in self.issues:
             if issue.filename in line_waivers and issue.errcode in line_waivers[issue.filename]:
-                for linenum in line_waivers[issue.filename][issue.errcode]:
-                    if issue.lineno == linenum:
+                for lineno in line_waivers[issue.filename][issue.errcode]:
+                    if issue.lineno == lineno:
                         issue.waived = True
                         continue
             # Don't use try/except because this should not succeed in try often
@@ -159,17 +154,17 @@ class AscentLintLog(object):
 
         self.prep_file_stats()
 
-    def _handle_line_waiver(self, line_waivers, filename, linenum, match, log):
+    def _handle_line_waiver(self, line_waivers, filename, lineno, match, log):
         line_waivers.setdefault(filename, {})
         rules = match.split(',')
         for rule in rules:
             rule = rule.strip()
             line_waivers[filename].setdefault(rule, [])
-            line_waivers[filename][rule].append(linenum)
+            line_waivers[filename][rule].append(lineno)
             continue
 
 
-    def _handle_block_start(self, block_waivers, filename, linenum, match, log):
+    def _handle_block_start(self, block_waivers, filename, lineno, match, log):
         block_waivers.setdefault(filename, {})
         rules = match.split(',')
         for rule in rules:
@@ -181,16 +176,16 @@ class AscentLintLog(object):
                               filename,
                               rule,
                               block_waivers[filename][rule][-1][0],
-                              linenum)
+                              lineno)
                 else:
                     # previous disable/enable is coherent so we can add a new entry to the list
-                    block_waivers[filename][rule].append([linenum, None])
+                    block_waivers[filename][rule].append([lineno, None])
             else:
-                block_waivers[filename][rule] = [[linenum, None]]
+                block_waivers[filename][rule] = [[lineno, None]]
 
-    def _handle_block_end(self, block_waivers, filename, linenum, match, log):
+    def _handle_block_end(self, block_waivers, filename, lineno, match, log):
         if filename not in block_waivers:
-            log.error("In %s, 'enable' pragmas on line %s for '%s' appears before any 'disable' pragmas", filename, linenum, match)
+            log.error("In %s, 'enable' pragmas on line %s for '%s' appears before any 'disable' pragmas", filename, lineno, match)
             return
         rules = match.split(',')
         for rule in rules:
@@ -199,15 +194,15 @@ class AscentLintLog(object):
                 log.error("In %s, 'enable' pragma for %s on line %s appears before any 'disable' pragmas",
                           filename,
                           rule,
-                          linenum)
+                          lineno)
                 return
             if block_waivers[filename][rule][-1][1] is None:
-                block_waivers[filename][rule][-1][1] = linenum
+                block_waivers[filename][rule][-1][1] = lineno
             else:
                 log.error("In %s, 'enable' pragma for %s on line %s doesn't have a matching 'disable'. Previous ['disable', 'enable'] are on lines %s",
                           filename,
                           rule,
-                          linenum,
+                          lineno,
                           str(block_waivers[filename][rule][-1]))
 
     def _check_block_waivers(self, block_waivers, log):
@@ -309,4 +304,3 @@ if __name__ == '__main__':
     verbosity = cmn_logging.DEBUG if options.tool_debug else cmn_logging.DEBUG
     log = cmn_logging.build_logger("bazel_lint.log", level=verbosity)
     main(options, log)
-    
