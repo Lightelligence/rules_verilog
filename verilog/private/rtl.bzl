@@ -477,9 +477,11 @@ def _verilog_rtl_lint_test_impl(ctx):
         output = ctx.outputs.command_script,
         substitutions = {
             "{RULEFILE}": "".join([f.short_path for f in ctx.files.rulefile]),
+            "{DEFINES}": " ".join(defines),
             "{FLISTS}": " ".join(["-f {}".format(f.short_path) for f in trans_flists.to_list()]),
             "{TOP_PATH}": top_path,
             "{INST_TOP}": ctx.attr.top,
+            "{LINT_PARSER}": ctx.files.lint_parser[0].short_path,
         },
     )
 
@@ -560,7 +562,7 @@ verilog_rtl_lint_test = rule(
         ),
         "lint_parser": attr.label(
             allow_files = True,
-            default = "@rules_verilog//:lint_parser_hal",
+            default = "@rules_verilog//:lint_parser_ascent",
             doc = "Post processor for lint logs allowing for easier waiving of warnings.",
         ),
         "waiver_direct": attr.string(

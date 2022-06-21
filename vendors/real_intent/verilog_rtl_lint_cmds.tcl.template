@@ -1,0 +1,5 @@
+set ri_write_zdb false
+source {RULEFILE}
+analyze {FLISTS} {TOP_PATH}
+elaborate {INST_TOP}
+report_policy ALL -output lint.rpt -verbose -skip_empty_summary_status
