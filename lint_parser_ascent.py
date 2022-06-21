@@ -104,7 +104,7 @@ class AscentLintLog(object):
                     log.critical("Ascent failed before it can render a report. Exiting")
                 match = re.match("([IWE])\s+([A-Z_]+):\s+(\S+):(\d+)\s+(.*)\s+New", line)
                 if match:
-                    self.issues.append(AscentMessage(match.group(2), match.group(1), match.group(5).strip(), match.group(3), match.group(4)))
+                    self.issues.append(AscentMessage(match.group(2), match.group(1), match.group(5).strip(), match.group(3), int(match.group(4))))
                     continue
                 if line.startswith("File Definitions"):
                     found_file_map = True
@@ -133,14 +133,14 @@ class AscentLintLog(object):
                 for i, line in enumerate(filep.readlines()):
                     match = LINE_WAIVER_REGEXP.search(line)
                     if match:
-                        self._handle_line_waiver(line_waivers, filename, str(i + 1), match.group(1), log)
+                        self._handle_line_waiver(line_waivers, filename, i + 1, match.group(1), log)
                     match = BLOCK_WAIVER_START_REGEXP.match(line)
                     if match:
-                        self._handle_block_start(block_waivers, filename, str(i + 1), match.group(1), log)
+                        self._handle_block_start(block_waivers, filename, i + 1, match.group(1), log)
                         continue
                     match = BLOCK_WAIVER_END_REGEXP.match(line)
                     if match:
-                        self._handle_block_end(block_waivers, filename, str(i + 1), match.group(1), log)
+                        self._handle_block_end(block_waivers, filename, i + 1, match.group(1), log)
                         continue
 
         self._check_block_waivers(block_waivers, log)
@@ -190,7 +190,7 @@ class AscentLintLog(object):
 
     def _handle_block_end(self, block_waivers, filename, linenum, match, log):
         if filename not in block_waivers:
-            log.error("In %s, 'enable' pragmas on line for '%s' appears before any 'disable' pragmas", filename, linenum, match)
+            log.error("In %s, 'enable' pragmas on line %s for '%s' appears before any 'disable' pragmas", filename, linenum, match)
             return
         rules = match.split(',')
         for rule in rules:
