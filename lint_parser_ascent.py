@@ -16,8 +16,8 @@ import cmn_logging
 ################################################################################
 # Constants
 LINE_WAIVER_REGEXP = re.compile("\S\s// lint: disable=(.*)")
-BLOCK_WAIVER_START_REGEXP = re.compile("\s+// lint: disable=(.*)")
-BLOCK_WAIVER_END_REGEXP = re.compile("\s+// lint: enable=(.*)")
+BLOCK_WAIVER_START_REGEXP = re.compile("\s*// lint: disable=(.*)")
+BLOCK_WAIVER_END_REGEXP = re.compile("\s*// lint: enable=(.*)")
 
 # If you encounter a block waiver
 # block_waivers is a dict that maps file names to a list
