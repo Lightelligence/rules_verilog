@@ -458,8 +458,10 @@ verilog_rtl_unit_test = rule(
 def _verilog_rtl_lint_test_impl(ctx):
     trans_flists = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_flists", allow_other_outputs = False)
 
-    defines = ["-define {}{}".format(key, value) for key, value in gather_shell_defines(ctx.attr.shells).items()]
-    defines.extend(["-define {}{}".format(key, value) for key, value in ctx.attr.defines.items()])
+    # defines = ["-define {}{}".format(key, value) for key, value in gather_shell_defines(ctx.attr.shells).items()]
+    # defines.extend(["-define {}{}".format(key, value) for key, value in ctx.attr.defines.items()])
+    defines = ["+define+{}{}".format(key, value) for key, value in gather_shell_defines(ctx.attr.shells).items()]
+    defines.extend(["+define+{}{}".format(key, value) for key, value in ctx.attr.defines.items()])
 
     top_path = ""
     for dep in ctx.attr.deps:
