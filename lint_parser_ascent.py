@@ -104,9 +104,9 @@ class AscentLintLog(object):
                 if line.startswith("File Definitions"):
                     found_file_map = True
                 if found_file_map:
-                    match = re.match("([a-zA-Z0-9_]+\.s?vh?)\s+(.{0,2}\S+)", line)
+                    match = re.match("([a-zA-Z0-9_]+\.s?vh?(_\d+)?)\s+(.{0,2}\S+)", line)
                     if match:
-                        self.file_map[match.group(1)] = match.group(2)
+                        self.file_map[match.group(1)] = match.group(3)
 
         self.infos = [issue for issue in self.issues if issue.severity == 'I']
         self.warnings = [issue for issue in self.issues if issue.severity == 'W']
@@ -294,13 +294,13 @@ def main(options, log):
         newest_lint_log = AscentLintLog("lint.rpt", log)
         newest_lint_log.stats()
     except Exception as exc:
-        log.error("Failed to parse lint log file: %s", exc)
+        log.error("Failed to parse lint.rpt")
 
     log.exit_if_warnings_or_errors("Lint parsing failed due to previous errors")
 
 
 if __name__ == '__main__':
     options = parse_args(sys.argv[1:])
-    verbosity = cmn_logging.DEBUG if options.tool_debug else cmn_logging.DEBUG
+    verbosity = cmn_logging.INFO if options.tool_debug else cmn_logging.DEBUG
     log = cmn_logging.build_logger("bazel_lint.log", level=verbosity)
     main(options, log)
