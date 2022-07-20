@@ -69,7 +69,7 @@ class AscentMessage(object):
     def from_csv(cls, csv_row):
         if csv_row['severity'] == "S":
             return None
-        
+
         severity = csv_row['severity']
         errcode = csv_row['rulename']
         info = csv_row['details']
@@ -99,7 +99,9 @@ class AscentLintLog(object):
                     log.critical("Ascent failed before it can render a report. Exiting")
                 match = re.match("([IWE])\s+([A-Z_]+):\s+(\S+):(\d+)\s+(.*)\s+New", line)
                 if match:
-                    self.issues.append(AscentMessage(match.group(2), match.group(1), match.group(5).strip(), match.group(3), int(match.group(4))))
+                    self.issues.append(
+                        AscentMessage(match.group(2), match.group(1),
+                                      match.group(5).strip(), match.group(3), int(match.group(4))))
                     continue
                 if line.startswith("File Definitions"):
                     found_file_map = True
@@ -163,7 +165,6 @@ class AscentLintLog(object):
             line_waivers[filename][rule].append(lineno)
             continue
 
-
     def _handle_block_start(self, block_waivers, filename, lineno, match, log):
         block_waivers.setdefault(filename, {})
         rules = match.split(',')
@@ -172,11 +173,8 @@ class AscentLintLog(object):
             # Check to see if the last 'disable' has a matching 'enable'
             if rule in block_waivers[filename]:
                 if block_waivers[filename][rule][-1][1] is None:
-                    log.error("In %s, %s has a 'disable' on line %s and %s without an 'enable' in between",
-                              filename,
-                              rule,
-                              block_waivers[filename][rule][-1][0],
-                              lineno)
+                    log.error("In %s, %s has a 'disable' on line %s and %s without an 'enable' in between", filename,
+                              rule, block_waivers[filename][rule][-1][0], lineno)
                 else:
                     # previous disable/enable is coherent so we can add a new entry to the list
                     block_waivers[filename][rule].append([lineno, None])
@@ -185,34 +183,29 @@ class AscentLintLog(object):
 
     def _handle_block_end(self, block_waivers, filename, lineno, match, log):
         if filename not in block_waivers:
-            log.error("In %s, 'enable' pragmas on line %s for '%s' appears before any 'disable' pragmas", filename, lineno, match)
+            log.error("In %s, 'enable' pragmas on line %s for '%s' appears before any 'disable' pragmas", filename,
+                      lineno, match)
             return
         rules = match.split(',')
         for rule in rules:
             rule = rule.strip()
             if rule not in block_waivers[filename]:
-                log.error("In %s, 'enable' pragma for %s on line %s appears before any 'disable' pragmas",
-                          filename,
-                          rule,
-                          lineno)
+                log.error("In %s, 'enable' pragma for %s on line %s appears before any 'disable' pragmas", filename,
+                          rule, lineno)
                 return
             if block_waivers[filename][rule][-1][1] is None:
                 block_waivers[filename][rule][-1][1] = lineno
             else:
-                log.error("In %s, 'enable' pragma for %s on line %s doesn't have a matching 'disable'. Previous ['disable', 'enable'] are on lines %s",
-                          filename,
-                          rule,
-                          lineno,
-                          str(block_waivers[filename][rule][-1]))
+                log.error(
+                    "In %s, 'enable' pragma for %s on line %s doesn't have a matching 'disable'. Previous ['disable', 'enable'] are on lines %s",
+                    filename, rule, lineno, str(block_waivers[filename][rule][-1]))
 
     def _check_block_waivers(self, block_waivers, log):
         for filename, rule_dict in block_waivers.items():
             for rule, waiver_list in rule_dict.items():
                 if waiver_list[-1][1] is None:
-                    log.error("In %s, couldn't find a matching 'enable' for %s. The 'disable' is on line %s",
-                              filename,
-                              rule,
-                              waiver_list[-1][0])
+                    log.error("In %s, couldn't find a matching 'enable' for %s. The 'disable' is on line %s", filename,
+                              rule, waiver_list[-1][0])
                     # Remove the partial block waiver from the list since it's incomplete
                     del waiver_list[-1]
 
@@ -255,7 +248,7 @@ class AscentLintLog(object):
         else:
             log.info("Found %3d %s (+%3d waived)", unwaived, level, waived)
 
-    def stats(self):        
+    def stats(self):
         for info in self.infos:
             if not info.waived:
                 log.error("%s", info)
