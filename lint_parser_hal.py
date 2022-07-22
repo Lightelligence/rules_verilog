@@ -156,7 +156,7 @@ class HalLintLog(object):
             # Only apply a direct waiver if the filename and lineno are empty, meaning HAL didn't render the error correctly
             if (issue.filename, issue.lineno, issue.errcode) in waivers:
                 issue.waived = True
-            elif issue.filename is "" and issue.lineno is "" and self.waiver_direct_regex.search(issue.info):
+            elif issue.filename == "" and issue.lineno == "" and self.waiver_direct_regex.search(issue.info):
                 issue.waived = True
 
         self.prep_file_stats()
