@@ -541,9 +541,9 @@ verilog_rtl_lint_test = rule(
         "run_template": attr.label(
             allow_single_file = True,
             default = Label("@rules_verilog//vendors/cadence:verilog_rtl_lint_test.sh.template"),
-            doc = "The template to generate the script to run the lint test.\n",
+            doc = "The template to generate the script to run the lint test.\n" + 
                   "The command templates are located at " +
-                  "@rules_verilog//vendors/<vendor name>/verilog_rtl_lint_test.tcl.template\n" +
+                  "@rules_verilog//vendors/<vendor name>/verilog_rtl_lint_test.tcl.template\n",
         ),
         "rulefile": attr.label(
             allow_single_file = True,
@@ -584,7 +584,7 @@ verilog_rtl_lint_test = rule(
             default = Label("@rules_verilog//vendors/real_intent:verilog_rtl_lint_cmds.tcl.template"),
             doc = "The template to generate the command script for this lint test.\n" +
                   "The command templates are located at " +
-                  "@rules_verilog//vendors/<vendor name>/verilog_rtl_lint_cmds.tcl.template\n" +
+                  "@rules_verilog//vendors/<vendor name>/verilog_rtl_lint_cmds.tcl.template\n",
         ),
         "_command_override": attr.label(
             default = Label("@rules_verilog//:verilog_rtl_lint_test_command"),
