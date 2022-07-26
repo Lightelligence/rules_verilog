@@ -516,14 +516,19 @@ def _verilog_rtl_lint_test_impl(ctx):
 verilog_rtl_lint_test = rule(
     doc = """Compile and run lint on target
 
-    This rule was written for Cadence HAL to be run under xcelium. As such, it
+    This rule was originally written for Cadence HAL to be run under xcelium. As such, it
     is not entirely generic. It also uses a log post-processor
-    (lint_parser_hal.py) to allow for easier waiving of warnings.
+    (passed in by the lint_parser attribute) to allow for easier waiving of warnings.
 
     The DUT must have no unwaived warning/errors in order for this rule to
     pass. The intended philosophy is for blocks to maintain a clean lint status
     throughout the lifecycle of the project, not to run lint as a checklist
     item towards the end of the project.
+
+    There are several attributes in this rule that must be kept in sync.
+    run_template, rulefile, lint_parser, and command_template must use the associated
+    files for each vendor. The default values all point to the Cadence HAL versions.
+    If an instance of this rule overrides any values, they must override all four.
 
     """,
     implementation = _verilog_rtl_lint_test_impl,
@@ -537,13 +542,15 @@ verilog_rtl_lint_test = rule(
             allow_single_file = True,
             default = Label("@rules_verilog//vendors/cadence:verilog_rtl_lint_test.sh.template"),
             doc = "The template to generate the script to run the lint test.\n",
+                  "The command templates are located at " +
+                  "@rules_verilog//vendors/<vendor name>/verilog_rtl_lint_test.tcl.template\n" +
         ),
         "rulefile": attr.label(
             allow_single_file = True,
             mandatory = True,
-            doc = "The Cadence rulefile for HAL.\n" +
-                  "Suggested one per project.\n" +
-                  "Example: https://github.com/freecores/t6507lp/blob/ca7d7ea779082900699310db459a544133fe258a/lint/run/hal.def",
+            doc = "The rules configuration file for this lint run. rules_verilog doesn't provide a reference rulefile, " +
+                  "each project that uses rules_verilog must write their own tool-specific rulefile.\n" +
+                  "Example HAL rulefile: https://github.com/freecores/t6507lp/blob/ca7d7ea779082900699310db459a544133fe258a/lint/run/hal.def",
         ),
         "shells": attr.label_list(
             doc = _SHELLS_DOC,
@@ -564,8 +571,10 @@ verilog_rtl_lint_test = rule(
         ),
         "lint_parser": attr.label(
             allow_files = True,
-            default = "@rules_verilog//:lint_parser_ascent",
-            doc = "Post processor for lint logs allowing for easier waiving of warnings.",
+            default = "@rules_verilog//:lint_parser_hal",
+            doc = "Post processor for lint logs allowing for easier waiving of warnings.\n" +
+                  "Parsers for HAL and Ascent are included in rules_verilog release at " +
+                  "@rules_verilog//lint_parser_(hal|ascent)",
         ),
         "waiver_direct": attr.string(
             doc = "Lint waiver python regex to apply directly to a lint message. This is sometimes needed to work around cases when HAL has formatting errors in xrun.log.xml that cause problems for the lint parser",
@@ -573,7 +582,9 @@ verilog_rtl_lint_test = rule(
         "command_template": attr.label(
             allow_single_file = True,
             default = Label("@rules_verilog//vendors/real_intent:verilog_rtl_lint_cmds.tcl.template"),
-            doc = "The template to generate the command script for this lint test.\n",
+            doc = "The template to generate the command script for this lint test.\n" +
+                  "The command templates are located at " +
+                  "@rules_verilog//vendors/<vendor name>/verilog_rtl_lint_cmds.tcl.template\n" +
         ),
         "_command_override": attr.label(
             default = Label("@rules_verilog//:verilog_rtl_lint_test_command"),

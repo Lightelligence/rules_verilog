@@ -1,0 +1,1 @@
+HAL does not use a command file; it only uses a run script. This rendered template should never be called by any run script.

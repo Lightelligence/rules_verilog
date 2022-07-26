@@ -19,16 +19,13 @@ LINE_WAIVER_REGEXP = re.compile("\S\s// lint: disable=(.*)")
 BLOCK_WAIVER_START_REGEXP = re.compile("\s*// lint: disable=(.*)")
 BLOCK_WAIVER_END_REGEXP = re.compile("\s*// lint: enable=(.*)")
 
-# If you encounter a block waiver
-# block_waivers is a dict that maps file names to a list
-# Each item in the list is a tuple of (start_line, end_line)
-
 ################################################################################
 # Helpers
 
 
 def parse_args(argv):
-    parser = argparse.ArgumentParser(description="FIXME:CC", formatter_class=argparse.RawTextHelpFormatter)
+    parser = argparse.ArgumentParser(description="Parse output report from Ascent Lint using inline RTL waivers",
+                                     formatter_class=argparse.RawTextHelpFormatter)
 
     parser.add_argument('--tool-debug',
                         default=False,

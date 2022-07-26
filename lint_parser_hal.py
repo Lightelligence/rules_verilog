@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Parses results from HAL lint"""
+"""Parses results from Cadence HAL lint"""
 
 ################################################################################
 # stdlib
@@ -30,7 +30,8 @@ WAIVER_REGEXP = re.compile("\s// lint: disable=(.*)")
 
 
 def parse_args(argv):
-    parser = argparse.ArgumentParser(description="FIXME:CC", formatter_class=argparse.RawTextHelpFormatter)
+    parser = argparse.ArgumentParser(description="Parse output report from HAL Lint using inline RTL waivers",
+                                     formatter_class=argparse.RawTextHelpFormatter)
 
     parser.add_argument('--tool-debug',
                         default=False,
