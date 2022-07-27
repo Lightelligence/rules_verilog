@@ -468,7 +468,7 @@ def _verilog_rtl_lint_test_impl(ctx):
 
     defines = [shell_defines_string.format(key, value) for key, value in gather_shell_defines(ctx.attr.shells).items()]
     defines.extend([attr_defines_string.format(key, value) for key, value in ctx.attr.defines.items()])
-    
+
     top_path = ""
     for dep in ctx.attr.deps:
         if VerilogInfo in dep and dep[VerilogInfo].last_module:
@@ -547,7 +547,7 @@ verilog_rtl_lint_test = rule(
         "run_template": attr.label(
             allow_single_file = True,
             default = Label("@rules_verilog//vendors/cadence:verilog_rtl_lint_test.sh.template"),
-            doc = "The template to generate the script to run the lint test.\n" + 
+            doc = "The template to generate the script to run the lint test.\n" +
                   "The command templates are located at " +
                   "@rules_verilog//vendors/<vendor name>/verilog_rtl_lint_test.tcl.template\n",
         ),
