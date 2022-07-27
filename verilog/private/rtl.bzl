@@ -458,11 +458,17 @@ verilog_rtl_unit_test = rule(
 def _verilog_rtl_lint_test_impl(ctx):
     trans_flists = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_flists", allow_other_outputs = False)
 
-    # defines = ["-define {}{}".format(key, value) for key, value in gather_shell_defines(ctx.attr.shells).items()]
-    # defines.extend(["-define {}{}".format(key, value) for key, value in ctx.attr.defines.items()])
-    defines = ["+define+{}{}".format(key, value) for key, value in gather_shell_defines(ctx.attr.shells).items()]
-    defines.extend(["+define+{}{}".format(key, value) for key, value in ctx.attr.defines.items()])
+    # This is a temporary hack to work around issue with using -define in Ascent
+    # This will be removed in a future release once the Ascent issue is fixed
+    shell_defines_string = "-define {}{}"
+    attr_defines_string = "-define {}{}"
+    if str(ctx.attr.run_template.label) == "@rules_verilog//vendors/real_intent:verilog_rtl_lint_test.sh.template":
+        shell_defines_string = "+define+{}{}"
+        attr_defines_string = "+define+{}{}"
 
+    defines = [shell_defines_string.format(key, value) for key, value in gather_shell_defines(ctx.attr.shells).items()]
+    defines.extend([attr_defines_string.format(key, value) for key, value in ctx.attr.defines.items()])
+    
     top_path = ""
     for dep in ctx.attr.deps:
         if VerilogInfo in dep and dep[VerilogInfo].last_module:
