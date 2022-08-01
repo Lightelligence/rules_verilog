@@ -458,15 +458,16 @@ verilog_rtl_unit_test = rule(
 def _verilog_rtl_lint_test_impl(ctx):
     trans_flists = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_flists", allow_other_outputs = False)
 
-    # This is a temporary hack to work around issue with using -define in Ascent
-    # This will be removed in a future release once the Ascent issue is fixed
+    # This is a workaround for an issue with using -define in Ascent and will be removed once the Ascent issue is fixed
+    # See github issue #24
     shell_defines_string = "-define {}{}"
     attr_defines_string = "-define {}{}"
     if str(ctx.attr.run_template.label) == "@rules_verilog//vendors/real_intent:verilog_rtl_lint_test.sh.template":
         shell_defines_string = "+define+{}{}"
         attr_defines_string = "+define+{}{}"
 
-    defines = [shell_defines_string.format(key, value) for key, value in gather_shell_defines(ctx.attr.shells).items()]
+    defines = [shell_defines_string.format("LINT", "")]
+    defines.extend([shell_defines_string.format(key, value) for key, value in gather_shell_defines(ctx.attr.shells).items()])
     defines.extend([attr_defines_string.format(key, value) for key, value in ctx.attr.defines.items()])
 
     top_path = ""
@@ -571,8 +572,9 @@ verilog_rtl_lint_test = rule(
         ),
         "defines": attr.string_dict(
             allow_empty = True,
-            doc = "List of additional \\`defines for this lint run.\nIf a define is only for control and has no value, " +
-                  "e.g. \\`define LINT, the dictionary entry key should be \"LINT\" and the value should be the empty string.\n" +
+            doc = "List of additional \\`defines for this lint run.\nLINT is always defined by default\n" +
+                  "If a define is only for control and has no value, " +
+                  "e.g. \\`define USE_AXI, the dictionary entry key should be \"USE_AXI\" and the value should be the empty string.\n" +
                   "If a define needs a value, e.g. \\`define WIDTH 8, the dictionary value must start with '=', e.g. '=8'",
         ),
         "lint_parser": attr.label(
@@ -587,7 +589,7 @@ verilog_rtl_lint_test = rule(
         ),
         "command_template": attr.label(
             allow_single_file = True,
-            default = Label("@rules_verilog//vendors/real_intent:verilog_rtl_lint_cmds.tcl.template"),
+            default = Label("@rules_verilog//vendors/cadence:verilog_rtl_lint_cmds.tcl.template"),
             doc = "The template to generate the command script for this lint test.\n" +
                   "The command templates are located at " +
                   "@rules_verilog//vendors/<vendor name>/verilog_rtl_lint_cmds.tcl.template\n",
@@ -702,8 +704,9 @@ verilog_rtl_cdc_test = rule(
         ),
         "defines": attr.string_dict(
             allow_empty = True,
-            doc = "List of additional \\`defines for this cdc run.\nIf a define is only for control and has no value, " +
-                  "e.g. \\`define CDC, the dictionary entry key should be \"CDC\" and the value should be the empty string.\n" +
+            doc = "List of additional \\`defines for this cdc run.\nLINT and CDC are always defined\n" +
+                  "If a define is only for control and has no value, " +
+                  "e.g. \\`define USE_AXI, the dictionary entry key should be \"USE_AXI\" and the value should be the empty string.\n" +
                   "If a define needs a value, e.g. \\`define WIDTH 8, the dictionary value must start with '=', e.g. '=8'",
         ),
         "bbox_modules": attr.string_list(

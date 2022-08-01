@@ -1,4 +1,4 @@
-set ri_write_zdb false
+set ri_write_zdb false # Turn off the default debug database becasue it isn't needed for normal batch mode runs
 source {RULEFILE}
 analyze {DEFINES} {FLISTS} {TOP_PATH}
 elaborate {INST_TOP}
