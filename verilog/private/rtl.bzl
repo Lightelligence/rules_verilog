@@ -50,6 +50,7 @@ def create_flist_content(ctx, gumi_path, allow_library_discovery, no_synth = Fal
                     d = "."
                 flist_content.append("-y {}".format(d))
         else:
+            #the +incdir is only applied for the VCS
             for d in libdir:
                 flist_content.append("+incdir+{}".format(d))
             flist_content += [f.short_path for f in ctx.files.modules]
@@ -132,8 +133,8 @@ def _verilog_rtl_library_impl(ctx):
     elif not (ctx.attr.gumi_file_override == None):
         gumi_path = ctx.file.gumi_file_override.short_path
 
-    flist_content     = create_flist_content(ctx, gumi_path = gumi_path, allow_library_discovery = True)
-    flist_content_vcs = create_flist_content(ctx, gumi_path = gumi_path, allow_library_discovery = False)
+    flist_content_xrun = create_flist_content(ctx, gumi_path = gumi_path, allow_library_discovery = True)
+    flist_content_vcs  = create_flist_content(ctx, gumi_path = gumi_path, allow_library_discovery = False)
 
     last_module = None
     for m in ctx.files.modules:
@@ -144,8 +145,8 @@ def _verilog_rtl_library_impl(ctx):
         last_module = m
 
     ctx.actions.write(
-        output = ctx.outputs.flist,
-        content = "\n".join(flist_content),
+        output = ctx.outputs.flist_xrun,
+        content = "\n".join(flist_content_xrun),
     )
     ctx.actions.write(
         output = ctx.outputs.flist_vcs,
@@ -154,15 +155,15 @@ def _verilog_rtl_library_impl(ctx):
 
 
     trans_srcs = get_transitive_srcs(srcs, ctx.attr.deps, VerilogInfo, "transitive_sources", allow_other_outputs = True)
-    trans_flists = get_transitive_srcs([ctx.outputs.flist], ctx.attr.deps, VerilogInfo, "transitive_flists", allow_other_outputs = False)
+    trans_flists_xrun = get_transitive_srcs([ctx.outputs.flist_xrun], ctx.attr.deps, VerilogInfo, "transitive_flists_xrun", allow_other_outputs = False)
     trans_flists_vcs = get_transitive_srcs([ctx.outputs.flist_vcs], ctx.attr.deps, VerilogInfo, "transitive_flists_vcs", allow_other_outputs = False)
 
     trans_dpi = get_transitive_srcs([], ctx.attr.deps, VerilogInfo, "transitive_dpi", allow_other_outputs = False)
 
-    runfiles_list = trans_srcs.to_list() + trans_flists.to_list() + trans_flists_vcs.to_list() + trans_dpi.to_list()
+    runfiles_list = trans_srcs.to_list() + trans_flists_xrun.to_list() + trans_flists_vcs.to_list() + trans_dpi.to_list()
     runfiles = ctx.runfiles(files = runfiles_list)
 
-    all_files = depset(trans_srcs.to_list() + trans_flists.to_list() + trans_flists_vcs.to_list() )
+    all_files = depset(trans_srcs.to_list() + trans_flists_xrun.to_list() + trans_flists_vcs.to_list() )
 
     return [
         ShellInfo(
@@ -172,7 +173,7 @@ def _verilog_rtl_library_impl(ctx):
         ),
         VerilogInfo(
             transitive_sources = trans_srcs,
-            transitive_flists = trans_flists,
+            transitive_flists_xrun = trans_flists_xrun,
             transitive_flists_vcs = trans_flists_vcs,
             transitive_dpi = trans_dpi,
             last_module = last_module,
@@ -249,7 +250,7 @@ verilog_rtl_library = rule(
         ),
     },
     outputs = {
-        "flist": "%{name}.f",
+        "flist_xrun": "%{name}__xrun.f",
         "flist_vcs": "%{name}__vcs.f",
     },
 )
