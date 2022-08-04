@@ -67,7 +67,7 @@ Load rules into your `BUILD` files from [@rules_verilog//verilog:defs.bzl](veril
 ## Caveats
 
 ### Vendor Support
-These rules were written with the Cadence tools as the underlying compiler and simulator. Abstraction leaks are prevalent throughout the rules.
+These rules were written with the Cadence and Synopsys tools as the underlying compiler and simulator. Abstraction leaks are prevalent throughout the rules.
 
 ### UVM Testbenches
 While rules for unit tests exist, the [verilog_dv_tb](docs/defs.md#verilog_dv_tb) and [verilog_dv_test_cfg](docs/defs.md#verilog_dv_test_cfg) rules are intended to work in conjunction with an external script capable of spawning many parallel simulations. Documentation throughout this codebase refers to a tool called `simmer` which may be released in a future version.
