@@ -116,10 +116,10 @@ Compiles and runs a small unit test for DV.
 | Name  | Description | Type | Mandatory | Default |
 | :-------------: | :-------------: | :-------------: | :-------------: | :-------------: |
 | name |  A unique name for this target.   | <a href="https://bazel.build/docs/build-ref.html#name">Name</a> | required |  |
-| default_sim_opts |  Default simulator options to pass to the simulator.   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | @rules_verilog//vendors/cadence:verilog_dv_default_sim_opts.f |
+| default_sim_opts |  Simulator options to pass to the simulator.   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | @rules_verilog//vendors/cadence(synopsys):verilog_dv_default_sim_opts.f |
 | deps |  verilog_dv_library or verilog_rtl_library labels that the testbench is dependent on. Dependency ordering within this label list is not necessary if dependencies are consistently declared in all other rules.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | required |  |
 | sim_args |  Additional arguments to pass on command line to the simulator. Both compile and runtime arguments are allowed because dv_unit_test runs as a single step flow.   | List of strings | optional | [] |
-| ut_sim_template |  The template to generate the bash script to run the simulation.   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | @rules_verilog//vendors/cadence:verilog_dv_unit_test.sh.template |
+| ut_sim_template |  The template to generate the bash script to run the simulation.   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | @rules_verilog//vendors/cadence(synopsys):verilog_dv_unit_test.sh.template |
 
 
 <a name="#verilog_rtl_cdc_test"></a>
