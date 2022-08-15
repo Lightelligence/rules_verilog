@@ -458,8 +458,17 @@ verilog_rtl_unit_test = rule(
 def _verilog_rtl_lint_test_impl(ctx):
     trans_flists = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_flists", allow_other_outputs = False)
 
-    defines = ["-define {}{}".format(key, value) for key, value in gather_shell_defines(ctx.attr.shells).items()]
-    defines.extend(["-define {}{}".format(key, value) for key, value in ctx.attr.defines.items()])
+    # This is a workaround for an issue with using -define in Ascent and will be removed once the Ascent issue is fixed
+    # See github issue #24
+    shell_defines_string = "-define {}{}"
+    attr_defines_string = "-define {}{}"
+    if str(ctx.attr.run_template.label) == "@rules_verilog//vendors/real_intent:verilog_rtl_lint_test.sh.template":
+        shell_defines_string = "+define+{}{}"
+        attr_defines_string = "+define+{}{}"
+
+    defines = [shell_defines_string.format("LINT", "")]
+    defines.extend([shell_defines_string.format(key, value) for key, value in gather_shell_defines(ctx.attr.shells).items()])
+    defines.extend([attr_defines_string.format(key, value) for key, value in ctx.attr.defines.items()])
 
     top_path = ""
     for dep in ctx.attr.deps:
@@ -473,10 +482,24 @@ def _verilog_rtl_lint_test_impl(ctx):
         fail("Only one rulefile allowed, but {} has several rulefiles".format(ctx.label))
 
     ctx.actions.expand_template(
+        template = ctx.file.command_template,
+        output = ctx.outputs.command_script,
+        substitutions = {
+            "{RULEFILE}": "".join([f.short_path for f in ctx.files.rulefile]),
+            "{DEFINES}": " ".join(defines),
+            "{FLISTS}": " ".join(["-f {}".format(f.short_path) for f in trans_flists.to_list()]),
+            "{TOP_PATH}": top_path,
+            "{INST_TOP}": ctx.attr.top,
+            "{LINT_PARSER}": ctx.files.lint_parser[0].short_path,
+        },
+    )
+
+    ctx.actions.expand_template(
         template = ctx.file.run_template,
         output = ctx.outputs.executable,
         substitutions = {
             "{SIMULATOR_COMMAND}": ctx.attr._command_override[ToolEncapsulationInfo].command,
+            "{COMMAND_SCRIPT}": ctx.outputs.command_script.short_path,
             "{DEFINES}": " ".join(defines),
             "{FLISTS}": " ".join(["-f {}".format(f.short_path) for f in trans_flists.to_list()]),
             "{TOP_PATH}": top_path,
@@ -491,7 +514,7 @@ def _verilog_rtl_lint_test_impl(ctx):
     trans_flists = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_flists", allow_other_outputs = False)
     trans_srcs = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_sources", allow_other_outputs = True)
 
-    runfiles = ctx.runfiles(files = trans_srcs.to_list() + trans_flists.to_list() + ctx.files.design_info + ctx.files.rulefile + ctx.files.lint_parser)
+    runfiles = ctx.runfiles(files = trans_srcs.to_list() + trans_flists.to_list() + ctx.files.design_info + ctx.files.rulefile + ctx.files.lint_parser + [ctx.outputs.command_script])
 
     return [
         DefaultInfo(runfiles = runfiles),
@@ -500,14 +523,19 @@ def _verilog_rtl_lint_test_impl(ctx):
 verilog_rtl_lint_test = rule(
     doc = """Compile and run lint on target
 
-    This rule was written for Cadence HAL to be run under xcelium. As such, it
+    This rule was originally written for Cadence HAL to be run under xcelium. As such, it
     is not entirely generic. It also uses a log post-processor
-    (lint_parser_hal.py) to allow for easier waiving of warnings.
+    (passed in by the lint_parser attribute) to allow for easier waiving of warnings.
 
     The DUT must have no unwaived warning/errors in order for this rule to
     pass. The intended philosophy is for blocks to maintain a clean lint status
     throughout the lifecycle of the project, not to run lint as a checklist
     item towards the end of the project.
+
+    There are several attributes in this rule that must be kept in sync.
+    run_template, rulefile, lint_parser, and command_template must use the associated
+    files for each vendor. The default values all point to the Cadence HAL versions.
+    If an instance of this rule overrides any values, they must override all four.
 
     """,
     implementation = _verilog_rtl_lint_test_impl,
@@ -520,14 +548,16 @@ verilog_rtl_lint_test = rule(
         "run_template": attr.label(
             allow_single_file = True,
             default = Label("@rules_verilog//vendors/cadence:verilog_rtl_lint_test.sh.template"),
-            doc = "The template to generate the script to run the lint test.\n",
+            doc = "The template to generate the script to run the lint test.\n" +
+                  "The command templates are located at " +
+                  "@rules_verilog//vendors/<vendor name>/verilog_rtl_lint_test.tcl.template\n",
         ),
         "rulefile": attr.label(
             allow_single_file = True,
             mandatory = True,
-            doc = "The Cadence rulefile for HAL.\n" +
-                  "Suggested one per project.\n" +
-                  "Example: https://github.com/freecores/t6507lp/blob/ca7d7ea779082900699310db459a544133fe258a/lint/run/hal.def",
+            doc = "The rules configuration file for this lint run. rules_verilog doesn't provide a reference rulefile, " +
+                  "each project that uses rules_verilog must write their own tool-specific rulefile.\n" +
+                  "Example HAL rulefile: https://github.com/freecores/t6507lp/blob/ca7d7ea779082900699310db459a544133fe258a/lint/run/hal.def",
         ),
         "shells": attr.label_list(
             doc = _SHELLS_DOC,
@@ -542,17 +572,27 @@ verilog_rtl_lint_test = rule(
         ),
         "defines": attr.string_dict(
             allow_empty = True,
-            doc = "List of additional \\`defines for this lint run.\nIf a define is only for control and has no value, " +
-                  "e.g. \\`define LINT, the dictionary entry key should be \"LINT\" and the value should be the empty string.\n" +
+            doc = "List of additional \\`defines for this lint run.\nLINT is always defined by default\n" +
+                  "If a define is only for control and has no value, " +
+                  "e.g. \\`define USE_AXI, the dictionary entry key should be \"USE_AXI\" and the value should be the empty string.\n" +
                   "If a define needs a value, e.g. \\`define WIDTH 8, the dictionary value must start with '=', e.g. '=8'",
         ),
         "lint_parser": attr.label(
             allow_files = True,
             default = "@rules_verilog//:lint_parser_hal",
-            doc = "Post processor for lint logs allowing for easier waiving of warnings.",
+            doc = "Post processor for lint logs allowing for easier waiving of warnings.\n" +
+                  "Parsers for HAL and Ascent are included in rules_verilog release at " +
+                  "@rules_verilog//lint_parser_(hal|ascent)",
         ),
         "waiver_direct": attr.string(
             doc = "Lint waiver python regex to apply directly to a lint message. This is sometimes needed to work around cases when HAL has formatting errors in xrun.log.xml that cause problems for the lint parser",
+        ),
+        "command_template": attr.label(
+            allow_single_file = True,
+            default = Label("@rules_verilog//vendors/cadence:verilog_rtl_lint_cmds.tcl.template"),
+            doc = "The template to generate the command script for this lint test.\n" +
+                  "The command templates are located at " +
+                  "@rules_verilog//vendors/<vendor name>/verilog_rtl_lint_cmds.tcl.template\n",
         ),
         "_command_override": attr.label(
             default = Label("@rules_verilog//:verilog_rtl_lint_test_command"),
@@ -560,6 +600,9 @@ verilog_rtl_lint_test = rule(
                   "Example override in project's .bazelrc:\n" +
                   '  build --@rules_verilog//:verilog_rtl_lint_test_command="runmod -t xrun --"',
         ),
+    },
+    outputs = {
+        "command_script": "%{name}_cmds.tcl",
     },
     test = True,
 )
@@ -661,8 +704,9 @@ verilog_rtl_cdc_test = rule(
         ),
         "defines": attr.string_dict(
             allow_empty = True,
-            doc = "List of additional \\`defines for this cdc run.\nIf a define is only for control and has no value, " +
-                  "e.g. \\`define CDC, the dictionary entry key should be \"CDC\" and the value should be the empty string.\n" +
+            doc = "List of additional \\`defines for this cdc run.\nLINT and CDC are always defined\n" +
+                  "If a define is only for control and has no value, " +
+                  "e.g. \\`define USE_AXI, the dictionary entry key should be \"USE_AXI\" and the value should be the empty string.\n" +
                   "If a define needs a value, e.g. \\`define WIDTH 8, the dictionary value must start with '=', e.g. '=8'",
         ),
         "bbox_modules": attr.string_list(

@@ -4,7 +4,6 @@
 mv xrun.log xrun.log.bak 2> /dev/null
 mv xrun.log.xml xrun.log.xml.bak 2> /dev/null
 {SIMULATOR_COMMAND} \
-  -define LINT \
   -sv \
   -hal  \
   -licqueue \

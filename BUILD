@@ -14,6 +14,12 @@ py_binary(
     deps = [":cmn_logging"],
 )
 
+py_binary(
+    name = "lint_parser_ascent",
+    srcs = ["lint_parser_ascent.py"],
+    deps = [":cmn_logging"],
+)
+
 verilog_tool_encapsulation(
     name = "verilog_dv_unit_test_command",
     build_setting_default = "xrun",
