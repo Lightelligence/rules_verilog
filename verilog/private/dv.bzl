@@ -274,7 +274,7 @@ def _verilog_dv_tb_impl(ctx):
     return [
         DefaultInfo(
             files = all_files,
-            runfiles = ctx.runfiles(files = trans_srcs.to_list() + trans_flists.to_list() + out_deps.to_list() + ctx.files.ccf + ctx.files.extra_runfiles + [ctx.file._default_sim_opts_xrun] + [ctx.file._default_sim_opts_vcs])
+            runfiles = ctx.runfiles(files = trans_srcs.to_list() + trans_flists.to_list() + out_deps.to_list() + ctx.files.ccf + ctx.files.extra_runfiles + [ctx.file._default_sim_opts_xrun] + [ctx.file._default_sim_opts_vcs]),
         ),
         DVTBInfo(
             ccf = ctx.files.ccf,
