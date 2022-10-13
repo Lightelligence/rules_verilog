@@ -8,8 +8,7 @@ This requires that the original module was instantiated using \\`gumi_<module_na
 
 VerilogInfo = provider(fields = {
     "transitive_sources": "All source source files needed by a target. This flow is not currently setup to do partioned compile, so all files need to be carried through to the final step for compilation as a whole.",
-    "transitive_flists_xrun": "All flists which specify ordering of transitive sources for XRUN.",
-    "transitive_flists_vcs": "All flists which specify ordering of transitive sources for VCS.",
+    "transitive_flists": "All flists which specify ordering of transitive sources.",
     "transitive_dpi": "Shared libraries (only .so extension allowed) to link in via the DPI for testbenches.",
     "last_module": "This is a convenience accessor. The last module specified is assumed be the top module in a design. This is frequently needed by downstream tools.",
 })
@@ -89,7 +88,7 @@ def flists_to_arguments(deps, provider, field, prefix, separator = ""):
 def _verilog_test_impl(ctx):
     trans_srcs = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_sources")
     srcs_list = trans_srcs.to_list()
-    flists = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_flists_xrun")
+    flists = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_flists")
     flists_list = flists.to_list()
 
     content = []
