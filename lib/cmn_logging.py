@@ -81,9 +81,24 @@ class CmnLogger(logging.getLoggerClass()):
     def reset_stopwatch(self):
         self._start_time = datetime.now()
 
+    def stop_stopwatch(self):
+        self._stop_time = datetime.now()
+
     @property
     def start_time(self):
         return self._start_time
+
+    @property
+    def stop_time(self):
+        return self._stop_time
+
+    @property
+    def duration(self):
+        return self.stop_time - self.start_time
+
+    @property
+    def duration_in_microseconds(self):
+        return self.duration.seconds * (10**6) + self.duration.microseconds
 
     @property
     def timestamp(self):
@@ -94,9 +109,9 @@ class CmnLogger(logging.getLoggerClass()):
         return datetime.now() - self._start_time
 
     @property
-    def timestamp_in_microsecond(self):
-        now = self.timestamp
-        return now.microsecond - self._start_time.microsecond + (now.second - self._start_time.second) * 1000000
+    def timestamp_in_microseconds(self):
+        delta = self.timestamp_delta
+        return delta.seconds * (10**6) + delta.microseconds
 
 
 class CmnFormatter(logging.Formatter):
