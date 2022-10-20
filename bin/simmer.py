@@ -1266,7 +1266,7 @@ class VCompJob(Job):
         self.bazel_runfiles_main = os.path.join(bazel_bin, relpath, "{}.runfiles".format(bazel_target), "__main__")
 
         self.bazel_compile_args = os.path.join(self.bazel_runfiles_main, relpath,
-                                          "{}_compile_args_{}.f".format(bazel_target, options.simulator))
+                                               "{}_compile_args_{}.f".format(bazel_target, options.simulator))
         self.bazel_runtime_args = os.path.join(self.bazel_runfiles_main, relpath,
                                                "{}_runtime_args.f".format(bazel_target))
         self.compile_warning_waivers_path = os.path.join(self.bazel_runfiles_main, relpath,
