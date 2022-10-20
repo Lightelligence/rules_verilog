@@ -139,11 +139,11 @@ run
 {% if options.wave_type == 'fsdb' -%}
 {% if options.simulator == 'xrun' -%}call {% endif -%}fsdbDumpfile {{ waves_db }}
 {% if options.simulator == 'xrun' -%}call {% endif -%}fsdbAll on
+{% if options.simulator == 'xrun' -%}call {% endif -%}fsdbStruct on
 {% if options.simulator == 'xrun' -%}call {% endif -%}fsdbDelta
-{% if options.simulator == 'xrun' -%}call {% endif -%}fsdbDumpSVA
-{% if options.simulator == 'xrun' -%}call {% endif -%}fsdbForce
+{% if options.simulator == 'xrun' -%}call {% endif -%}fsdbSvastatus
 {% if options.simulator == 'xrun' -%}call {% endif -%}fsdbFunctions
-{% if options.simulator == 'xrun' -%}call {% endif -%}fsdbMda
+{% if options.simulator == 'xrun' -%}call {% endif -%}fsdbMda on
 {% if options.simulator == 'xrun' -%}call {% endif -%}fsdbPackedmda on
 {% for probe in probes -%}
 {% if options.simulator == 'xrun' -%}call {% endif -%}fsdbDumpvars 0 {{ probe }}
@@ -274,8 +274,10 @@ cd {{bazel_runfiles_main}} && \\
     {% endif -%}
     {% if options.simulator == 'vcs' -%}
     -full64 +v2k +vpi -notice -licqueue \\
-    -V -DVCS -CFLAGS -LDFLAGS \\
-    -assert svaext -debug_access+pp \\
+    -V -DVCS -CFLAGS -LDFLAGS -assert svaext \\
+    {% if enable_debug_access == 0 -%}
+    -debug_access+pp \\
+    {% endif -%}
     -partcomp -pcmakeprof -j4 -reportstats \\
     -lca -lrt -simprofile time \\
     -top tb_top -ntb_opts uvm-1.2 \\
