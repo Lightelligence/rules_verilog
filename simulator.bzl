@@ -2,7 +2,7 @@
 """Provides access to the DPI headers in an xcelium installation.
 
 This allows bazel to precompile DPI code to be able to pass shared
-objects to xrun via the -sv_lib flag.
+objects to the simulator.
 
 Example usage in another WORKSPACE file:
 
@@ -11,11 +11,6 @@ xcelium_setup(name="xcelium")
 """
 
 XRUN_BUILD = """
-# filegroup(
-#     name = "vpi_headers",
-#     srcs = glob(["vpi_*.h"]),
-#     visibility = ["//visibility:public"],
-# )
 filegroup(
     name = "dpi_headers",
     srcs = ["svdpi.h", "svdpi_compatibility.h"],

@@ -1,3 +1,32 @@
+-sv
+-uvm
+-64bit
+-verbose
+-licqueue
+-elaborate
+-access rwc
+-define TBV
+-nowarn BADPRF
+-nowarn CUVIHR
+-nowarn DSEMEL
+-nowarn DSEM2009
+-nowarn LIBNOU
+-nowarn RNDXCELON
+-nowarn SPDUSD
+-nowarn TSNSPK
+-define XCELIUM
+-uvmhome CDNS-1.2
+-fast_recompilation
+-enable_single_yvlib
+-timescale 100fs/100fs
+-vtimescale 100fs/100fs
+-define UVM_REGEX_NO_DPI
+-define UVM_NO_DEPRECATED
+-libext .sv+.svh+.v+.vams
+-vlog_ext +.vh+.vm+.vp+.udp
+-define TIMESCALE_STEP_FS=100
+-define TIMESCALE_PREC_FS=100
+-define UVM_OBJECT_MUST_HAVE_CONSTRUCTOR
 {COMPILE_ARGS}
 {DEFINES}
 {FLISTS}
