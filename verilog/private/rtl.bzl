@@ -456,7 +456,6 @@ verilog_rtl_unit_test = rule(
 )
 
 def _verilog_rtl_lint_test_impl(ctx):
-
     trans_flists = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_flists", allow_other_outputs = False)
 
     # This is a workaround for an issue with using -define in Ascent and will be removed once the Ascent issue is fixed
