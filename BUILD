@@ -1,19 +1,6 @@
-load("@rules_python//python:defs.bzl", "py_binary")
 load("@rules_verilog//verilog:defs.bzl", "verilog_tool_encapsulation")
 
 package(default_visibility = ["//visibility:public"])
-
-py_binary(
-    name = "lint_parser_hal",
-    srcs = ["lint_parser_hal.py"],
-    deps = ["//lib:cmn_logging"],
-)
-
-py_binary(
-    name = "lint_parser_ascent",
-    srcs = ["lint_parser_ascent.py"],
-    deps = ["//lib:cmn_logging"],
-)
 
 verilog_tool_encapsulation(
     name = "verilog_dv_unit_test_command",
