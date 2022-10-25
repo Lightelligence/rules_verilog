@@ -375,7 +375,7 @@ verilog_dv_tb = rule(
 def _verilog_dv_unit_test_impl(ctx):
     trans_srcs = get_transitive_srcs([], ctx.attr.deps, VerilogInfo, "transitive_sources")
     srcs_list = trans_srcs.to_list()
-    flists = get_transitive_srcs([], ctx.attr.deps, VerilogInfo, "transitive_flists_xrun")
+    flists = get_transitive_srcs([], ctx.attr.deps, VerilogInfo, "transitive_flists")
     flists_list = flists.to_list()
 
     ctx.actions.expand_template(
