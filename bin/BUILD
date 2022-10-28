@@ -20,6 +20,7 @@ py_binary(
     deps = [
         "//lib:calc_simresults_location",
         "//lib:cmn_logging",
+        "//bin:check_test",
     ],
 )
 
