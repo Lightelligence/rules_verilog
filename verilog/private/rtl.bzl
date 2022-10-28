@@ -507,6 +507,7 @@ def _verilog_rtl_lint_test_impl(ctx):
             "{RULEFILE}": "".join([f.short_path for f in ctx.files.rulefile]),
             "{INST_TOP}": ctx.attr.top,
             "{LINT_PARSER}": ctx.files.lint_parser[0].short_path,
+            "{LINT_PARSER_LIB}": ctx.files._lint_parser_lib[0].dirname,
             "{WAIVER_DIRECT}": ctx.attr.waiver_direct,
         },
     )
@@ -514,7 +515,7 @@ def _verilog_rtl_lint_test_impl(ctx):
     trans_flists = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_flists", allow_other_outputs = False)
     trans_srcs = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_sources", allow_other_outputs = True)
 
-    runfiles = ctx.runfiles(files = trans_srcs.to_list() + trans_flists.to_list() + ctx.files.design_info + ctx.files.rulefile + ctx.files.lint_parser + [ctx.outputs.command_script])
+    runfiles = ctx.runfiles(files = trans_srcs.to_list() + trans_flists.to_list() + ctx.files.design_info + ctx.files.rulefile + ctx.files.lint_parser + ctx.files._lint_parser_lib + [ctx.outputs.command_script])
 
     return [
         DefaultInfo(runfiles = runfiles),
@@ -579,7 +580,7 @@ verilog_rtl_lint_test = rule(
         ),
         "lint_parser": attr.label(
             allow_files = True,
-            default = "@rules_verilog//:lint_parser_hal",
+            default = "@rules_verilog//bin:lint_parser_hal",
             doc = "Post processor for lint logs allowing for easier waiving of warnings.\n" +
                   "Parsers for HAL and Ascent are included in rules_verilog release at " +
                   "@rules_verilog//lint_parser_(hal|ascent)",
@@ -599,6 +600,14 @@ verilog_rtl_lint_test = rule(
             doc = "Allows custom override of simulator command in the event of wrapping via modulefiles\n" +
                   "Example override in project's .bazelrc:\n" +
                   '  build --@rules_verilog//:verilog_rtl_lint_test_command="runmod -t xrun --"',
+        ),
+        "_lint_parser_lib": attr.label(
+            allow_single_file = True,
+            default = "@rules_verilog//lib:cmn_logging",
+            doc = "Python library dir needed by lint parser script.\n" +
+                  "Using a private attribute instead of something cleaner\n" +
+                  "because I cannot find a way to create File objects\n" +
+                  "from Label objects to be used with ctx.runfiles",
         ),
     },
     outputs = {

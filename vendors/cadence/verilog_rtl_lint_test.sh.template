@@ -17,4 +17,5 @@ mv xrun.log.xml xrun.log.xml.bak 2> /dev/null
   -halargs '"-RULEFILE {RULEFILE} -inst_top {INST_TOP} -design_info {DESIGN_INFO} -XML xrun.log.xml"' \
   -logfile xrun.log
 
+export PYTHONPATH="{LINT_PARSER_LIB}:$PYTHONPATH"
 ./{LINT_PARSER} $@ --waiver-direct "{WAIVER_DIRECT}"

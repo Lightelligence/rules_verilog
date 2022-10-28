@@ -65,6 +65,10 @@ Load rules into your `BUILD` files from [@rules_verilog//verilog:defs.bzl](veril
 - [verilog_test](docs/defs.md#verilog_test)
 
 ## Caveats
+- The SVUnit package always adds svunit_pkg.sv to the compiler command line after the user flists.  Without compiler library discovery, user flists cannot include/import anything that depends on svunit_pkg.
+    - To work around this ordering dependency, the project Bazel rules must create the verilog_rtl_lib using the module files as headers, and use a dummy .sv file as the top module.
+    - By declaring the module files as headers, they will not get put on the compiler command line via flists - rather their parents directory appears as an incdir.
+    - This allows SVUnit's generated flist to appear last on the compiler command line, without violating any compiler ordering dependencies.
 
 ### Vendor Support
 These rules were written with the Cadence and Synopsys tools as the underlying compiler and simulator. Abstraction leaks are prevalent throughout the rules.
