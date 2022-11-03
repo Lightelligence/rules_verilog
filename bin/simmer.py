@@ -138,10 +138,10 @@ run
 {% endif -%}
 {% if options.wave_type == 'fsdb' -%}
 {% if options.simulator == 'xrun' -%}call {% endif -%}fsdbDumpfile {{ waves_db }}
-{% if options.simulator == 'xrun' -%}call {% endif -%}fsdbDumpMDA 0 tb_top.dut
-{% if options.simulator == 'xrun' -%}call {% endif -%}fsdbDumpSVA 0 tb_top.dut
 {% for probe in probes -%}
 {% if options.simulator == 'xrun' -%}call {% endif -%}fsdbDumpvars 0 {{ probe }}
+{% if options.simulator == 'xrun' -%}call {% endif -%}fsdbDumpMDA 0 {{ probe }}
+{% if options.simulator == 'xrun' -%}call {% endif -%}fsdbDumpSVA 0 {{ probe }}
 {% endfor -%}
 run
 {% endif -%}
