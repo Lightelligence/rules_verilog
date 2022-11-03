@@ -138,7 +138,7 @@ run
 {% endif -%}
 {% if options.wave_type == 'fsdb' -%}
 {% if options.simulator == 'xrun' -%}call {% endif -%}fsdbDumpfile {{ waves_db }}
-{% for probe in probes -%}
+{% for probe in options.probes -%}
 {% if options.simulator == 'xrun' -%}call {% endif -%}fsdbDumpvars 0 {{ probe }}
 {% if options.simulator == 'xrun' -%}call {% endif -%}fsdbDumpMDA 0 {{ probe }}
 {% if options.simulator == 'xrun' -%}call {% endif -%}fsdbDumpSVA 0 {{ probe }}
