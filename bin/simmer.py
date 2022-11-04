@@ -138,15 +138,10 @@ run
 {% endif -%}
 {% if options.wave_type == 'fsdb' -%}
 {% if options.simulator == 'xrun' -%}call {% endif -%}fsdbDumpfile {{ waves_db }}
-{% if options.simulator == 'xrun' -%}call {% endif -%}fsdbAll on
-{% if options.simulator == 'xrun' -%}call {% endif -%}fsdbStruct on
-{% if options.simulator == 'xrun' -%}call {% endif -%}fsdbDelta
-{% if options.simulator == 'xrun' -%}call {% endif -%}fsdbSvastatus
-{% if options.simulator == 'xrun' -%}call {% endif -%}fsdbFunctions
-{% if options.simulator == 'xrun' -%}call {% endif -%}fsdbMda on
-{% if options.simulator == 'xrun' -%}call {% endif -%}fsdbPackedmda on
-{% for probe in probes -%}
+{% for probe in options.probes -%}
 {% if options.simulator == 'xrun' -%}call {% endif -%}fsdbDumpvars 0 {{ probe }}
+{% if options.simulator == 'xrun' -%}call {% endif -%}fsdbDumpMDA 0 {{ probe }}
+{% if options.simulator == 'xrun' -%}call {% endif -%}fsdbDumpSVA 0 {{ probe }}
 {% endfor -%}
 run
 {% endif -%}
@@ -154,7 +149,6 @@ run
 
 SIM_TEMPLATE = jinja2.Template("""#!/bin/bash
 export PROJ_DIR={{ job.vcomper.rcfg.proj_dir }}
-source $PROJ_DIR/env/env.sh
 
 ARGS=$@
 
@@ -246,16 +240,12 @@ testFunction
 
 RERUN_TEMPLATE = jinja2.Template("""#!/bin/bash
 shopt -s expand_aliases
-export PROJ_DIR={{ job.vcomper.rcfg.proj_dir }}
 
 ARGS=$@
 
-cd $PROJ_DIR
-source $PROJ_DIR/env/env.sh
-
 set -e
 
-simmer -t {{ job.vcomper.name }}:{{ job.name }} --seed {{ seed }} {{ cmd_line_sim_opts }} --verb=UVM_MEDIUM --waves --simulator {{ options.simulator }} $ARGS
+simmer -t {{ job.vcomper.name }}:{{ job.name }} --seed {{ seed }} {{ cmd_line_sim_opts }} --verbosity=UVM_MEDIUM --waves --simulator {{ options.simulator }} $ARGS
 
 """)
 
@@ -299,6 +289,7 @@ cd {{bazel_runfiles_main}} && \\
     {% endif -%}
     {% if enable_debug_access > 0 -%}
     {% if options.simulator == 'xrun' -%}
+    +vpiSyncPerf \\
     -createdebugdb \\
     {% endif -%}
     {% if options.simulator == 'vcs' -%}
@@ -339,8 +330,6 @@ while [ -h "$SOURCE" ]; do # resolve $SOURCE until the file is no longer a symli
 done
 PROJ_DIR="$( cd -P "$( dirname "$SOURCE" )" >/dev/null 2>&1 && pwd )"
 
-shopt -s expand_aliases
-source $PROJ_DIR/env/env.sh
 shopt -s expand_aliases
 
 simmer -t {{ job.vcomper.name }}:{{ job.name }} {{ options.reproduce_args | join(' ') }} --seed {{ seed }} $ARGS --simulator {{ options.simulator }}
@@ -1553,10 +1542,14 @@ class TestJob(Job):
                 default_capture = 'tb_top.dut'
                 waves_db = os.path.join(waves_db, "waves.vcd")
             if options.wave_type == 'fsdb':
-                waves_db = "waves.fsdb"
+                waves_db = os.path.join(waves_db, "waves.fsdb")
                 verdi_pli = os.path.join(os.environ['VERDI_HOME'], 'share/PLI/IUS/LINUX64/boot',
                                          'debpli.so:novas_pli_boot')
                 sim_opts += " -loadpli1 {} ".format(verdi_pli)
+                sim_opts += " +UVM_VERDI_TRACE=UVM_AWARE+HIER+RAL+TLM+COMPWAVE "
+                sim_opts += " +fsdb+delta +fsdb+force +fsdb+functions +fsdb+struct=on "
+                sim_opts += " +fsdb+parameter=on +fsdb+sva_status +fsdb+sva_success "
+                sim_opts += " +fsdb+autoflush "
             sim_opts += " -input {} ".format(waves_tcl)
             options.probes = options.waves if options.waves != [] else [default_capture]
             with open(waves_tcl, 'w') as filep:
@@ -1582,6 +1575,8 @@ class TestJob(Job):
         if options.verbosity:
             if 'UVM_VERBOSITY' not in sim_opts:
                 sim_opts += ' +UVM_VERBOSITY=' + options.verbosity
+                if options.verbosity == 'UVM_DEBUG':
+                    sim_opts += " +UVM_TR_RECORD +UVM_LOG_RECORD "
             else:
                 sim_opts = re.sub(' \+UVM_VERBOSITY=[A-Z_]+', ' +UVM_VERBOSITY=' + options.verbosity, sim_opts)
         else:
