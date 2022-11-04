@@ -244,8 +244,6 @@ export PROJ_DIR={{ job.vcomper.rcfg.proj_dir }}
 
 ARGS=$@
 
-cd $PROJ_DIR
-
 set -e
 
 simmer -t {{ job.vcomper.name }}:{{ job.name }} --seed {{ seed }} {{ cmd_line_sim_opts }} --verbosity=UVM_MEDIUM --waves --simulator {{ options.simulator }} $ARGS
@@ -1550,7 +1548,6 @@ class TestJob(Job):
                                          'debpli.so:novas_pli_boot')
                 sim_opts += " -loadpli1 {} ".format(verdi_pli)
                 sim_opts += " +UVM_VERDI_TRACE=UVM_AWARE+HIER+RAL+TLM+COMPWAVE "
-                sim_opts += " +UVM_TR_RECORD +UVM_LOG_RECORD "
                 sim_opts += " +fsdb+delta +fsdb+force +fsdb+functions +fsdb+struct=on "
                 sim_opts += " +fsdb+parameter=on +fsdb+sva_status +fsdb+sva_success "
                 sim_opts += " +fsdb+autoflush "
@@ -1579,6 +1576,8 @@ class TestJob(Job):
         if options.verbosity:
             if 'UVM_VERBOSITY' not in sim_opts:
                 sim_opts += ' +UVM_VERBOSITY=' + options.verbosity
+                if options.verbosity == 'UVM_DEBUG':
+                    sim_opts += " +UVM_TR_RECORD +UVM_LOG_RECORD "
             else:
                 sim_opts = re.sub(' \+UVM_VERBOSITY=[A-Z_]+', ' +UVM_VERBOSITY=' + options.verbosity, sim_opts)
         else:
