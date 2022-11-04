@@ -240,7 +240,6 @@ testFunction
 
 RERUN_TEMPLATE = jinja2.Template("""#!/bin/bash
 shopt -s expand_aliases
-export PROJ_DIR={{ job.vcomper.rcfg.proj_dir }}
 
 ARGS=$@
 
