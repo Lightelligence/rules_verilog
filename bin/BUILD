@@ -21,6 +21,8 @@ py_binary(
         "//bin:check_test",
         "//lib:calc_simresults_location",
         "//lib:cmn_logging",
+        "//lib:job_runner",
+        "//lib:rv_utils",
     ],
 )
 
