@@ -18,6 +18,14 @@ py_library(
 )
 
 py_library(
+    name = "regression",
+    srcs = ["regression.py"],
+    deps = ["calc_simresults_location",
+            "rv_utils",
+    ],
+)
+
+py_library(
     name = "rv_utils",
     srcs = ["rv_utils.py"],
 )

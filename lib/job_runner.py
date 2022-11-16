@@ -5,6 +5,7 @@ import bisect
 import datetime
 import enum
 import os
+import signal
 import subprocess
 import threading
 import time
@@ -415,3 +416,74 @@ class JobManager():
         self.stop()
         for job in self._active:
             job.job_runner.kill()
+
+
+class BazelTBJob(Job):
+    """Runs bazel to build up a tb compile."""
+
+    def __init__(self, rcfg, target, vcomper, timeout):
+        self.bazel_target = target
+        super(BazelTBJob, self).__init__(rcfg, self, timeout)
+        self.vcomper = vcomper
+        if vcomper:
+            self.vcomper.add_dependency(self)
+
+        self.job_dir = self.vcomper.job_dir # Don't actually need a dir, but jobrunner/manager want it defined
+        if self.rcfg.options.no_compile:
+            self.main_cmdline = "echo \"Bypassing {} due to --no-compile\"".format(target)
+        else:
+            self.main_cmdline = "bazel run {}".format(target)
+
+        self.suppress_output = True
+        if self.rcfg.options.tool_debug:
+            self.suppress_output = False
+
+    def post_run(self):
+        super(BazelTBJob, self).post_run()
+        if self.job_runner.returncode == 0:
+            self.jobstatus = JobStatus.PASSED
+        else:
+            self.jobstatus = JobStatus.FAILED
+            self.log.error("%s failed. Log in %s", self, os.path.join(self.job_dir, "stderr.log"))
+
+    def __repr__(self):
+        return 'Bazel("{}")'.format(self.bazel_target)
+
+
+class BazelTestCfgJob(Job):
+    """Bazel build for a testcfg only needs to be run once per test cfg, not per iteration. So split it out into its own job"""
+
+    def __init__(self, rcfg, target, vcomper, timeout):
+        self.bazel_target = target
+        super(BazelTestCfgJob, self).__init__(rcfg, self, timeout)
+        self.vcomper = vcomper
+        if vcomper:
+            self.add_dependency(vcomper)
+
+        self.job_dir = self.vcomper.job_dir # Don't actually need a dir, but jobrunner/manager want it defined
+        self.main_cmdline = "bazel build {}".format(self.bazel_target)
+
+        self.suppress_output = True
+        if self.rcfg.options.tool_debug:
+            self.suppress_output = False
+
+    def post_run(self):
+        super(BazelTestCfgJob, self).post_run()
+        if self.job_runner.returncode == 0:
+            self.jobstatus = JobStatus.PASSED
+        else:
+            self.jobstatus = JobStatus.FAILED
+            self.log.error("%s failed. Log in %s", self, os.path.join(self.job_dir, "stderr.log"))
+
+    def dynamic_args(self):
+        """Additional arugmuents to specific to each simulation"""
+        path, target = self.bazel_target.split(":")
+        path_to_dynamic_args_files = os.path.join(self.rcfg.proj_dir, "bazel-bin", path[2:],
+                                                  "{}_dynamic_args.py".format(target))
+        with open(path_to_dynamic_args_files, 'r') as filep:
+            content = filep.read()
+            dynamic_args = eval(content)
+        return dynamic_args
+
+    def __repr__(self):
+        return 'Bazel("{}")'.format(self.bazel_target)

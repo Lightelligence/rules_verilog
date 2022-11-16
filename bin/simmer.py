@@ -1,16 +1,13 @@
 #!/usr/bin/env python
 
+
 ################################################################################
-# stdlib
+# standard lib imports
 import argparse
 from copy import deepcopy
 import datetime
-import fnmatch
-import getpass
 from hashlib import sha1
 import os
-import shlex
-import signal
 import sys
 from tempfile import TemporaryFile
 import random
@@ -19,24 +16,22 @@ import stat
 import subprocess
 
 ################################################################################
-# Bigger libraries (better to place these later for dependency ordering
+# bigger lib, so better to place this later for dependency ordering
 import jinja2
 
+
 ################################################################################
-# import rules_verilog libraries
+# rules_verilog lib imports
 from lib import cmn_logging
 from lib.calc_simresults_location import calc_simresults_location
-from lib.job_runner import Job, JobManager, JobStatus
+from lib.job_runner import Job, JobStatus
 from lib import job_runner
+from lib import regression
 from lib import rv_utils
+
 
 log = None
 
-################################################################################
-# Constants
-
-LOGGER_INDENT = 8 # I'd rather create a "plain" message in the logger that doesn't format, but more work than its worth
-BENCHES_REL_DIR = "digital/dv/benches"
 
 SIM_CMD_TEMPLATE = jinja2.Template("""
 {% if options.wave_start -%}
@@ -688,243 +683,6 @@ def parse_args(argv):
     return options
 
 
-class RegressionConfig():
-
-    def __init__(self, options, log):
-        self.options = options
-        self.log = log
-
-        self.max_bench_name_length = 20
-        self.max_test_name_length = 20
-
-        self.suppress_output = False
-
-        self.proj_dir = self.options.proj_dir
-        self.regression_dir = calc_simresults_location(self.proj_dir)
-        if not os.path.exists(self.regression_dir):
-            os.mkdir(self.regression_dir)
-
-        self.invocation_dir = os.getcwd()
-
-        self.test_discovery()
-
-        total_tests = sum([iterations for vcomp in self.all_vcomp.values() for test, iterations in vcomp.items()])
-        if total_tests == 0:
-            self.log.critical("Test globbing resulted in no tests to run")
-
-        self.tidy = True
-        if total_tests == 1:
-            self.tidy = False
-        if self.options.waves is not None:
-            self.tidy = False
-        if self.options.nt:
-            self.tidy = False
-        if self.tidy:
-            log.info("tidy=%s passing tests will automatically be cleaned up. Use --nt to prevent automatic cleanup.",
-                     self.tidy)
-
-        self.deferred_messages = []
-
-    def table_format(self, b, t, c, indent=' ' * LOGGER_INDENT):
-        return "{}{:{}s}  {:{}s}  {:{}s}".format(indent, b, self.max_bench_name_length, t, self.max_test_name_length, c,
-                                                 6)
-
-    def table_format_summary_line(self, bench, test, passed, skipped, failed, indent=' ' * LOGGER_INDENT):
-        return f"{indent}{bench:{self.max_bench_name_length}s}  {test:{self.max_test_name_length}s}  {passed:{6}s}  {skipped:{6}s}  {failed:{6}s}"
-
-    def format_test_name(self, b, t, i):
-        return "{:{}s}  {:{}s}  {:-4d}".format(b, self.max_bench_name_length, t, self.max_test_name_length, i)
-
-    def test_discovery(self):
-        """Look for all tests in the checkout and filter down to what was specified on the CLI"""
-        self.log.summary("Starting test discovery")
-        dtp = rv_utils.DatetimePrinter(self.log)
-
-        cmd = "bazel query \"kind(dv_tb, //{}/...)\"".format(BENCHES_REL_DIR)
-        log.debug(" > %s", cmd)
-
-        dtp.reset()
-        with TemporaryFile() as stdout_fp, TemporaryFile() as stderr_fp:
-            p = subprocess.Popen(cmd, stdout=stdout_fp, stderr=stderr_fp, shell=True)
-            p.wait()
-            stdout_fp.seek(0)
-            stderr_fp.seek(0)
-            stdout = stdout_fp.read()
-            stderr = stderr_fp.read()
-            if p.returncode:
-                log.critical("bazel bench discovery failed: %s", stderr.decode('ascii'))
-
-        dtp.stop_and_print()
-        all_vcomp = stdout.decode('ascii').split('\n')
-        all_vcomp = dict([(av, {}) for av in all_vcomp if av])
-
-        tests_to_tags = {}
-        vcomp_to_query_results = {}
-
-        for vcomp, tests in all_vcomp.items():
-            vcomp_path, _ = vcomp.split(':')
-            test_wildcard = os.path.join(vcomp_path, "tests", "...")
-            if self.options.allow_no_run:
-                cmd = 'bazel cquery "attr(abstract, 0, kind(dv_test_cfg, {test_wildcard} intersect allpaths({test_wildcard}, {vcomp})))"'.format(
-                    test_wildcard=test_wildcard, vcomp=vcomp)
-            else:
-                cmd = 'bazel cquery "attr(no_run, 0, attr(abstract, 0, kind(dv_test_cfg, {test_wildcard} intersect allpaths({test_wildcard}, {vcomp}))))"'.format(
-                    test_wildcard=test_wildcard, vcomp=vcomp)
-
-            log.debug(" > %s", cmd)
-
-            dtp.reset()
-
-            with TemporaryFile() as stdout_fp, TemporaryFile() as stderr_fp:
-                cmd = shlex.split(cmd)
-                p = subprocess.Popen(cmd, stdout=stdout_fp, stderr=stderr_fp, shell=False, bufsize=-1)
-                p.wait()
-                stdout_fp.seek(0)
-                stderr_fp.seek(0)
-                stdout = stdout_fp.read()
-                stderr = stderr_fp.read()
-                if p.returncode:
-                    log.critical("bazel test discovery failed:\n%s", stderr.decode('ascii'))
-
-            dtp.stop_and_print()
-            query_results = stdout.decode('ascii').replace('\n', ' ')
-            query_results = re.sub("\([a-z0-9]{7,64}\) *", "", query_results)
-            vcomp_to_query_results[vcomp] = query_results
-
-        for vcomp, tests in all_vcomp.items():
-            query_results = vcomp_to_query_results[vcomp]
-            cmd = "bazel build {} --aspects @rules_verilog//verilog/private:dv.bzl%verilog_dv_test_cfg_info_aspect".format(
-                query_results)
-            log.debug(" > %s", cmd)
-
-            dtp.reset()
-            with TemporaryFile() as stdout_fp, TemporaryFile() as stderr_fp:
-                cmd = shlex.split(cmd)
-                p = subprocess.Popen(cmd, stdout=stdout_fp, stderr=stderr_fp, shell=False, bufsize=-1)
-                p.wait()
-                stdout_fp.seek(0)
-                stderr_fp.seek(0)
-                stdout = stdout_fp.read()
-                stderr = stderr_fp.read()
-                if p.returncode:
-                    log.critical("bazel test discovery failed:\n%s", stderr.decode('ascii'))
-
-            dtp.stop_and_print()
-            text = stdout.decode('ascii').split('\n') + stderr.decode('ascii').split('\n')
-
-            ttv = [
-                re.search("verilog_dv_test_cfg_info\((?P<test>.*), (?P<vcomp>.*), \[(?P<tags>.*)\]\)", line)
-                for line in text
-            ]
-            ttv = [match for match in ttv if match]
-
-            matching_tests = [(mt.group('test'), eval("[%s]" % mt.group('tags'))) for mt in ttv
-                              if mt.group('vcomp') == vcomp]
-            tests_to_tags.update(matching_tests)
-            tests.update(dict([(t[0], 0) for t in matching_tests]))
-
-        table_output = []
-        table_output.append(self.table_format("bench", "test", "count"))
-        table_output.append(self.table_format("-----", "----", "-----"))
-        for vcomp, tests in all_vcomp.items():
-            bench = vcomp.split(':')[1]
-            for i, (test_target, count) in enumerate(tests.items()):
-                test = test_target.split(':')[1]
-                if i == 0:
-                    table_output.append(self.table_format(bench, test, str(count)))
-                else:
-                    table_output.append(self.table_format('', test, str(count)))
-
-        self.log.debug("Tests available:\n%s", "\n".join(table_output))
-
-        # bti is bench-test-iteration
-        for ta in self.options.tests:
-            try:
-                btglob, iterations = ta.btiglob.split("@")
-                try:
-                    iterations = int(iterations)
-                except ValueError:
-                    self.log.critical("iterations (value after after @) was not integer: '%s'", ta.btiglob)
-            except ValueError:
-                btglob = ta.btiglob
-                iterations = 1
-
-            try:
-                bglob, tglob = btglob.split(":")
-            except ValueError:
-                # If inside a testbench directory, it's only necessary to provide a single glob
-                pwd = os.getcwd()
-                benches_dir = os.path.join(self.proj_dir, BENCHES_REL_DIR)
-                if not (benches_dir in pwd and len(benches_dir) < len(pwd)):
-                    self.log.critical("Not in a benches/ directory. Must provide bench:test style glob.")
-                bglob = pwd[len(benches_dir) + 1:]
-                tglob = btglob
-
-            query = "*:{}".format(bglob) # Matching against a bazel label
-            vcomp_match = fnmatch.filter(all_vcomp.keys(), query)
-
-            log.debug("Looking for tests matching %s", ta)
-
-            for vcomp in vcomp_match:
-                tests = all_vcomp[vcomp]
-                query = "*:{}".format(tglob) # Matching against a bazel label
-                test_match = fnmatch.filter(tests, query)
-                for test in test_match:
-                    # Filter tests againsts tags
-                    test_tags = set(tests_to_tags[test])
-                    if ta.tag and not ((ta.tag & test_tags) == ta.tag):
-                        log.debug("  Skipping %s because it did not match --tag=%s", test, ta.tag)
-                        continue
-                    if ta.ntag and (ta.ntag & test_tags):
-                        log.debug("  Skipping %s because it matched --ntags=%s", test, ta.ntag)
-                        continue
-                    if self.options.global_tag and not (
-                        (self.options.global_tag & test_tags) == self.options.global_tag):
-                        log.debug("  Skipping %s because it did not match --global-tag=%s", test,
-                                  self.options.global_tag)
-                        continue
-                    if self.options.global_ntag and (self.options.global_ntag & test_tags):
-                        log.debug("  Skipping %s because it match --global-ntags=%s", test, self.options.global_ntag)
-                        continue
-                    log.debug("  %s met tag requirements", test)
-                    try:
-                        new_max = max(tests[test], iterations)
-                    except KeyError:
-                        new_max = iterations
-                    tests[test] = new_max
-
-        # Now prune down all the tests and benches that aren't active
-        for vcomp, tests in all_vcomp.items():
-            all_vcomp[vcomp] = dict([(t, i) for t, i in tests.items() if i])
-        all_vcomp = dict([(vcomp, tests) for vcomp, tests in all_vcomp.items() if len(tests)])
-
-        table_output = []
-        table_output.append(self.table_format("bench", "test", "count"))
-        table_output.append(self.table_format("-----", "----", "-----"))
-        vcomps = list(all_vcomp.keys())
-        vcomps.sort()
-        for vcomp in vcomps:
-            bench = vcomp.split(':')[1]
-            tests = all_vcomp[vcomp]
-            test_targets = list(tests.keys())
-            test_targets.sort()
-            for i, test_target in enumerate(test_targets):
-                test = test_target.split(':')[1]
-                count = tests[test_target]
-                if i == 0:
-                    table_output.append(self.table_format(bench, test, str(count)))
-                else:
-                    table_output.append(self.table_format('', test, str(count)))
-
-        self.log.info("Tests to run:\n%s", "\n".join(table_output))
-
-        self.all_vcomp = all_vcomp
-
-        if self.options.discovery_only:
-            self.log.info("Ran with --discovery-only option. Exiting.")
-            sys.exit(0)
-
-
 class BazelShutdownJob(Job):
     """When all vcomps are done, shutdown bazel server to limit memory consumption.
 
@@ -1149,77 +907,6 @@ class VCompJob(Job):
 
     def __repr__(self):
         return 'Vcomp("{}")'.format(self.bazel_vcomp_target)
-
-
-class BazelTestCfgJob(Job):
-    """Bazel build for a testcfg only needs to be run once per test cfg, not per iteration. So split it out into its own job"""
-
-    def __init__(self, rcfg, target, vcomper):
-        self.bazel_target = target
-        super(BazelTestCfgJob, self).__init__(rcfg, self, options.timeout)
-        self.vcomper = vcomper
-        if vcomper:
-            self.add_dependency(vcomper)
-
-        self.job_dir = self.vcomper.job_dir # Don't actually need a dir, but jobrunner/manager want it defined
-        self.main_cmdline = "bazel build {}".format(self.bazel_target)
-
-        self.suppress_output = True
-        if self.rcfg.options.tool_debug:
-            self.suppress_output = False
-
-    def post_run(self):
-        super(BazelTestCfgJob, self).post_run()
-        if self.job_runner.returncode == 0:
-            self.jobstatus = JobStatus.PASSED
-        else:
-            self.jobstatus = JobStatus.FAILED
-            log.error("%s failed. Log in %s", self, os.path.join(self.job_dir, "stderr.log"))
-
-    def dynamic_args(self):
-        """Additional arugmuents to specific to each simulation"""
-        path, target = self.bazel_target.split(":")
-        path_to_dynamic_args_files = os.path.join(self.rcfg.proj_dir, "bazel-bin", path[2:],
-                                                  "{}_dynamic_args.py".format(target))
-        with open(path_to_dynamic_args_files, 'r') as filep:
-            content = filep.read()
-            dynamic_args = eval(content)
-        return dynamic_args
-
-    def __repr__(self):
-        return 'Bazel("{}")'.format(self.bazel_target)
-
-
-class BazelTBJob(Job):
-    """Runs bazel to build up a tb compile."""
-
-    def __init__(self, rcfg, target, vcomper):
-        self.bazel_target = target
-        super(BazelTBJob, self).__init__(rcfg, self, options.timeout)
-        self.vcomper = vcomper
-        if vcomper:
-            self.vcomper.add_dependency(self)
-
-        self.job_dir = self.vcomper.job_dir # Don't actually need a dir, but jobrunner/manager want it defined
-        if self.rcfg.options.no_compile:
-            self.main_cmdline = "echo \"Bypassing {} due to --no-compile\"".format(target)
-        else:
-            self.main_cmdline = "bazel run {}".format(target)
-
-        self.suppress_output = True
-        if self.rcfg.options.tool_debug:
-            self.suppress_output = False
-
-    def post_run(self):
-        super(BazelTBJob, self).post_run()
-        if self.job_runner.returncode == 0:
-            self.jobstatus = JobStatus.PASSED
-        else:
-            self.jobstatus = JobStatus.FAILED
-            log.error("%s failed. Log in %s", self, os.path.join(self.job_dir, "stderr.log"))
-
-    def __repr__(self):
-        return 'Bazel("{}")'.format(self.bazel_target)
 
 
 class TestJob(Job):
@@ -1567,95 +1254,6 @@ class TestJob(Job):
             return "<incomplete>"
 
 
-class IterationCfg():
-
-    def __init__(self, target):
-        self.target = target # The number or weight of sims to run
-        self.spawn_count = 1
-
-        # Used for display at end
-        self.jobs = []
-
-    def inc(self, job):
-        self.spawn_count += 1
-        self.jobs.append(job)
-
-    def __lt__(self, other):
-        return self.jobs[0].name < other.jobs[0].name
-
-
-def print_summary(rcfg, vcomp_jobs, icfgs, jm):
-    table_data = [("bench", "test", "passed", "skipped", "failed", "logs")]
-    separator = [""] * len(table_data[0])
-    table_data.append(separator)
-
-    total_passed = 0
-    total_skipped = 0
-    total_failed = 0
-
-    last = len(rcfg.all_vcomp) - 1
-    for i, (vcomp_name, (icfgs, test_list)) in enumerate(rcfg.all_vcomp.items()):
-        vcomp = vcomp_jobs[vcomp_name]
-        table_data.append(
-            (vcomp.name, "vcomp", '1' if vcomp.jobstatus.successful else '',
-             '1' if vcomp.jobstatus == vcomp.jobstatus.SKIPPED else '', '1' if not vcomp.jobstatus.successful else '',
-             '' if vcomp.jobstatus.successful else str(vcomp.log_path)))
-        if vcomp.jobstatus == vcomp.jobstatus.PASSED:
-            total_passed += 1
-        elif vcomp.jobstatus == vcomp.jobstatus.FAILED:
-            total_failed += 1
-        else:
-            total_skipped += 1
-
-        if rcfg.options.no_run:
-            continue
-
-        icfgs.sort()
-        for icfg in icfgs:
-            if not icfg.jobs[0].vcomper is vcomp:
-                continue
-            passed = [j for j in icfg.jobs if j.jobstatus.completed and j.jobstatus.successful]
-            failed = [j for j in icfg.jobs if j.jobstatus == j.jobstatus.FAILED]
-            skipped = [j for j in icfg.jobs if j.jobstatus not in [j.jobstatus.FAILED, j.jobstatus.PASSED]]
-
-            total_passed += len(passed)
-            total_failed += len(failed)
-            total_skipped += len(skipped)
-
-            try:
-                assert len(passed) + len(failed) + len(skipped) == len(icfg.jobs), print(
-                    len(passed), len(failed), len(skipped), len(icfg.jobs))
-            except AssertionError as exc:
-                if not jm.exited_prematurely:
-                    raise exc
-
-            table_data.append(
-                ("", icfg.jobs[0].name, str(len(passed)) if passed else "", str(len(skipped)) if skipped else "",
-                 str(len(failed)) if failed else "", ""))
-            for j in failed:
-                table_data.append(("", "", "", "", "", j.log_path if j.log_path else ''))
-        if i != last:
-            table_data.append(separator)
-
-    # Check that entries are consistent
-    assert all(len(i) == len(table_data[0]) for i in table_data)
-    columns = list(zip(*table_data))
-    column_widths = [max([len(cell) for cell in col]) for col in columns]
-    formatter = " " * LOGGER_INDENT + "  ".join(
-        ["{{:{}{}s}}".format('>' if i in [2, 3, 4] else '', c) for i, c in enumerate(column_widths)])
-    for i, entry in enumerate(table_data):
-        if entry == separator:
-            table_data[i] = ['-' * cw for cw in column_widths]
-    table_data_formatted = [formatter.format(*i) for i in table_data]
-    rcfg.log.summary("Job Results\n%s", "\n".join(table_data_formatted))
-
-    table_data = [("", "", "passed", "skipped", "failed", "")]
-    table_data.append(['-' * len(i) for i in table_data[0]])
-    table_data.append(("", "", str(total_passed), str(total_skipped), str(total_failed), ""))
-    table_data_formatted = [formatter.format(*i) for i in table_data]
-    rcfg.log.summary("Simulation Summary\n%s", "\n".join(table_data_formatted))
-
-
 def main(rcfg):
     """
     Parameters
@@ -1676,16 +1274,16 @@ def main(rcfg):
         vcomper = VCompJob(rcfg, vcomp)
         vcomp_jobs[vcomp] = vcomper
 
-        btbj = BazelTBJob(rcfg, vcomp, vcomper)
+        btbj = job_runner.BazelTBJob(rcfg, vcomp, vcomper, options.timeout)
         btbj_jobs.append(btbj)
 
         tests = []
         icfgs = []
         for test, iterations in test_list.items():
-            icfg = IterationCfg(iterations)
+            icfg = rv_utils.IterationCfg(iterations)
             icfgs.append(icfg)
 
-            btcj = BazelTestCfgJob(rcfg, test, vcomper)
+            btcj = job_runner.BazelTestCfgJob(rcfg, test, vcomper, options.timeout)
             btcj_jobs.append(btcj)
 
             t = TestJob(rcfg, test, vcomper=vcomper, icfg=icfg, btcj=btcj)
@@ -1716,7 +1314,7 @@ def main(rcfg):
                    'parallel_interval': options.parallel_interval,
                    'idle_print_seconds': options.idle_print_seconds,
                    'quit_count': options.quit_count}
-        jm = JobManager(jm_opts, log)
+        jm = job_runner.JobManager(jm_opts, log)
 
         for job in btbj_jobs:
             if options.no_compile:
@@ -1771,7 +1369,7 @@ def main(rcfg):
         jm.kill()
         log.critical("Exiting due to keyboard interrupt")
 
-    print_summary(rcfg, vcomp_jobs, icfgs, jm)
+    rv_utils.print_summary(rcfg, vcomp_jobs, icfgs, jm)
 
     failures = {}
     for bench, (icfgs, test_list) in rcfg.all_vcomp.items():
@@ -1792,5 +1390,5 @@ if __name__ == '__main__':
     options = parse_args(sys.argv[1:])
     verbosity = cmn_logging.DEBUG if options.tool_debug else cmn_logging.INFO
     log = cmn_logging.build_logger("sim", level=verbosity, use_color=options.use_color, filehandler="simmer.log")
-    rcfg = RegressionConfig(options, log)
+    rcfg = regression.RegressionConfig(options, log)
     main(rcfg)
