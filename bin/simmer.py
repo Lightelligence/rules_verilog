@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 
-
 ################################################################################
 # standard lib imports
 import argparse
@@ -15,11 +14,9 @@ import re
 import stat
 import subprocess
 
-
 ################################################################################
 # bigger lib, so better to place this later for dependency ordering
 import jinja2
-
 
 ################################################################################
 # rules_verilog lib imports
@@ -30,9 +27,7 @@ from lib import parser_actions
 from lib import regression
 from lib import rv_utils
 
-
 log = None
-
 
 SIM_CMD_TEMPLATE = jinja2.Template("""
 {% if options.wave_start -%}
@@ -62,7 +57,6 @@ run
 run
 {% endif -%}
 """)
-
 
 SIM_TEMPLATE = jinja2.Template("""#!/bin/bash
 export PROJ_DIR={{ job.vcomper.rcfg.proj_dir }}
@@ -155,7 +149,6 @@ testFunction
 
 """)
 
-
 RERUN_TEMPLATE = jinja2.Template("""#!/bin/bash
 shopt -s expand_aliases
 
@@ -166,7 +159,6 @@ set -e
 simmer -t {{ job.vcomper.name }}:{{ job.name }} --seed {{ seed }} {{ cmd_line_sim_opts }} --verbosity=UVM_MEDIUM --waves --simulator {{ options.simulator }} $ARGS
 
 """)
-
 
 COMPILE_TEMPLATE = jinja2.Template("""#!/bin/bash
 
@@ -455,9 +447,7 @@ def parse_args(argv):
     gregre.add_argument('--coverage',
                         action=parser_actions.CovAction,
                         help=f'Enable Code Coverage.\n{parser_actions.CovAction.format_options(indent=0)}')
-    gregre.add_argument('--covfile',
-                        default=COVFILE,
-                        help='Path to Coverage configuration file')
+    gregre.add_argument('--covfile', default=COVFILE, help='Path to Coverage configuration file')
     gregre.add_argument('--junit-dump',
                         type=str,
                         default=None,
@@ -1204,10 +1194,12 @@ def main(rcfg):
             rcfg.log.critical("--seed can only be used if a single test is run")
 
     try:
-        jm_opts = {'parallel_max': options.parallel_max,
-                   'parallel_interval': options.parallel_interval,
-                   'idle_print_seconds': options.idle_print_seconds,
-                   'quit_count': options.quit_count}
+        jm_opts = {
+            'parallel_max': options.parallel_max,
+            'parallel_interval': options.parallel_interval,
+            'idle_print_seconds': options.idle_print_seconds,
+            'quit_count': options.quit_count
+        }
         jm = job_runner.JobManager(jm_opts, log)
 
         for job in btbj_jobs:

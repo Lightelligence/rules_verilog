@@ -13,7 +13,6 @@ from tempfile import TemporaryFile
 # rules_verilog lib imports
 from lib import rv_utils
 
-
 # I'd rather create a "plain" message in the logger
 # that doesn't format, but more work than its worth
 LOGGER_INDENT = 8
@@ -52,8 +51,9 @@ class RegressionConfig():
         if self.options.nt:
             self.tidy = False
         if self.tidy:
-            self.log.info("tidy=%s passing tests will automatically be cleaned up. Use --nt to prevent automatic cleanup.",
-                     self.tidy)
+            self.log.info(
+                "tidy=%s passing tests will automatically be cleaned up. Use --nt to prevent automatic cleanup.",
+                self.tidy)
 
         self.deferred_messages = []
 
@@ -213,10 +213,11 @@ class RegressionConfig():
                     if self.options.global_tag and not (
                         (self.options.global_tag & test_tags) == self.options.global_tag):
                         self.log.debug("  Skipping %s because it did not match --global-tag=%s", test,
-                                  self.options.global_tag)
+                                       self.options.global_tag)
                         continue
                     if self.options.global_ntag and (self.options.global_ntag & test_tags):
-                        self.log.debug("  Skipping %s because it match --global-ntags=%s", test, self.options.global_ntag)
+                        self.log.debug("  Skipping %s because it match --global-ntags=%s", test,
+                                       self.options.global_ntag)
                         continue
                     self.log.debug("  %s met tag requirements", test)
                     try:

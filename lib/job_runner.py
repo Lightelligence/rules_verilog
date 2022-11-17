@@ -10,6 +10,7 @@ import subprocess
 import threading
 import time
 
+
 @enum.unique
 class JobStatus(enum.Enum):
     NOT_STARTED = 0

@@ -30,7 +30,7 @@ class DatetimePrinter():
 class IterationCfg():
 
     def __init__(self, target):
-        self.target = target 
+        self.target = target
         self.spawn_count = 1
         self.jobs = []
 

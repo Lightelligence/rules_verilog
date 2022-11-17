@@ -76,6 +76,6 @@ class CovAction(argparse.Action):
         for cov_option in cov_options:
             if cov_option not in self.legal_coverage_options:
                 parser.error(
-                    "Illegal coverage value {}\nRequires a colon separated list of the following values:\n  {}".
-                    format(cov_option, self.format_options()))
+                    "Illegal coverage value {}\nRequires a colon separated list of the following values:\n  {}".format(
+                        cov_option, self.format_options()))
         setattr(args, self.dest, values)
