@@ -12,7 +12,6 @@ from tempfile import TemporaryFile
 
 # rules_verilog lib imports
 from lib import rv_utils
-from lib.calc_simresults_location import calc_simresults_location
 
 
 # I'd rather create a "plain" message in the logger
@@ -33,7 +32,7 @@ class RegressionConfig():
         self.suppress_output = False
 
         self.proj_dir = self.options.proj_dir
-        self.regression_dir = calc_simresults_location(self.proj_dir)
+        self.regression_dir = rv_utils.calc_simresults_location(self.proj_dir)
         if not os.path.exists(self.regression_dir):
             os.mkdir(self.regression_dir)
 

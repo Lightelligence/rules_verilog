@@ -2,10 +2,14 @@
 """Utility class definitions."""
 
 import datetime
+import getpass
+import os
+import re
 
 # I'd rather create a "plain" message in the logger
 # that doesn't format, but more work than its worth
 LOGGER_INDENT = 8
+SIMRESULTS = os.environ.get('SIMRESULTS', '')
 
 
 class DatetimePrinter():
@@ -108,3 +112,29 @@ def print_summary(rcfg, vcomp_jobs, icfgs, jm):
     table_data.append(("", "", str(total_passed), str(total_skipped), str(total_failed), ""))
     table_data_formatted = [formatter.format(*i) for i in table_data]
     rcfg.log.summary("Simulation Summary\n%s", "\n".join(table_data_formatted))
+
+
+def calc_simresults_location(checkout_path):
+    """Calculate the path to put regression results."""
+    username = getpass.getuser()
+
+    # FIXME, we may want to detect who owns the check to allow
+    # for rerunning in someone else's area? # pylint: disable=fixme
+    sim_results_home = os.path.join(SIMRESULTS, username)
+    if not os.path.exists(sim_results_home):
+        os.mkdir(sim_results_home)
+
+    # If username is in the checkout_path try to reduce the name
+    # Assume username is somewhere is path
+    try:
+        checkout_path = re.search("{}/(.*)".format(username), checkout_path).group(1)
+    except AttributeError:
+        pass
+    checkout_path = checkout_path.replace('/', '_')
+    # Adding the datetime into the regression directory will force a recompile.
+    # Ideally, the vcomp directory will need to have the same name
+    # strdate = time.strftime("%Y_%m_%d_%H_%M_%S", time.localtime(time.time()))
+    # regression_directory = '{}__{}'.format(checkout_path, strdate)
+    regression_directory = checkout_path
+    regression_directory = os.path.join(sim_results_home, regression_directory)
+    return regression_directory

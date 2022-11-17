@@ -8,11 +8,6 @@ py_library(
 )
 
 py_library(
-    name = "calc_simresults_location",
-    srcs = ["calc_simresults_location.py"],
-)
-
-py_library(
     name = "job_runner",
     srcs = ["job_runner.py"],
 )
@@ -25,9 +20,7 @@ py_library(
 py_library(
     name = "regression",
     srcs = ["regression.py"],
-    deps = ["calc_simresults_location",
-            "rv_utils",
-    ],
+    deps = ["rv_utils"],
 )
 
 py_library(

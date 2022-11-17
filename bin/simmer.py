@@ -15,6 +15,7 @@ import re
 import stat
 import subprocess
 
+
 ################################################################################
 # bigger lib, so better to place this later for dependency ordering
 import jinja2
@@ -22,9 +23,8 @@ import jinja2
 
 ################################################################################
 # rules_verilog lib imports
-from lib import cmn_logging
-from lib.calc_simresults_location import calc_simresults_location
 from lib.job_runner import Job, JobStatus
+from lib import cmn_logging
 from lib import job_runner
 from lib import parser_actions
 from lib import regression
@@ -62,6 +62,7 @@ run
 run
 {% endif -%}
 """)
+
 
 SIM_TEMPLATE = jinja2.Template("""#!/bin/bash
 export PROJ_DIR={{ job.vcomper.rcfg.proj_dir }}
@@ -154,6 +155,7 @@ testFunction
 
 """)
 
+
 RERUN_TEMPLATE = jinja2.Template("""#!/bin/bash
 shopt -s expand_aliases
 
@@ -164,6 +166,7 @@ set -e
 simmer -t {{ job.vcomper.name }}:{{ job.name }} --seed {{ seed }} {{ cmd_line_sim_opts }} --verbosity=UVM_MEDIUM --waves --simulator {{ options.simulator }} $ARGS
 
 """)
+
 
 COMPILE_TEMPLATE = jinja2.Template("""#!/bin/bash
 
