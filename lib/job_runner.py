@@ -487,3 +487,34 @@ class BazelTestCfgJob(Job):
 
     def __repr__(self):
         return 'Bazel("{}")'.format(self.bazel_target)
+
+
+class BazelShutdownJob(Job):
+    """When all vcomps are done, shutdown bazel server to limit memory consumption.
+
+    Once sockets were added, where 'bazel run' may be invoked, there is concern that this may cause
+    intermittent failures due to race conditions. Leaving this class and instantiation for posterity,
+    but changing the execution to not actually do a shutdown.
+    """
+
+    def __init__(self, rcfg, timeout):
+        super(BazelShutdownJob, self).__init__(rcfg, "bazel shutdown", timeout)
+
+        self.job_dir = rcfg.proj_dir
+        # self.main_cmdline = "bazel shutdown"
+        self.main_cmdline = "echo \"Skipping bazel shutdown\""
+
+        self.suppress_output = True
+        if self.rcfg.options.tool_debug:
+            self.suppress_output = False
+
+    def post_run(self):
+        super(BazelShutdownJob, self).post_run()
+        if self.job_runner.returncode == 0:
+            self.jobstatus = JobStatus.PASSED
+        else:
+            self.jobstatus = JobStatus.FAILED
+            self.log.error("%s failed. Log in %s", self, os.path.join(self.job_dir, "stderr.log"))
+
+    def __repr__(self):
+        return 'Bazel Shutdown'

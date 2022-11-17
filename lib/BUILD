@@ -18,6 +18,11 @@ py_library(
 )
 
 py_library(
+    name = "parser_actions",
+    srcs = ["parser_actions.py"],
+)
+
+py_library(
     name = "regression",
     srcs = ["regression.py"],
     deps = ["calc_simresults_location",

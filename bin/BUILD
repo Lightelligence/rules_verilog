@@ -22,6 +22,7 @@ py_binary(
         "//lib:calc_simresults_location",
         "//lib:cmn_logging",
         "//lib:job_runner",
+        "//lib:parser_actions",
         "//lib:regression",
         "//lib:rv_utils",
     ],

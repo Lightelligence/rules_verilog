@@ -273,10 +273,6 @@ JUNIT_TEMPLATE = jinja2.Template("""<?xml version="1.0" encoding="UTF-8"?>
 </testsuites>
 """)
 
-################################################################################
-# Helpers
-
-
 class TestAction(argparse.Action):
 
     class TestArg():
@@ -681,37 +677,6 @@ def parse_args(argv):
             sys.exit(99)
     options.proj_dir = PROJ_DIR
     return options
-
-
-class BazelShutdownJob(Job):
-    """When all vcomps are done, shutdown bazel server to limit memory consumption.
-
-    Once sockets were added, where 'bazel run' may be invoked, there is concern that this may cause
-    intermittent failures due to race conditions. Leaving this class and instantiation for posterity,
-    but changing the execution to not actually do a shutdown.
-    """
-
-    def __init__(self, rcfg):
-        super(BazelShutdownJob, self).__init__(rcfg, "bazel shutdown", options.timeout)
-
-        self.job_dir = rcfg.proj_dir
-        # self.main_cmdline = "bazel shutdown"
-        self.main_cmdline = "echo \"Skipping bazel shutdown\""
-
-        self.suppress_output = True
-        if self.rcfg.options.tool_debug:
-            self.suppress_output = False
-
-    def post_run(self):
-        super(BazelShutdownJob, self).post_run()
-        if self.job_runner.returncode == 0:
-            self.jobstatus = JobStatus.PASSED
-        else:
-            self.jobstatus = JobStatus.FAILED
-            log.error("%s failed. Log in %s", self, os.path.join(self.job_dir, "stderr.log"))
-
-    def __repr__(self):
-        return 'Bazel Shutdown'
 
 
 class VCompJob(Job):
@@ -1268,7 +1233,7 @@ def main(rcfg):
     btcj_jobs = []
     btbj_jobs = []
 
-    bazel_shutdown_job = BazelShutdownJob(rcfg)
+    bazel_shutdown_job = job_runner.BazelShutdownJob(rcfg, options.timeout)
 
     for vcomp, test_list in rcfg.all_vcomp.items():
         vcomper = VCompJob(rcfg, vcomp)
