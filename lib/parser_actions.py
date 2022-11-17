@@ -55,3 +55,27 @@ class XpropAction(argparse.Action):
         else:
             parser.error("Illegal xprop value {}, only the following are allowed:\n  {}".format(
                 values, "\n  ".join(["{} : {}".format(ii, jj) for ii, jj in self.legal_xprop_options.items()])))
+
+
+class CovAction(argparse.Action):
+    legal_coverage_options = {
+        'B': 'Block - For enabling block coverage',
+        'E': 'Expr - For enabling expression coverage',
+        'F': 'Fsm - For enabling fsm coverage',
+        'T': 'Toggle - For enabling toggle coverage',
+        'U': 'fUnctional - For enabling functional coverage',
+        'A': 'All - For enabling all supported coverage types'
+    }
+
+    @classmethod
+    def format_options(cls, indent=2):
+        return f"\n{' '*indent}".join(["{} : {}".format(ii, jj) for ii, jj in cls.legal_coverage_options.items()])
+
+    def __call__(self, parser, args, values, option_string=None):
+        cov_options = values.split(':')
+        for cov_option in cov_options:
+            if cov_option not in self.legal_coverage_options:
+                parser.error(
+                    "Illegal coverage value {}\nRequires a colon separated list of the following values:\n  {}".
+                    format(cov_option, self.format_options()))
+        setattr(args, self.dest, values)

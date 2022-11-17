@@ -26,6 +26,7 @@ from lib import cmn_logging
 from lib.calc_simresults_location import calc_simresults_location
 from lib.job_runner import Job, JobStatus
 from lib import job_runner
+from lib import parser_actions
 from lib import regression
 from lib import rv_utils
 
@@ -273,59 +274,6 @@ JUNIT_TEMPLATE = jinja2.Template("""<?xml version="1.0" encoding="UTF-8"?>
 </testsuites>
 """)
 
-class TestAction(argparse.Action):
-
-    class TestArg():
-
-        def __init__(self, btiglob):
-            self.btiglob = btiglob
-            self.tag = set()
-            self.ntag = set()
-
-        def __repr__(self):
-            return "TestArg(btiglob='{}', tags={}, ntags={})".format(self.btiglob, self.tag, self.ntag)
-
-    def __call__(self, parser, namespace, values, option_string=None):
-        ta = self.__class__.TestArg(values)
-        getattr(namespace, self.dest).append(ta)
-
-
-class TagAction(argparse.Action):
-
-    def __call__(self, parser, namespace, values, option_string=None):
-        try:
-            last_test = namespace.tests[-1]
-        except IndexError:
-            return # The return is actually more graceful than the explicit value error
-            # It relies upon argparse to catch the missing option and throw a better formatted error
-            # raise ValueError("Attempted to use a test tag filter without any tests specified. Did you forget the '-t' flag?")
-        l = getattr(last_test, self.dest)
-        l.add(values)
-
-
-class GlobalTagAction(argparse.Action):
-
-    def __call__(self, parser, namespace, values, option_string=None):
-        gt = getattr(namespace, self.dest)
-        gt.add(values)
-
-
-class XpropAction(argparse.Action):
-    legal_xprop_options = {
-        'C': 'C - Compute as ternary (CAT)',
-        'F': 'F - Forward only X (FOX)',
-        'D': 'D - Disable xprop',
-    }
-
-    def __call__(self, parser, args, values, option_string=None):
-        if values in ['C', 'F']:
-            setattr(args, self.dest, values)
-        elif values == 'D':
-            setattr(args, self.dest, None)
-        else:
-            parser.error("Illegal xprop value {}, only the following are allowed:\n  {}".format(
-                values, "\n  ".join(["{} : {}".format(ii, jj) for ii, jj in self.legal_xprop_options.items()])))
-
 
 def parse_args(argv):
     """
@@ -469,7 +417,7 @@ def parse_args(argv):
     gtestc.add_argument('--xprop',
                         type=str,
                         default='F',
-                        action=XpropAction,
+                        action=parser_actions.XpropAction,
                         help=('F=FOX (Forward-Only-X) mode. C=CAT(Compute as Ternary) mode. D=Disable. '
                               'CAT outputs behave exactly like hardware. '
                               'FOX is more pessimistic, and propogates X to the output if X is in the control.'))
@@ -499,33 +447,10 @@ def parse_args(argv):
 
     gregre = parser.add_argument_group("Regression arguments")
 
-    class CovAction(argparse.Action):
-        legal_coverage_options = {
-            'B': 'Block - For enabling block coverage',
-            'E': 'Expr - For enabling expression coverage',
-            'F': 'Fsm - For enabling fsm coverage',
-            'T': 'Toggle - For enabling toggle coverage',
-            'U': 'fUnctional - For enabling functional coverage',
-            'A': 'All - For enabling all supported coverage types'
-        }
-
-        @classmethod
-        def format_options(cls, indent=2):
-            return f"\n{' '*indent}".join(["{} : {}".format(ii, jj) for ii, jj in cls.legal_coverage_options.items()])
-
-        def __call__(self, parser, args, values, option_string=None):
-            cov_options = values.split(':')
-            for cov_option in cov_options:
-                if cov_option not in self.legal_coverage_options:
-                    parser.error(
-                        "Illegal coverage value {}\nRequires a colon separated list of the following values:\n  {}".
-                        format(cov_option, self.format_options()))
-            setattr(args, self.dest, values)
-
     gregre.add_argument('--mce', default=False, action='store_true', help='Multicore license enable for xrun.')
     gregre.add_argument('--coverage',
-                        action=CovAction,
-                        help=f'Enable Code Coverage.\n{CovAction.format_options(indent=0)}')
+                        action=parser_actions.CovAction,
+                        help=f'Enable Code Coverage.\n{parser_actions.CovAction.format_options(indent=0)}')
     gregre.add_argument('--covfile',
                         default="$PROJ_DIR/digital/dv/scripts/default_coverage_opt.ccf",
                         help='Path to Coverage configuration file')
@@ -595,7 +520,7 @@ def parse_args(argv):
         '-t',
         dest='tests',
         default=[],
-        action=TestAction,
+        action=parser_actions.TestAction,
         help=
         ('Test names to run. This option has some smarts depending on tool invocation directory.\n'
          'If you run in a "bench" directory, just specify a single "glob" of tests that you want to run.\n'
@@ -617,20 +542,20 @@ def parse_args(argv):
 
     parser.add_argument('--tag',
                         type=str,
-                        action=TagAction,
+                        action=parser_actions.TagAction,
                         help='Only include tests that match this tag. Must specify indepently for each test glob')
     parser.add_argument('--ntag',
                         type=str,
-                        action=TagAction,
+                        action=parser_actions.TagAction,
                         help='Exclude tests that match this tag. Must specify indepently for each test glob')
 
     parser.add_argument('--global-tag',
                         default=set(),
-                        action=GlobalTagAction,
+                        action=parser_actions.GlobalTagAction,
                         help='Only include tests that match this tag. Affects all test globs')
     parser.add_argument('--global-ntag',
                         default=set(),
-                        action=GlobalTagAction,
+                        action=parser_actions.GlobalTagAction,
                         help='Exclude tests that match this tag. Affects all test globs')
     parser.add_argument('--simulator',
                         type=str,
@@ -711,7 +636,7 @@ class VCompJob(Job):
         if options.gui:
             enable_debug_access = 2
 
-        cov_opts = None
+        cov_opts = ''
         if options.coverage:
             self.cov_work_dir = os.path.join(self.rcfg.regression_dir, self.name + "__COV_WORK")
             os.system("mkdir -p {}".format(self.cov_work_dir))
