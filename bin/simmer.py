@@ -300,6 +300,7 @@ def parse_args(argv):
     SIM_PLATFORM = os.environ.get('SIM_PLATFORM', 'xrun')
     VCS_LICENSES = os.environ.get('VCS_LICENSES', 0)
     XRUN_LICENSES = os.environ.get('XRUN_LICENSES', 0)
+    COVFILE = PROJ_DIR + os.environ.get('COVFILE', "coverage.ccf")
 
     parser = argparse.ArgumentParser(description="Runs simulations!", formatter_class=argparse.RawTextHelpFormatter)
 
@@ -452,7 +453,7 @@ def parse_args(argv):
                         action=parser_actions.CovAction,
                         help=f'Enable Code Coverage.\n{parser_actions.CovAction.format_options(indent=0)}')
     gregre.add_argument('--covfile',
-                        default="$PROJ_DIR/digital/dv/scripts/default_coverage_opt.ccf",
+                        default=COVFILE,
                         help='Path to Coverage configuration file')
     gregre.add_argument('--junit-dump',
                         type=str,

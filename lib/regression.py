@@ -18,7 +18,7 @@ from lib.calc_simresults_location import calc_simresults_location
 # I'd rather create a "plain" message in the logger
 # that doesn't format, but more work than its worth
 LOGGER_INDENT = 8
-BENCHES_REL_DIR = "digital/dv/benches"
+BENCHES_REL_DIR = os.environ.get('BENCHES_REL_DIR', 'benches')
 
 
 class RegressionConfig():
