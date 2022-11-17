@@ -1169,7 +1169,7 @@ class VCompJob(Job):
         if options.gui:
             enable_debug_access = 2
 
-        cov_opts = None
+        cov_opts = ''
         if options.coverage:
             self.cov_work_dir = os.path.join(self.rcfg.regression_dir, self.name + "__COV_WORK")
             os.system("mkdir -p {}".format(self.cov_work_dir))
