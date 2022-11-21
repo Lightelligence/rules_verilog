@@ -8,8 +8,8 @@ py_library(
 )
 
 py_library(
-    name = "job_runner",
-    srcs = ["job_runner.py"],
+    name = "job_lib",
+    srcs = ["job_lib.py"],
 )
 
 py_library(

@@ -78,14 +78,14 @@ class Job():
 
     _priority_cache = {}
 
-    def __init__(self, rcfg, name, timeout):
+    def __init__(self, rcfg, name):
         self.rcfg = rcfg # Regression cfg object
         self.name = name
 
         # String set by derived class of the directory to run this job in
         self.job_dir = None
 
-        self.job_runner = None
+        self.job_lib = None
 
         self.job_start_time = None
         self.job_stop_time = None
@@ -96,7 +96,7 @@ class Job():
         # FIXME need to implement a way to actually override this
         # FIXME add multiplier for --gui
         #self.timeout = 12.25 # Float hours
-        self.timeout = timeout
+        self.timeout = rcfg.options.timeout
 
         self.priority = -3600 # Not sure that making this super negative is necessary if we log more stuff
         self._get_priority()
@@ -165,7 +165,7 @@ class JobRunner():
 
     def __init__(self, job, manager):
         self.job = job
-        self.job.job_runner = self
+        self.job.job_lib = self
 
         self.manager = manager
 
@@ -281,7 +281,7 @@ class JobManager():
         self._run_jobs_thread_active = True
         self._run_jobs_thread.start()
 
-        self.job_runner_type = SubprocessJobRunner
+        self.job_lib_type = SubprocessJobRunner
 
         self._last_done_or_idle_print = datetime.datetime.now()
 
@@ -296,7 +296,7 @@ class JobManager():
             self._move_ready_to_active()
             while len(self._active):
                 for i, job in enumerate(self._active):
-                    if job.job_runner.check_for_done():
+                    if job.job_lib.check_for_done():
                         self.log.debug("%s body done", job)
                         try:
                             job.post_run()
@@ -377,7 +377,7 @@ class JobManager():
                 continue # Need to finish loop or final cleanup wont happen
             job.pre_run()
             self.log.debug("%s priority: %d", job, job.priority)
-            self.job_runner_type(job, self)
+            self.job_lib_type(job, self)
             jobs_that_advanced_state.append(i)
             self._active.append(job)
 
@@ -418,15 +418,15 @@ class JobManager():
     def kill(self):
         self.stop()
         for job in self._active:
-            job.job_runner.kill()
+            job.job_lib.kill()
 
 
 class BazelTBJob(Job):
     """Runs bazel to build up a tb compile."""
 
-    def __init__(self, rcfg, target, vcomper, timeout):
+    def __init__(self, rcfg, target, vcomper):
         self.bazel_target = target
-        super(BazelTBJob, self).__init__(rcfg, self, timeout)
+        super(BazelTBJob, self).__init__(rcfg, self)
         self.vcomper = vcomper
         if vcomper:
             self.vcomper.add_dependency(self)
@@ -443,7 +443,7 @@ class BazelTBJob(Job):
 
     def post_run(self):
         super(BazelTBJob, self).post_run()
-        if self.job_runner.returncode == 0:
+        if self.job_lib.returncode == 0:
             self.jobstatus = JobStatus.PASSED
         else:
             self.jobstatus = JobStatus.FAILED
@@ -456,9 +456,9 @@ class BazelTBJob(Job):
 class BazelTestCfgJob(Job):
     """Bazel build for a testcfg only needs to be run once per test cfg, not per iteration. So split it out into its own job"""
 
-    def __init__(self, rcfg, target, vcomper, timeout):
+    def __init__(self, rcfg, target, vcomper):
         self.bazel_target = target
-        super(BazelTestCfgJob, self).__init__(rcfg, self, timeout)
+        super(BazelTestCfgJob, self).__init__(rcfg, self)
         self.vcomper = vcomper
         if vcomper:
             self.add_dependency(vcomper)
@@ -472,7 +472,7 @@ class BazelTestCfgJob(Job):
 
     def post_run(self):
         super(BazelTestCfgJob, self).post_run()
-        if self.job_runner.returncode == 0:
+        if self.job_lib.returncode == 0:
             self.jobstatus = JobStatus.PASSED
         else:
             self.jobstatus = JobStatus.FAILED
@@ -500,8 +500,8 @@ class BazelShutdownJob(Job):
     but changing the execution to not actually do a shutdown.
     """
 
-    def __init__(self, rcfg, timeout):
-        super(BazelShutdownJob, self).__init__(rcfg, "bazel shutdown", timeout)
+    def __init__(self, rcfg):
+        super(BazelShutdownJob, self).__init__(rcfg, "bazel shutdown")
 
         self.job_dir = rcfg.proj_dir
         # self.main_cmdline = "bazel shutdown"
@@ -513,7 +513,7 @@ class BazelShutdownJob(Job):
 
     def post_run(self):
         super(BazelShutdownJob, self).post_run()
-        if self.job_runner.returncode == 0:
+        if self.job_lib.returncode == 0:
             self.jobstatus = JobStatus.PASSED
         else:
             self.jobstatus = JobStatus.FAILED

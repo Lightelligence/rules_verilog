@@ -20,9 +20,9 @@ import jinja2
 
 ################################################################################
 # rules_verilog lib imports
-from lib.job_runner import Job, JobStatus
+from lib.job_lib import Job, JobStatus
 from lib import cmn_logging
-from lib import job_runner
+from lib import job_lib
 from lib import parser_actions
 from lib import regression
 from lib import rv_utils
@@ -610,7 +610,7 @@ class VCompJob(Job):
         else:
             self.__class__.all_names[name] = self
 
-        super(VCompJob, self).__init__(rcfg, name, options.timeout)
+        super(VCompJob, self).__init__(rcfg, name)
 
         self.bench_dir = os.path.join(self.rcfg.proj_dir, self.bazel_vcomp_target.split(':')[0][2:])
 
@@ -758,7 +758,7 @@ class VCompJob(Job):
         log.debug(" > %s", self.main_cmdline)
 
     def post_run(self):
-        if self.job_runner.returncode == 0:
+        if self.job_lib.returncode == 0:
             log_level = log.info
             self.jobstatus = JobStatus.PASSED
         else:
@@ -814,7 +814,7 @@ class TestJob(Job):
         self.icfg.inc(self)
         self.btcj = btcj
 
-        super(TestJob, self).__init__(rcfg, name, options.timeout)
+        super(TestJob, self).__init__(rcfg, name)
         self.rcfg = rcfg
         self.vcomper = vcomper
         self.sim_opts = None
@@ -1063,7 +1063,7 @@ class TestJob(Job):
         net_time_str, cps_str = self._get_stats_from_log_file()
         total_time_str = self._get_total_time_str()
         time_stats_str = "({} cps / {} net_time / {} total_time)".format(cps_str, net_time_str, total_time_str)
-        if self.job_runner.returncode != 0:
+        if self.job_lib.returncode != 0:
             os.system("ln -snf %s .last_fail" % self.job_dir)
             log.debug("created link to sim dir as '.last_fail'")
             log.error(
@@ -1111,7 +1111,7 @@ class TestJob(Job):
         # If iteration count hasnt been hit yet, add another copy onto the run list
         if self.icfg.spawn_count <= self.icfg.target:
             c = self.clone()
-            self.job_runner.manager.add_job(c)
+            self.job_lib.manager.add_job(c)
 
     def _get_total_time_str(self):
         hours = int(self.duration_s // 3600)
@@ -1151,13 +1151,13 @@ def main(rcfg):
     btcj_jobs = []
     btbj_jobs = []
 
-    bazel_shutdown_job = job_runner.BazelShutdownJob(rcfg, options.timeout)
+    bazel_shutdown_job = job_lib.BazelShutdownJob(rcfg)
 
     for vcomp, test_list in rcfg.all_vcomp.items():
         vcomper = VCompJob(rcfg, vcomp)
         vcomp_jobs[vcomp] = vcomper
 
-        btbj = job_runner.BazelTBJob(rcfg, vcomp, vcomper, options.timeout)
+        btbj = job_lib.BazelTBJob(rcfg, vcomp, vcomper)
         btbj_jobs.append(btbj)
 
         tests = []
@@ -1166,7 +1166,7 @@ def main(rcfg):
             icfg = rv_utils.IterationCfg(iterations)
             icfgs.append(icfg)
 
-            btcj = job_runner.BazelTestCfgJob(rcfg, test, vcomper, options.timeout)
+            btcj = job_lib.BazelTestCfgJob(rcfg, test, vcomper)
             btcj_jobs.append(btcj)
 
             t = TestJob(rcfg, test, vcomper=vcomper, icfg=icfg, btcj=btcj)
@@ -1199,7 +1199,7 @@ def main(rcfg):
             'idle_print_seconds': options.idle_print_seconds,
             'quit_count': options.quit_count
         }
-        jm = job_runner.JobManager(jm_opts, log)
+        jm = job_lib.JobManager(jm_opts, log)
 
         for job in btbj_jobs:
             if options.no_compile:

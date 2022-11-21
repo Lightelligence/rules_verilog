@@ -20,7 +20,7 @@ py_binary(
     deps = [
         "//bin:check_test",
         "//lib:cmn_logging",
-        "//lib:job_runner",
+        "//lib:job_lib",
         "//lib:parser_actions",
         "//lib:regression",
         "//lib:rv_utils",
