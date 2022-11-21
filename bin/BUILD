@@ -19,8 +19,11 @@ py_binary(
     srcs = ["simmer.py"],
     deps = [
         "//bin:check_test",
-        "//lib:calc_simresults_location",
         "//lib:cmn_logging",
+        "//lib:job_lib",
+        "//lib:parser_actions",
+        "//lib:regression",
+        "//lib:rv_utils",
     ],
 )
 

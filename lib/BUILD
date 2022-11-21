@@ -8,6 +8,22 @@ py_library(
 )
 
 py_library(
-    name = "calc_simresults_location",
-    srcs = ["calc_simresults_location.py"],
+    name = "job_lib",
+    srcs = ["job_lib.py"],
+)
+
+py_library(
+    name = "parser_actions",
+    srcs = ["parser_actions.py"],
+)
+
+py_library(
+    name = "regression",
+    srcs = ["regression.py"],
+    deps = ["rv_utils"],
+)
+
+py_library(
+    name = "rv_utils",
+    srcs = ["rv_utils.py"],
 )

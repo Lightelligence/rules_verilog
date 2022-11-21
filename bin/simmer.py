@@ -1,39 +1,14 @@
 #!/usr/bin/env python
 
-# place holder for run script...
-# should be directory independant and use variables or current path to figure out where to run
-# output should be stored in /simresults/<proj|chip>/username/bench/testname_seed/ ...
-# a link to test dir should be added to bench dir for easy navigation of results
-#
-# List of input RTL files should come from Make flow
 ################################################################################
-
-# pylint: disable=line-too-long
-# pylint: disable=too-many-lines
-# pylint: disable=missing-class-docstring
-# pylint: disable=missing-function-docstring
-# pylint: disable=invalid-name
-# pylint: disable=too-few-public-methods
-# pylint: disable=too-many-statements
-# pylint: disable=too-many-branches
-
-################################################################################
-# stdlib
+# standard lib imports
 import argparse
-import bisect
 from copy import deepcopy
-import enum
-import fnmatch
-import getpass
+import datetime
 from hashlib import sha1
 import os
-import shlex
-import signal
 import sys
 from tempfile import TemporaryFile
-import threading
-import time
-import datetime
 import random
 import re
 import stat
@@ -44,79 +19,15 @@ import subprocess
 import jinja2
 
 ################################################################################
-# Checkout specific libraries
+# rules_verilog lib imports
+from lib.job_lib import Job, JobStatus
 from lib import cmn_logging
-from lib.calc_simresults_location import calc_simresults_location
+from lib import job_lib
+from lib import parser_actions
+from lib import regression
+from lib import rv_utils
 
 log = None
-
-################################################################################
-# Constants
-
-LOGGER_INDENT = 8 # I'd rather create a "plain" message in the logger that doesn't format, but more work than its worth
-BENCHES_REL_DIR = "digital/dv/benches"
-
-
-@enum.unique
-class JobStatus(enum.Enum):
-    NOT_STARTED = 0
-    TO_BE_BYPASSED = 1
-    PASSED = 10
-    FAILED = 11
-    SKIPPED = 12 # Due to upstream dependency failures, this job was not run
-    BYPASSED = 13 # Skipped due to a norun directive, allows downstream jobs to execute assuming the outputs of this job have been previously created
-
-    @property
-    def completed(self):
-        return self.value >= self.__class__.PASSED.value
-
-    @property
-    def successful(self):
-        return self in [self.PASSED, self.BYPASSED]
-
-    def __str__(self):
-        return self.name
-
-    def _error(self, new_state):
-        raise ValueError("May not go from {} to {}".format(self, new_state))
-
-    def update(self, new_state):
-        """Check for legal transitions.
-        This doesn't actually change this instance, an assignment must be done with retval.
-        Example:
-
-          self._jobstatus = self._jobstatus.update(new_jobstatus)
-        """
-        if new_state == self.NOT_STARTED:
-            self._error(new_state)
-        if self == new_state:
-            pass # No actual transition, ignore
-        elif self == self.NOT_STARTED:
-            pass # Any transition is legal
-        elif self == self.TO_BE_BYPASSED:
-            if new_state == self.PASSED:
-                return self.BYPASSED # In the case of a bypassed job, part of
-                # the job may still be run with a
-                # placeholder command. Downstream logic
-                # may mark this as passed, but keep
-                # bypassed for final formatting.
-            if new_state != self.FAILED:
-                self._error(new_state)
-        elif self == self.PASSED:
-            if new_state != self.FAILED:
-                self._error(new_state)
-        elif self == self.FAILED:
-            self._error(new_state)
-        elif self == self.SKIPPED:
-            if new_state != self.FAILED:
-                self._error(new_state)
-        elif self == self.BYPASSED:
-            if new_state != self.FAILED:
-                self._error(new_state)
-        else:
-            raise ValueError("Unknown current state")
-        return new_state
-
 
 SIM_CMD_TEMPLATE = jinja2.Template("""
 {% if options.wave_start -%}
@@ -158,7 +69,6 @@ function testFunction {
 
  {% for socket_name, socket_command, socket_file in sockets %}
     ##################################################
-    cd $PROJ_DIR
     # Remove previous socket file if it exists
     rm -f {{ socket_file }}
     # spawn {{ socket_name }} socket
@@ -358,63 +268,6 @@ JUNIT_TEMPLATE = jinja2.Template("""<?xml version="1.0" encoding="UTF-8"?>
 </testsuites>
 """)
 
-################################################################################
-# Helpers
-
-
-class TestAction(argparse.Action):
-
-    class TestArg():
-
-        def __init__(self, btiglob):
-            self.btiglob = btiglob
-            self.tag = set()
-            self.ntag = set()
-
-        def __repr__(self):
-            return "TestArg(btiglob='{}', tags={}, ntags={})".format(self.btiglob, self.tag, self.ntag)
-
-    def __call__(self, parser, namespace, values, option_string=None):
-        ta = self.__class__.TestArg(values)
-        getattr(namespace, self.dest).append(ta)
-
-
-class TagAction(argparse.Action):
-
-    def __call__(self, parser, namespace, values, option_string=None):
-        try:
-            last_test = namespace.tests[-1]
-        except IndexError:
-            return # The return is actually more graceful than the explicit value error
-            # It relies upon argparse to catch the missing option and throw a better formatted error
-            # raise ValueError("Attempted to use a test tag filter without any tests specified. Did you forget the '-t' flag?")
-        l = getattr(last_test, self.dest)
-        l.add(values)
-
-
-class GlobalTagAction(argparse.Action):
-
-    def __call__(self, parser, namespace, values, option_string=None):
-        gt = getattr(namespace, self.dest)
-        gt.add(values)
-
-
-class XpropAction(argparse.Action):
-    legal_xprop_options = {
-        'C': 'C - Compute as ternary (CAT)',
-        'F': 'F - Forward only X (FOX)',
-        'D': 'D - Disable xprop',
-    }
-
-    def __call__(self, parser, args, values, option_string=None):
-        if values in ['C', 'F']:
-            setattr(args, self.dest, values)
-        elif values == 'D':
-            setattr(args, self.dest, None)
-        else:
-            parser.error("Illegal xprop value {}, only the following are allowed:\n  {}".format(
-                values, "\n  ".join(["{} : {}".format(ii, jj) for ii, jj in self.legal_xprop_options.items()])))
-
 
 def parse_args(argv):
     """
@@ -441,6 +294,7 @@ def parse_args(argv):
     SIM_PLATFORM = os.environ.get('SIM_PLATFORM', 'xrun')
     VCS_LICENSES = os.environ.get('VCS_LICENSES', 0)
     XRUN_LICENSES = os.environ.get('XRUN_LICENSES', 0)
+    COVFILE = PROJ_DIR + os.environ.get('COVFILE', "coverage.ccf")
 
     parser = argparse.ArgumentParser(description="Runs simulations!", formatter_class=argparse.RawTextHelpFormatter)
 
@@ -558,7 +412,7 @@ def parse_args(argv):
     gtestc.add_argument('--xprop',
                         type=str,
                         default='F',
-                        action=XpropAction,
+                        action=parser_actions.XpropAction,
                         help=('F=FOX (Forward-Only-X) mode. C=CAT(Compute as Ternary) mode. D=Disable. '
                               'CAT outputs behave exactly like hardware. '
                               'FOX is more pessimistic, and propogates X to the output if X is in the control.'))
@@ -588,36 +442,11 @@ def parse_args(argv):
 
     gregre = parser.add_argument_group("Regression arguments")
 
-    class CovAction(argparse.Action):
-        legal_coverage_options = {
-            'B': 'Block - For enabling block coverage',
-            'E': 'Expr - For enabling expression coverage',
-            'F': 'Fsm - For enabling fsm coverage',
-            'T': 'Toggle - For enabling toggle coverage',
-            'U': 'fUnctional - For enabling functional coverage',
-            'A': 'All - For enabling all supported coverage types'
-        }
-
-        @classmethod
-        def format_options(cls, indent=2):
-            return f"\n{' '*indent}".join(["{} : {}".format(ii, jj) for ii, jj in cls.legal_coverage_options.items()])
-
-        def __call__(self, parser, args, values, option_string=None):
-            cov_options = values.split(':')
-            for cov_option in cov_options:
-                if cov_option not in self.legal_coverage_options:
-                    parser.error(
-                        "Illegal coverage value {}\nRequires a colon separated list of the following values:\n  {}".
-                        format(cov_option, self.format_options()))
-            setattr(args, self.dest, values)
-
     gregre.add_argument('--mce', default=False, action='store_true', help='Multicore license enable for xrun.')
     gregre.add_argument('--coverage',
-                        action=CovAction,
-                        help=f'Enable Code Coverage.\n{CovAction.format_options(indent=0)}')
-    gregre.add_argument('--covfile',
-                        default="$PROJ_DIR/digital/dv/scripts/default_coverage_opt.ccf",
-                        help='Path to Coverage configuration file')
+                        action=parser_actions.CovAction,
+                        help=f'Enable Code Coverage.\n{parser_actions.CovAction.format_options(indent=0)}')
+    gregre.add_argument('--covfile', default=COVFILE, help='Path to Coverage configuration file')
     gregre.add_argument('--junit-dump',
                         type=str,
                         default=None,
@@ -684,7 +513,7 @@ def parse_args(argv):
         '-t',
         dest='tests',
         default=[],
-        action=TestAction,
+        action=parser_actions.TestAction,
         help=
         ('Test names to run. This option has some smarts depending on tool invocation directory.\n'
          'If you run in a "bench" directory, just specify a single "glob" of tests that you want to run.\n'
@@ -706,20 +535,20 @@ def parse_args(argv):
 
     parser.add_argument('--tag',
                         type=str,
-                        action=TagAction,
+                        action=parser_actions.TagAction,
                         help='Only include tests that match this tag. Must specify indepently for each test glob')
     parser.add_argument('--ntag',
                         type=str,
-                        action=TagAction,
+                        action=parser_actions.TagAction,
                         help='Exclude tests that match this tag. Must specify indepently for each test glob')
 
     parser.add_argument('--global-tag',
                         default=set(),
-                        action=GlobalTagAction,
+                        action=parser_actions.GlobalTagAction,
                         help='Only include tests that match this tag. Affects all test globs')
     parser.add_argument('--global-ntag',
                         default=set(),
-                        action=GlobalTagAction,
+                        action=parser_actions.GlobalTagAction,
                         help='Exclude tests that match this tag. Affects all test globs')
     parser.add_argument('--simulator',
                         type=str,
@@ -768,375 +597,6 @@ def parse_args(argv):
     return options
 
 
-class DatetimePrinter():
-
-    def __init__(self, log):
-        self.ts = datetime.datetime.now()
-        self.log = log
-
-    def reset(self):
-        self.ts = datetime.datetime.now()
-
-    def stop_and_print(self):
-        stop = datetime.datetime.now()
-        delta = stop - self.ts
-        self.log.debug("Last time check: %d", delta.total_seconds())
-
-
-class RegressionConfig():
-
-    def __init__(self, options, log):
-        self.options = options
-        self.log = log
-
-        self.max_bench_name_length = 20
-        self.max_test_name_length = 20
-
-        self.suppress_output = False
-
-        self.proj_dir = self.options.proj_dir
-        self.regression_dir = calc_simresults_location(self.proj_dir)
-        if not os.path.exists(self.regression_dir):
-            os.mkdir(self.regression_dir)
-
-        self.invocation_dir = os.getcwd()
-
-        self.test_discovery()
-
-        total_tests = sum([iterations for vcomp in self.all_vcomp.values() for test, iterations in vcomp.items()])
-        if total_tests == 0:
-            self.log.critical("Test globbing resulted in no tests to run")
-
-        self.tidy = True
-        if total_tests == 1:
-            self.tidy = False
-        if self.options.waves is not None:
-            self.tidy = False
-        if self.options.nt:
-            self.tidy = False
-        if self.tidy:
-            log.info("tidy=%s passing tests will automatically be cleaned up. Use --nt to prevent automatic cleanup.",
-                     self.tidy)
-
-        self.deferred_messages = []
-
-    def table_format(self, b, t, c, indent=' ' * LOGGER_INDENT):
-        return "{}{:{}s}  {:{}s}  {:{}s}".format(indent, b, self.max_bench_name_length, t, self.max_test_name_length, c,
-                                                 6)
-
-    def table_format_summary_line(self, bench, test, passed, skipped, failed, indent=' ' * LOGGER_INDENT):
-        return f"{indent}{bench:{self.max_bench_name_length}s}  {test:{self.max_test_name_length}s}  {passed:{6}s}  {skipped:{6}s}  {failed:{6}s}"
-
-    def format_test_name(self, b, t, i):
-        return "{:{}s}  {:{}s}  {:-4d}".format(b, self.max_bench_name_length, t, self.max_test_name_length, i)
-
-    def test_discovery(self):
-        """Look for all tests in the checkout and filter down to what was specified on the CLI"""
-        self.log.summary("Starting test discovery")
-        dtp = DatetimePrinter(self.log)
-
-        cmd = "bazel query \"kind(dv_tb, //{}/...)\"".format(BENCHES_REL_DIR)
-        log.debug(" > %s", cmd)
-
-        dtp.reset()
-        with TemporaryFile() as stdout_fp, TemporaryFile() as stderr_fp:
-            p = subprocess.Popen(cmd, stdout=stdout_fp, stderr=stderr_fp, shell=True)
-            p.wait()
-            stdout_fp.seek(0)
-            stderr_fp.seek(0)
-            stdout = stdout_fp.read()
-            stderr = stderr_fp.read()
-            if p.returncode:
-                log.critical("bazel bench discovery failed: %s", stderr.decode('ascii'))
-
-        dtp.stop_and_print()
-        all_vcomp = stdout.decode('ascii').split('\n')
-        all_vcomp = dict([(av, {}) for av in all_vcomp if av])
-
-        tests_to_tags = {}
-        vcomp_to_query_results = {}
-
-        for vcomp, tests in all_vcomp.items():
-            vcomp_path, _ = vcomp.split(':')
-            test_wildcard = os.path.join(vcomp_path, "tests", "...")
-            if self.options.allow_no_run:
-                cmd = 'bazel cquery "attr(abstract, 0, kind(dv_test_cfg, {test_wildcard} intersect allpaths({test_wildcard}, {vcomp})))"'.format(
-                    test_wildcard=test_wildcard, vcomp=vcomp)
-            else:
-                cmd = 'bazel cquery "attr(no_run, 0, attr(abstract, 0, kind(dv_test_cfg, {test_wildcard} intersect allpaths({test_wildcard}, {vcomp}))))"'.format(
-                    test_wildcard=test_wildcard, vcomp=vcomp)
-
-            log.debug(" > %s", cmd)
-
-            dtp.reset()
-
-            with TemporaryFile() as stdout_fp, TemporaryFile() as stderr_fp:
-                cmd = shlex.split(cmd)
-                p = subprocess.Popen(cmd, stdout=stdout_fp, stderr=stderr_fp, shell=False, bufsize=-1)
-                p.wait()
-                stdout_fp.seek(0)
-                stderr_fp.seek(0)
-                stdout = stdout_fp.read()
-                stderr = stderr_fp.read()
-                if p.returncode:
-                    log.critical("bazel test discovery failed:\n%s", stderr.decode('ascii'))
-
-            dtp.stop_and_print()
-            query_results = stdout.decode('ascii').replace('\n', ' ')
-            query_results = re.sub("\([a-z0-9]{7,64}\) *", "", query_results)
-            vcomp_to_query_results[vcomp] = query_results
-
-        for vcomp, tests in all_vcomp.items():
-            query_results = vcomp_to_query_results[vcomp]
-            cmd = "bazel build {} --aspects @rules_verilog//verilog/private:dv.bzl%verilog_dv_test_cfg_info_aspect".format(
-                query_results)
-            log.debug(" > %s", cmd)
-
-            dtp.reset()
-            with TemporaryFile() as stdout_fp, TemporaryFile() as stderr_fp:
-                cmd = shlex.split(cmd)
-                p = subprocess.Popen(cmd, stdout=stdout_fp, stderr=stderr_fp, shell=False, bufsize=-1)
-                p.wait()
-                stdout_fp.seek(0)
-                stderr_fp.seek(0)
-                stdout = stdout_fp.read()
-                stderr = stderr_fp.read()
-                if p.returncode:
-                    log.critical("bazel test discovery failed:\n%s", stderr.decode('ascii'))
-
-            dtp.stop_and_print()
-            text = stdout.decode('ascii').split('\n') + stderr.decode('ascii').split('\n')
-
-            ttv = [
-                re.search("verilog_dv_test_cfg_info\((?P<test>.*), (?P<vcomp>.*), \[(?P<tags>.*)\]\)", line)
-                for line in text
-            ]
-            ttv = [match for match in ttv if match]
-
-            matching_tests = [(mt.group('test'), eval("[%s]" % mt.group('tags'))) for mt in ttv
-                              if mt.group('vcomp') == vcomp]
-            tests_to_tags.update(matching_tests)
-            tests.update(dict([(t[0], 0) for t in matching_tests]))
-
-        table_output = []
-        table_output.append(self.table_format("bench", "test", "count"))
-        table_output.append(self.table_format("-----", "----", "-----"))
-        for vcomp, tests in all_vcomp.items():
-            bench = vcomp.split(':')[1]
-            for i, (test_target, count) in enumerate(tests.items()):
-                test = test_target.split(':')[1]
-                if i == 0:
-                    table_output.append(self.table_format(bench, test, str(count)))
-                else:
-                    table_output.append(self.table_format('', test, str(count)))
-
-        self.log.debug("Tests available:\n%s", "\n".join(table_output))
-
-        # bti is bench-test-iteration
-        for ta in self.options.tests:
-            try:
-                btglob, iterations = ta.btiglob.split("@")
-                try:
-                    iterations = int(iterations)
-                except ValueError:
-                    self.log.critical("iterations (value after after @) was not integer: '%s'", ta.btiglob)
-            except ValueError:
-                btglob = ta.btiglob
-                iterations = 1
-
-            try:
-                bglob, tglob = btglob.split(":")
-            except ValueError:
-                # If inside a testbench directory, it's only necessary to provide a single glob
-                pwd = os.getcwd()
-                benches_dir = os.path.join(self.proj_dir, BENCHES_REL_DIR)
-                if not (benches_dir in pwd and len(benches_dir) < len(pwd)):
-                    self.log.critical("Not in a benches/ directory. Must provide bench:test style glob.")
-                bglob = pwd[len(benches_dir) + 1:]
-                tglob = btglob
-
-            query = "*:{}".format(bglob) # Matching against a bazel label
-            vcomp_match = fnmatch.filter(all_vcomp.keys(), query)
-
-            log.debug("Looking for tests matching %s", ta)
-
-            for vcomp in vcomp_match:
-                tests = all_vcomp[vcomp]
-                query = "*:{}".format(tglob) # Matching against a bazel label
-                test_match = fnmatch.filter(tests, query)
-                for test in test_match:
-                    # Filter tests againsts tags
-                    test_tags = set(tests_to_tags[test])
-                    if ta.tag and not ((ta.tag & test_tags) == ta.tag):
-                        log.debug("  Skipping %s because it did not match --tag=%s", test, ta.tag)
-                        continue
-                    if ta.ntag and (ta.ntag & test_tags):
-                        log.debug("  Skipping %s because it matched --ntags=%s", test, ta.ntag)
-                        continue
-                    if self.options.global_tag and not (
-                        (self.options.global_tag & test_tags) == self.options.global_tag):
-                        log.debug("  Skipping %s because it did not match --global-tag=%s", test,
-                                  self.options.global_tag)
-                        continue
-                    if self.options.global_ntag and (self.options.global_ntag & test_tags):
-                        log.debug("  Skipping %s because it match --global-ntags=%s", test, self.options.global_ntag)
-                        continue
-                    log.debug("  %s met tag requirements", test)
-                    try:
-                        new_max = max(tests[test], iterations)
-                    except KeyError:
-                        new_max = iterations
-                    tests[test] = new_max
-
-        # Now prune down all the tests and benches that aren't active
-        for vcomp, tests in all_vcomp.items():
-            all_vcomp[vcomp] = dict([(t, i) for t, i in tests.items() if i])
-        all_vcomp = dict([(vcomp, tests) for vcomp, tests in all_vcomp.items() if len(tests)])
-
-        table_output = []
-        table_output.append(self.table_format("bench", "test", "count"))
-        table_output.append(self.table_format("-----", "----", "-----"))
-        vcomps = list(all_vcomp.keys())
-        vcomps.sort()
-        for vcomp in vcomps:
-            bench = vcomp.split(':')[1]
-            tests = all_vcomp[vcomp]
-            test_targets = list(tests.keys())
-            test_targets.sort()
-            for i, test_target in enumerate(test_targets):
-                test = test_target.split(':')[1]
-                count = tests[test_target]
-                if i == 0:
-                    table_output.append(self.table_format(bench, test, str(count)))
-                else:
-                    table_output.append(self.table_format('', test, str(count)))
-
-        self.log.info("Tests to run:\n%s", "\n".join(table_output))
-
-        self.all_vcomp = all_vcomp
-
-        if self.options.discovery_only:
-            self.log.info("Ran with --discovery-only option. Exiting.")
-            sys.exit(0)
-
-
-class Job():
-
-    _priority_cache = {}
-
-    def __init__(self, rcfg, name):
-        self.rcfg = rcfg # Regression cfg object
-        self.name = name
-
-        # String set by derived class of the directory to run this job in
-        self.job_dir = None
-
-        self.job_runner = None
-
-        self.job_start_time = None
-        self.job_stop_time = None
-
-        self._jobstatus = JobStatus.NOT_STARTED
-
-        self.suppress_output = False
-        # FIXME need to implement a way to actually override this
-        # FIXME add multiplier for --gui
-        #self.timeout = 12.25 # Float hours
-        self.timeout = options.timeout
-
-        self.priority = -3600 # Not sure that making this super negative is necessary if we log more stuff
-        self._get_priority()
-        log.debug("%s priority=%d", self, self.priority)
-
-        # Implement both directions to make traversal of graph easier
-        self._dependencies = [] # Things this job is dependent on
-        self._children = [] # Jobs that depend on this jop
-
-    def __lt__(self, other):
-        return self.priority < other.priority
-
-    def _get_priority(self):
-        """This function is intended to assign a priority to this Job based on statistics of previous runs of this Job.
-
-        However, integration with the external simulation statistics aggregator didn't work well so support was removed.
-        """
-        return # Default zero priority
-
-    @property
-    def jobstatus(self):
-        return self._jobstatus
-
-    @jobstatus.setter
-    def jobstatus(self, new_jobstatus):
-        self._jobstatus = self._jobstatus.update(new_jobstatus)
-
-    def add_dependency(self, dep):
-        if not dep:
-            log.error("%s added null dep", self)
-        else:
-            self._dependencies.append(dep)
-        dep._children.append(self)
-        dep.increase_priority(self.priority)
-
-    def increase_priority(self, value):
-        # Recurse up with new value
-        self.priority += value
-        for dep in self._dependencies:
-            dep.increase_priority(value)
-
-    def pre_run(self):
-        log.info("Starting %s %s", self.__class__.__name__, self.name)
-        self.job_start_time = datetime.datetime.now()
-
-        if not os.path.exists(self.job_dir):
-            self.rcfg.log.debug("Creating job_dir: %s", self.job_dir)
-            os.mkdir(self.job_dir)
-
-    def post_run(self):
-        self.job_stop_time = datetime.datetime.now()
-        log.debug("post_run %s %s duration %s", self.__class__.__name__, self.name, self.duration_s)
-        self.completed = True
-
-    @property
-    def duration_s(self):
-        try:
-            delta = self.job_stop_time - self.job_start_time
-        except TypeError:
-            return 0
-        return delta.total_seconds()
-
-
-class BazelShutdownJob(Job):
-    """When all vcomps are done, shutdown bazel server to limit memory consumption.
-
-    Once sockets were added, where 'bazel run' may be invoked, there is concern that this may cause
-    intermittent failures due to race conditions. Leaving this class and instantiation for posterity,
-    but changing the execution to not actually do a shutdown.
-    """
-
-    def __init__(self, rcfg):
-        super(BazelShutdownJob, self).__init__(rcfg, "bazel shutdown")
-
-        self.job_dir = rcfg.proj_dir
-        # self.main_cmdline = "bazel shutdown"
-        self.main_cmdline = "echo \"Skipping bazel shutdown\""
-
-        self.suppress_output = True
-        if self.rcfg.options.tool_debug:
-            self.suppress_output = False
-
-    def post_run(self):
-        super(BazelShutdownJob, self).post_run()
-        if self.job_runner.returncode == 0:
-            self.jobstatus = JobStatus.PASSED
-        else:
-            self.jobstatus = JobStatus.FAILED
-            log.error("%s failed. Log in %s", self, os.path.join(self.job_dir, "stderr.log"))
-
-    def __repr__(self):
-        return 'Bazel Shutdown'
-
-
 class VCompJob(Job):
     # All found vcomp names to prevent collisions
     all_names = {}
@@ -1169,7 +629,7 @@ class VCompJob(Job):
         if options.gui:
             enable_debug_access = 2
 
-        cov_opts = None
+        cov_opts = ''
         if options.coverage:
             self.cov_work_dir = os.path.join(self.rcfg.regression_dir, self.name + "__COV_WORK")
             os.system("mkdir -p {}".format(self.cov_work_dir))
@@ -1298,7 +758,7 @@ class VCompJob(Job):
         log.debug(" > %s", self.main_cmdline)
 
     def post_run(self):
-        if self.job_runner.returncode == 0:
+        if self.job_lib.returncode == 0:
             log_level = log.info
             self.jobstatus = JobStatus.PASSED
         else:
@@ -1330,77 +790,6 @@ class VCompJob(Job):
 
     def __repr__(self):
         return 'Vcomp("{}")'.format(self.bazel_vcomp_target)
-
-
-class BazelTestCfgJob(Job):
-    """Bazel build for a testcfg only needs to be run once per test cfg, not per iteration. So split it out into its own job"""
-
-    def __init__(self, rcfg, target, vcomper):
-        self.bazel_target = target
-        super(BazelTestCfgJob, self).__init__(rcfg, self)
-        self.vcomper = vcomper
-        if vcomper:
-            self.add_dependency(vcomper)
-
-        self.job_dir = self.vcomper.job_dir # Don't actually need a dir, but jobrunner/manager want it defined
-        self.main_cmdline = "bazel build {}".format(self.bazel_target)
-
-        self.suppress_output = True
-        if self.rcfg.options.tool_debug:
-            self.suppress_output = False
-
-    def post_run(self):
-        super(BazelTestCfgJob, self).post_run()
-        if self.job_runner.returncode == 0:
-            self.jobstatus = JobStatus.PASSED
-        else:
-            self.jobstatus = JobStatus.FAILED
-            log.error("%s failed. Log in %s", self, os.path.join(self.job_dir, "stderr.log"))
-
-    def dynamic_args(self):
-        """Additional arugmuents to specific to each simulation"""
-        path, target = self.bazel_target.split(":")
-        path_to_dynamic_args_files = os.path.join(self.rcfg.proj_dir, "bazel-bin", path[2:],
-                                                  "{}_dynamic_args.py".format(target))
-        with open(path_to_dynamic_args_files, 'r') as filep:
-            content = filep.read()
-            dynamic_args = eval(content)
-        return dynamic_args
-
-    def __repr__(self):
-        return 'Bazel("{}")'.format(self.bazel_target)
-
-
-class BazelTBJob(Job):
-    """Runs bazel to build up a tb compile."""
-
-    def __init__(self, rcfg, target, vcomper):
-        self.bazel_target = target
-        super(BazelTBJob, self).__init__(rcfg, self)
-        self.vcomper = vcomper
-        if vcomper:
-            self.vcomper.add_dependency(self)
-
-        self.job_dir = self.vcomper.job_dir # Don't actually need a dir, but jobrunner/manager want it defined
-        if self.rcfg.options.no_compile:
-            self.main_cmdline = "echo \"Bypassing {} due to --no-compile\"".format(target)
-        else:
-            self.main_cmdline = "bazel run {}".format(target)
-
-        self.suppress_output = True
-        if self.rcfg.options.tool_debug:
-            self.suppress_output = False
-
-    def post_run(self):
-        super(BazelTBJob, self).post_run()
-        if self.job_runner.returncode == 0:
-            self.jobstatus = JobStatus.PASSED
-        else:
-            self.jobstatus = JobStatus.FAILED
-            log.error("%s failed. Log in %s", self, os.path.join(self.job_dir, "stderr.log"))
-
-    def __repr__(self):
-        return 'Bazel("{}")'.format(self.bazel_target)
 
 
 class TestJob(Job):
@@ -1674,7 +1063,7 @@ class TestJob(Job):
         net_time_str, cps_str = self._get_stats_from_log_file()
         total_time_str = self._get_total_time_str()
         time_stats_str = "({} cps / {} net_time / {} total_time)".format(cps_str, net_time_str, total_time_str)
-        if self.job_runner.returncode != 0:
+        if self.job_lib.returncode != 0:
             os.system("ln -snf %s .last_fail" % self.job_dir)
             log.debug("created link to sim dir as '.last_fail'")
             log.error(
@@ -1722,7 +1111,7 @@ class TestJob(Job):
         # If iteration count hasnt been hit yet, add another copy onto the run list
         if self.icfg.spawn_count <= self.icfg.target:
             c = self.clone()
-            self.job_runner.manager.add_job(c)
+            self.job_lib.manager.add_job(c)
 
     def _get_total_time_str(self):
         hours = int(self.duration_s // 3600)
@@ -1748,352 +1137,6 @@ class TestJob(Job):
             return "<incomplete>"
 
 
-class JobRunner():
-
-    def __init__(self, job, manager):
-        self.job = job
-        self.job.job_runner = self
-
-        self.manager = manager
-
-        self.done = False
-
-    def check_for_done(self):
-        raise NotImplementedError
-
-    @property
-    def returncode(self):
-        raise NotImplementedError
-
-    def print_stderr_if_failed(self):
-        raise NotImplementedError
-
-
-class SubprocessJobRunner(JobRunner):
-
-    def __init__(self, job, manager):
-        super(SubprocessJobRunner, self).__init__(job, manager)
-        kwargs = {'shell': True, 'preexec_fn': os.setsid}
-
-        if self.job.suppress_output or self.job.rcfg.options.no_stdout:
-            self.stdout_fp = open(os.path.join(self.job.job_dir, "stdout.log"), 'w')
-            self.stderr_fp = open(os.path.join(self.job.job_dir, "stderr.log"), 'w')
-            kwargs['stdout'] = self.stdout_fp
-            kwargs['stderr'] = self.stderr_fp
-        self._start_time = datetime.datetime.now()
-        self._p = subprocess.Popen(self.job.main_cmdline, **kwargs)
-
-    def check_for_done(self):
-        if self.done:
-            return self.done
-        try:
-            result = self._check_for_done()
-        except Exception as exc:
-            log.error("Job failed %s:\n%s", self.job, exc)
-            result = True
-        if result:
-            self.done = result
-        return result
-
-    def _check_for_done(self):
-        if self._p.poll() is not None:
-            if self.job.suppress_output or self.job.rcfg.options.no_stdout:
-                self.stdout_fp.close()
-                self.stderr_fp.close()
-            return True
-        delta = datetime.datetime.now() - self._start_time
-        if self.job.timeout > 0 and delta > datetime.timedelta(hours=self.job.timeout):
-            log.error("%s  exceeded timeout value of %s (job will be killed)", self.job, self.job.timeout)
-            os.killpg(os.getpgid(self._p.pid), signal.SIGTERM)
-            with open(os.path.join(self.job.job_dir, "stderr.log"), 'a') as filep:
-                filep.write("%%E- %s exceeded timeout value of %s (job will be killed)" % (self.job, self.job.timeout))
-            with open(os.path.join(self.job.job_dir, "stdout.log"), 'a') as filep:
-                filep.write("%%E- %s exceeded timeout value of %s (job will be killed)" % (self.job, self.job.timeout))
-            return True
-        return False
-
-    @property
-    def returncode(self):
-        return self._p.returncode
-
-    def kill(self):
-        os.killpg(os.getpgid(self._p.pid), signal.SIGTERM)
-        # None of the following variants seemed to work (due to shell=True ?)
-        # process = psutil.Process(self._p.pid)
-        # for proc in process.children(recursive=True):
-        #     proc.kill()
-        # process.kill()
-
-        # self._p.terminate()
-
-        # self._p.kill()
-
-
-class JobManager():
-    """Manages multiple concurrent jobs"""
-
-    def __init__(self):
-        self.max_parallel = options.parallel_max
-        self.sleep_interval = options.parallel_interval
-        self.idle_print_interval = datetime.timedelta(seconds=options.idle_print_seconds)
-
-        self._quit_count = options.quit_count
-        self._error_count = 0
-        self._done_grace_exit = False
-        self.exited_prematurely = False
-
-        # Jobs must transition from todo->ready->active->done
-
-        # These are jobs ready to be run, but may not dependencies filled yet
-        # This list is maintained in sorted priority order
-        self._todo = []
-
-        # Jobs ready to launch (all dependencies met)
-        # This list is maintained in sorted priority order
-        self._ready = []
-
-        # Jobs launched but not yet complete
-        self._active = []
-
-        # Completed jobs
-        self._done = []
-
-        self._skipped = []
-
-        self._run_jobs_thread = threading.Thread(name="_run_jobs", target=self._run_jobs)
-        self._run_jobs_thread.setDaemon(True)
-        self._run_jobs_thread_active = True
-        self._run_jobs_thread.start()
-
-        self.job_runner_type = SubprocessJobRunner
-
-        self._last_done_or_idle_print = datetime.datetime.now()
-
-    def _print_state(self, log_fn):
-        job_queues = ["_todo", "_ready", "_active", "_done", "_skipped"]
-        for jq in job_queues:
-            log_fn("%s: %s", jq, getattr(self, jq))
-
-    def _run_jobs(self):
-        while self._run_jobs_thread_active:
-            self._move_todo_to_ready()
-            self._move_ready_to_active()
-            while len(self._active):
-                for i, job in enumerate(self._active):
-                    if job.job_runner.check_for_done():
-                        log.debug("%s body done", job)
-                        try:
-                            job.post_run()
-                        except Exception as exc:
-                            log.error("%s  post_run_failed()\n:%s", job, exc)
-                        if not job.jobstatus.successful:
-                            self._error_count += 1
-                            if self._error_count >= self._quit_count:
-                                self._graceful_exit()
-                            self._move_children_to_skipped(job)
-                        self._active.pop(i)
-                        self._last_done_or_idle_print = datetime.datetime.now()
-                        self._done.append(job)
-                        # Ideally this would be before post_run, but pass_fail status may be set there
-                        self._move_todo_to_ready()
-                        self._move_ready_to_active()
-                time_since_last_done_or_idle_print = datetime.datetime.now() - self._last_done_or_idle_print
-                if time_since_last_done_or_idle_print > self.idle_print_interval:
-                    self._last_done_or_idle_print = datetime.datetime.now()
-                    self._print_state(log.info)
-
-                time.sleep(self.sleep_interval)
-            if not len(self._active):
-                time.sleep(self.sleep_interval)
-
-    def _move_children_to_skipped(self, job):
-        for child in job._children:
-            log.info("Skipping job %s due to dependency (%s) failure", child, job)
-            try:
-                self._todo.remove(child)
-                child.jobstatus = JobStatus.SKIPPED
-            except ValueError:
-                # Initially, this was a nice sanity check, but it doesn't always hold true
-                # See azure #924
-                # if child not in self._skipped:
-                #    raise ValueError("Couldn't find child job to mark as skipped")
-                continue
-            self._skipped.append(child)
-            self._move_children_to_skipped(child)
-
-    def _move_todo_to_ready(self):
-        self._print_state(log.debug)
-        jobs_that_advanced_state = []
-        for i, job in enumerate(self._todo):
-            if len(job._dependencies) == 0:
-                # There are no dependencies
-                bisect.insort_right(self._ready, job)
-                jobs_that_advanced_state.append(i)
-            else:
-                all_dependencies_are_done = all([dep.jobstatus.completed for dep in job._dependencies])
-                if not all_dependencies_are_done:
-                    continue
-                all_dependencies_passed = all([dep.jobstatus.successful for dep in job._dependencies])
-                if all_dependencies_passed:
-                    bisect.insort_right(self._ready, job)
-                    jobs_that_advanced_state.append(i)
-                else:
-                    log.error("Skipping job %s due dependency failure", job)
-                    jobs_that_advanced_state.append(i)
-                    self._skipped.append(job)
-                    job.jobstatus = JobStatus.SKIPPED
-
-        # Can't iterate and remove in list at the same time easily
-        for i in reversed(jobs_that_advanced_state):
-            self._todo.pop(i)
-
-    def _move_ready_to_active(self):
-        self._print_state(log.debug)
-
-        available_to_run = self.max_parallel - len(self._active)
-
-        jobs_that_advanced_state = []
-        for i in range(available_to_run):
-            try:
-                job = self._ready[i]
-            except IndexError:
-                # We have more jobs available than todos
-                continue # Need to finish loop or final cleanup wont happen
-            job.pre_run()
-            log.debug("%s priority: %d", job, job.priority)
-            self.job_runner_type(job, self)
-            jobs_that_advanced_state.append(i)
-            self._active.append(job)
-
-        for i in reversed(jobs_that_advanced_state):
-            self._ready.pop(i)
-
-    def _graceful_exit(self):
-        if self._done_grace_exit:
-            return
-        self.exited_prematurely = True
-        self._done_grace_exit = True
-        log.warn("Exceeded quit count. Graceful exit.")
-        self._skipped.extend(self._todo)
-        self._todo = []
-        self._skipped.extend(self._ready)
-        self._ready = []
-
-    def add_job(self, job):
-        if not isinstance(job, Job):
-            raise ValueError("Tried to add a non-Job job {} of type {}".format(job, type(job)))
-        if not self._done_grace_exit:
-            bisect.insort_right(self._todo, job)
-        else:
-            self._skipped.append(job)
-
-    def wait(self):
-        """Blocks until no jobs are left."""
-        log.info("Waiting until all jobs are completed.")
-        while len(self._todo) or len(self._ready) or len(self._active):
-            log.debug("still waiting")
-            time.sleep(10)
-
-    def stop(self):
-        """Stop the job runner thread (cpu intenstive). This is really more of a pause than a full stop&exit."""
-        self._run_jobs_thread_active = False
-        self.exited_prematurely = True
-
-    def kill(self):
-        self.stop()
-        for job in self._active:
-            job.job_runner.kill()
-
-
-class IterationCfg():
-
-    def __init__(self, target):
-        self.target = target # The number or weight of sims to run
-        self.spawn_count = 1
-
-        # Used for display at end
-        self.jobs = []
-
-    def inc(self, job):
-        self.spawn_count += 1
-        self.jobs.append(job)
-
-    def __lt__(self, other):
-        return self.jobs[0].name < other.jobs[0].name
-
-
-def print_summary(rcfg, vcomp_jobs, icfgs, jm):
-    table_data = [("bench", "test", "passed", "skipped", "failed", "logs")]
-    separator = [""] * len(table_data[0])
-    table_data.append(separator)
-
-    total_passed = 0
-    total_skipped = 0
-    total_failed = 0
-
-    last = len(rcfg.all_vcomp) - 1
-    for i, (vcomp_name, (icfgs, test_list)) in enumerate(rcfg.all_vcomp.items()):
-        vcomp = vcomp_jobs[vcomp_name]
-        table_data.append(
-            (vcomp.name, "vcomp", '1' if vcomp.jobstatus.successful else '',
-             '1' if vcomp.jobstatus == vcomp.jobstatus.SKIPPED else '', '1' if not vcomp.jobstatus.successful else '',
-             '' if vcomp.jobstatus.successful else str(vcomp.log_path)))
-        if vcomp.jobstatus == vcomp.jobstatus.PASSED:
-            total_passed += 1
-        elif vcomp.jobstatus == vcomp.jobstatus.FAILED:
-            total_failed += 1
-        else:
-            total_skipped += 1
-
-        if rcfg.options.no_run:
-            continue
-
-        icfgs.sort()
-        for icfg in icfgs:
-            if not icfg.jobs[0].vcomper is vcomp:
-                continue
-            passed = [j for j in icfg.jobs if j.jobstatus.completed and j.jobstatus.successful]
-            failed = [j for j in icfg.jobs if j.jobstatus == j.jobstatus.FAILED]
-            skipped = [j for j in icfg.jobs if j.jobstatus not in [j.jobstatus.FAILED, j.jobstatus.PASSED]]
-
-            total_passed += len(passed)
-            total_failed += len(failed)
-            total_skipped += len(skipped)
-
-            try:
-                assert len(passed) + len(failed) + len(skipped) == len(icfg.jobs), print(
-                    len(passed), len(failed), len(skipped), len(icfg.jobs))
-            except AssertionError as exc:
-                if not jm.exited_prematurely:
-                    raise exc
-
-            table_data.append(
-                ("", icfg.jobs[0].name, str(len(passed)) if passed else "", str(len(skipped)) if skipped else "",
-                 str(len(failed)) if failed else "", ""))
-            for j in failed:
-                table_data.append(("", "", "", "", "", j.log_path if j.log_path else ''))
-        if i != last:
-            table_data.append(separator)
-
-    # Check that entries are consistent
-    assert all(len(i) == len(table_data[0]) for i in table_data)
-    columns = list(zip(*table_data))
-    column_widths = [max([len(cell) for cell in col]) for col in columns]
-    formatter = " " * LOGGER_INDENT + "  ".join(
-        ["{{:{}{}s}}".format('>' if i in [2, 3, 4] else '', c) for i, c in enumerate(column_widths)])
-    for i, entry in enumerate(table_data):
-        if entry == separator:
-            table_data[i] = ['-' * cw for cw in column_widths]
-    table_data_formatted = [formatter.format(*i) for i in table_data]
-    rcfg.log.summary("Job Results\n%s", "\n".join(table_data_formatted))
-
-    table_data = [("", "", "passed", "skipped", "failed", "")]
-    table_data.append(['-' * len(i) for i in table_data[0]])
-    table_data.append(("", "", str(total_passed), str(total_skipped), str(total_failed), ""))
-    table_data_formatted = [formatter.format(*i) for i in table_data]
-    rcfg.log.summary("Simulation Summary\n%s", "\n".join(table_data_formatted))
-
-
 def main(rcfg):
     """
     Parameters
@@ -2108,22 +1151,22 @@ def main(rcfg):
     btcj_jobs = []
     btbj_jobs = []
 
-    bazel_shutdown_job = BazelShutdownJob(rcfg)
+    bazel_shutdown_job = job_lib.BazelShutdownJob(rcfg)
 
     for vcomp, test_list in rcfg.all_vcomp.items():
         vcomper = VCompJob(rcfg, vcomp)
         vcomp_jobs[vcomp] = vcomper
 
-        btbj = BazelTBJob(rcfg, vcomp, vcomper)
+        btbj = job_lib.BazelTBJob(rcfg, vcomp, vcomper)
         btbj_jobs.append(btbj)
 
         tests = []
         icfgs = []
         for test, iterations in test_list.items():
-            icfg = IterationCfg(iterations)
+            icfg = rv_utils.IterationCfg(iterations)
             icfgs.append(icfg)
 
-            btcj = BazelTestCfgJob(rcfg, test, vcomper)
+            btcj = job_lib.BazelTestCfgJob(rcfg, test, vcomper)
             btcj_jobs.append(btcj)
 
             t = TestJob(rcfg, test, vcomper=vcomper, icfg=icfg, btcj=btcj)
@@ -2150,7 +1193,13 @@ def main(rcfg):
             rcfg.log.critical("--seed can only be used if a single test is run")
 
     try:
-        jm = JobManager()
+        jm_opts = {
+            'parallel_max': options.parallel_max,
+            'parallel_interval': options.parallel_interval,
+            'idle_print_seconds': options.idle_print_seconds,
+            'quit_count': options.quit_count
+        }
+        jm = job_lib.JobManager(jm_opts, log)
 
         for job in btbj_jobs:
             if options.no_compile:
@@ -2205,7 +1254,7 @@ def main(rcfg):
         jm.kill()
         log.critical("Exiting due to keyboard interrupt")
 
-    print_summary(rcfg, vcomp_jobs, icfgs, jm)
+    rv_utils.print_summary(rcfg, vcomp_jobs, icfgs, jm)
 
     failures = {}
     for bench, (icfgs, test_list) in rcfg.all_vcomp.items():
@@ -2226,5 +1275,5 @@ if __name__ == '__main__':
     options = parse_args(sys.argv[1:])
     verbosity = cmn_logging.DEBUG if options.tool_debug else cmn_logging.INFO
     log = cmn_logging.build_logger("sim", level=verbosity, use_color=options.use_color, filehandler="simmer.log")
-    rcfg = RegressionConfig(options, log)
+    rcfg = regression.RegressionConfig(options, log)
     main(rcfg)
