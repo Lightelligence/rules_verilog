@@ -15,7 +15,7 @@ import stat
 import subprocess
 
 ################################################################################
-# bigger lib, so better to place this later for dependency ordering
+# Bigger libraries (better to place these later for dependency ordering
 import jinja2
 
 ################################################################################
@@ -69,7 +69,6 @@ function testFunction {
 
  {% for socket_name, socket_command, socket_file in sockets %}
     ##################################################
-    cd $PROJ_DIR
     # Remove previous socket file if it exists
     rm -f {{ socket_file }}
     # spawn {{ socket_name }} socket

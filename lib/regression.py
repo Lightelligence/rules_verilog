@@ -1,6 +1,6 @@
 #!/usr/bin/env python
-"""Regression config objec definition."""
 
+################################################################################
 # standard lib imports
 import fnmatch
 import os
@@ -10,6 +10,7 @@ import subprocess
 import sys
 from tempfile import TemporaryFile
 
+################################################################################
 # rules_verilog lib imports
 from lib import rv_utils
 

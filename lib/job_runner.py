@@ -1,6 +1,8 @@
 #!/usr/bin/env python
-"""JobStatus class definition."""
+"""Definitions for Job-running and Job-related classes."""
 
+################################################################################
+# standard lib imports
 import bisect
 import datetime
 import enum
