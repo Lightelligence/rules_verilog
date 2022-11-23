@@ -590,7 +590,7 @@ def parse_args(argv):
     if options.parallel_max == 0:
         options.parallel_max = int(SIM_LICENSES)
     else:
-        if options.parallel_max > SIM_LICENSES:
+        if options.parallel_max > int(SIM_LICENSES):
             print('-E- parse_args: --parallel-max is greater than available licenses')
             sys.exit(99)
     options.proj_dir = PROJ_DIR
