@@ -6,7 +6,7 @@ _SHELLS_DOC = """List of verilog_rtl_shell Labels.
 For each Label, a gumi define will be placed on the command line to use this shell instead of the original module.
 This requires that the original module was instantiated using \\`gumi_<module_name> instead of just <module_name>."""
 
-def create_flist_content(ctx, gumi_path, allow_library_discovery, no_synth = False):
+def create_flist_content(ctx, gumi_path, allow_library_discovery, no_synth = False, makelib = ""):
     """Create the content of a '.f' file.
 
     Args:
@@ -40,8 +40,12 @@ def create_flist_content(ctx, gumi_path, allow_library_discovery, no_synth = Fal
     # Using dirname may result in bazel-out included in path
     libdir = depset([f.short_path[:-len(f.basename) - 1] for f in ctx.files.modules]).to_list()
 
-    #if len(libdir):
     flist_content.append(gumi_path)
+
+    # if using makelib, start here
+    if len(makelib):
+        flist_content.append("-makelib")
+        flist_content.append(makelib)
 
     if not no_synth:
         if allow_library_discovery:
@@ -60,6 +64,10 @@ def create_flist_content(ctx, gumi_path, allow_library_discovery, no_synth = Fal
 
         for f in ctx.files.direct:
             flist_content.append(f.short_path)
+
+    # if using makelib, terminate here
+    if len(makelib):
+        flist_content.append("-endlib")
 
     flist_content.append("")
     return flist_content
@@ -130,7 +138,7 @@ def _verilog_rtl_library_impl(ctx):
     elif not (ctx.attr.gumi_file_override == None):
         gumi_path = ctx.file.gumi_file_override.short_path
 
-    flist_content = create_flist_content(ctx, gumi_path = gumi_path, allow_library_discovery = False)
+    flist_content = create_flist_content(ctx, gumi_path = gumi_path, allow_library_discovery = False, makelib = ctx.attr.makelib)
 
     last_module = None
     for m in ctx.files.modules:
@@ -147,7 +155,6 @@ def _verilog_rtl_library_impl(ctx):
 
     trans_srcs = get_transitive_srcs(srcs, ctx.attr.deps, VerilogInfo, "transitive_sources", allow_other_outputs = True)
     trans_flists = get_transitive_srcs([ctx.outputs.flist], ctx.attr.deps, VerilogInfo, "transitive_flists", allow_other_outputs = False)
-
     trans_dpi = get_transitive_srcs([], ctx.attr.deps, VerilogInfo, "transitive_dpi", allow_other_outputs = False)
 
     runfiles_list = trans_srcs.to_list() + trans_flists.to_list() + trans_dpi.to_list()
@@ -236,6 +243,11 @@ verilog_rtl_library = rule(
             doc = "A list of strings of module names to create gumi defines.\n" +
                   "If empty (default), the modules variable is used instead.\n" +
                   "Useful when using 'direct' or 'lib_files' or to limit the defines created when using a glob in 'modules'",
+        ),
+        "makelib": attr.string(
+            default = "",
+            doc = "Used to specify that this RTL lib should be compiled into its own library.\n" +
+                  "String value specified here is used as the name of the compile lib."
         ),
     },
     outputs = {
