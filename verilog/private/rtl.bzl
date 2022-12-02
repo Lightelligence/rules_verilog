@@ -247,7 +247,7 @@ verilog_rtl_library = rule(
         "makelib": attr.string(
             default = "",
             doc = "Used to specify that this RTL lib should be compiled into its own library.\n" +
-                  "String value specified here is used as the name of the compile lib."
+                  "String value specified here is used as the name of the compile lib.",
         ),
     },
     outputs = {
