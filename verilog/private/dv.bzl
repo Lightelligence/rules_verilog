@@ -229,11 +229,24 @@ def _verilog_dv_tb_impl(ctx):
     defines.update(ctx.attr.defines)
     defines.update(gather_shell_defines(ctx.attr.shells))
 
+    top = "tb_top"
+    vcs_extra_compile_args = []
+    xrun_extra_compile_args = []
+    if len(ctx.attr.verilog_config):
+        top = ctx.attr.verilog_config.keys()[0]
+        cfg = ctx.attr.verilog_config[top]
+        vcs_extra_compile_args.append(cfg)
+        xrun_extra_compile_args.append("-compcnfg {}".format(cfg))
+    vcs_extra_compile_args.append("-top {}".format(top))
+    xrun_extra_compile_args.append("-top {}".format(top))
+    vcs_extra_compile_args.extend(ctx.attr.extra_compile_args)
+    xrun_extra_compile_args.extend(ctx.attr.extra_compile_args)
+
     ctx.actions.expand_template(
         template = ctx.file._compile_args_template_vcs,
         output = ctx.outputs.compile_args_vcs,
         substitutions = {
-            "{COMPILE_ARGS}": ctx.expand_location("\n".join(ctx.attr.extra_compile_args), targets = ctx.attr.extra_runfiles),
+            "{COMPILE_ARGS}": ctx.expand_location("\n".join(vcs_extra_compile_args), targets = ctx.attr.extra_runfiles),
             "{DEFINES}": "\n".join(["+define+{}{}".format(key, value) for key, value in defines.items()]),
             "{FLISTS}": flists_to_arguments(ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_flists", "\n-f"),
         },
@@ -242,7 +255,7 @@ def _verilog_dv_tb_impl(ctx):
         template = ctx.file._compile_args_template_xrun,
         output = ctx.outputs.compile_args_xrun,
         substitutions = {
-            "{COMPILE_ARGS}": ctx.expand_location("\n".join(ctx.attr.extra_compile_args), targets = ctx.attr.extra_runfiles),
+            "{COMPILE_ARGS}": ctx.expand_location("\n".join(xrun_extra_compile_args), targets = ctx.attr.extra_runfiles),
             "{DEFINES}": "\n".join(["-define {}{}".format(key, value) for key, value in defines.items()]),
             "{FLISTS}": flists_to_arguments(ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_flists", "\n-f"),
         },
@@ -335,6 +348,10 @@ verilog_dv_tb = rule(
         "extra_runfiles": attr.label_list(
             allow_files = True,
             doc = "Additional files that need to be passed as runfiles to bazel. Most commonly used for files referred to by extra_compile_args or extra_runtime_args.",
+        ),
+        "verilog_config": attr.string_dict(
+            doc = "Key/value pair where the key represents the name of the config object,\n" +
+                  "and the value represents a relative pointer to the config .v file.",
         ),
         "_default_sim_opts_xrun": attr.label(
             allow_single_file = True,
