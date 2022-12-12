@@ -6,7 +6,6 @@
     -libext .svh \
     -libext .v \
     -libext .vams \
-    -disable_sem2009 \
     -timescale 100fs/100fs \
     -vtimescale 100fs/100fs \
     -define TIMESCALE_STEP_FS=100 \

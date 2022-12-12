@@ -43,7 +43,6 @@ fi
     -libext .svh \
     -libext .v \
     -libext .vams \
-    -disable_sem2009 \
     -enable_single_yvlib \
     -licqueue \
     -timescale 100fs/100fs \
