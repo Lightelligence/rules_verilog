@@ -49,7 +49,6 @@ fi
     -c '-libext\ .svh' \
     -c '-libext\ .v' \
     -c '-libext\ .vams' \
-    -c '-disable_sem2009' \
     -c '-enable_single_yvlib' \
     -c '-licqueue' \
     -c '-timescale\ 100fs/100fs' \

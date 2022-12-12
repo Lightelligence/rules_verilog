@@ -180,7 +180,7 @@ cd {{bazel_runfiles_main}} && \\
     {% endif -%}
     -partcomp -pcmakeprof -j4 -reportstats \\
     -lca -lrt -simprofile time \\
-    -top tb_top -ntb_opts uvm-1.2 \\
+    -ntb_opts uvm-1.2 \\
     +lint=PCWM-L,TFIPC-L,PCWM \\
     -xlrm floating_pnt_constraint \\
     -xlrm uniq_prior_final \\
