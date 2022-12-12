@@ -6,7 +6,6 @@
 -elaborate
 -access rwc
 -define TBV
--top tb_top
 -nowarn BADPRF
 -nowarn CUVIHR
 -nowarn DSEMEL
