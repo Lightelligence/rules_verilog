@@ -232,6 +232,7 @@ def _verilog_dv_tb_impl(ctx):
     top = "tb_top"
     vcs_extra_compile_args = []
     xrun_extra_compile_args = []
+    pldm_ice_extra_compile_args = []
     if len(ctx.attr.verilog_config):
         top = ctx.attr.verilog_config.keys()[0]
         cfg = ctx.attr.verilog_config[top]
@@ -241,6 +242,7 @@ def _verilog_dv_tb_impl(ctx):
     xrun_extra_compile_args.append("-top {}".format(top))
     vcs_extra_compile_args.extend(ctx.attr.extra_compile_args)
     xrun_extra_compile_args.extend(ctx.attr.extra_compile_args)
+    pldm_ice_extra_compile_args.extend(ctx.attr.extra_compile_args)
 
     ctx.actions.expand_template(
         template = ctx.file._compile_args_template_vcs,
@@ -264,7 +266,7 @@ def _verilog_dv_tb_impl(ctx):
         template = ctx.file._compile_args_template_pldm_ice,
         output = ctx.outputs.compile_args_pldm_ice,
         substitutions = {
-            "{COMPILE_ARGS}": ctx.expand_location("\n".join(ctx.attr.extra_compile_args), targets = ctx.attr.extra_runfiles),
+            "{COMPILE_ARGS}": ctx.expand_location("\n".join(pldm_ice_extra_compile_args), targets = ctx.attr.extra_runfiles),
             "{DEFINES}": "\n".join(["+define+{}{}".format(key, value) for key, value in defines.items()]),
             "{FLISTS}": flists_to_arguments(ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_flists", "\n-f"),
         },
@@ -290,7 +292,7 @@ def _verilog_dv_tb_impl(ctx):
 
     trans_srcs = get_transitive_srcs([], ctx.attr.deps + ctx.attr.shells, VerilogInfo, "transitive_sources", allow_other_outputs = True)
     trans_flists = get_transitive_srcs([], ctx.attr.deps + ctx.attr.shells, VerilogInfo, "transitive_flists", allow_other_outputs = False)
-    out_deps = depset([ctx.outputs.compile_args_vcs, ctx.outputs.compile_args_xrun, ctx.outputs.runtime_args, ctx.outputs.compile_warning_waivers, ctx.outputs.executable])
+    out_deps = depset([ctx.outputs.compile_args_vcs, ctx.outputs.compile_args_xrun, ctx.outputs.compile_args_pldm_ice, ctx.outputs.runtime_args, ctx.outputs.compile_warning_waivers, ctx.outputs.executable])
     all_files = depset([], transitive = [trans_srcs, trans_flists, out_deps])
 
     return [
