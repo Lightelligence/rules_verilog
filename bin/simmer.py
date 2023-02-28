@@ -945,7 +945,7 @@ class TestJob(Job):
                 sim_opts += " +fsdb+autoflush "
             sim_opts += " -input {} ".format(waves_tcl)
             options.probes = options.waves if options.waves != [] else [default_capture]
-            if options.wave_delta is True;
+            if options.wave_delta is True:
                 options.delta = "-event"
             with open(waves_tcl, 'w') as filep:
                 tmp = locals()
