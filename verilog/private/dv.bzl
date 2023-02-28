@@ -257,7 +257,7 @@ def _verilog_dv_tb_impl(ctx):
         substitutions = {
             "{COMPILE_ARGS}": ctx.expand_location("\n".join(xrun_extra_compile_args), targets = ctx.attr.extra_runfiles),
             "{DEFINES}": "\n".join(["-define {}{}".format(key, value) for key, value in defines.items()]),
-            "{FLISTS}": flists_to_arguments(ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_flists", "\n-f"),
+            "{FLISTS}": flists_to_arguments(ctx.attr.deps + ctx.attr.shells, VerilogInfo, "transitive_flists", "\n-f"),
         },
     )
     ctx.actions.expand_template(
