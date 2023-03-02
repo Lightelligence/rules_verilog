@@ -893,6 +893,7 @@ class TestJob(Job):
             sockets.append((socket_name, socket_command, socket_file))
 
         if options.coverage:
+            sim_opts += ' -covoverwrite '
             sim_opts += ' -covworkdir {} '.format(self.vcomper.cov_work_dir)
             sim_opts += ' -covbaserun {} '.format(self.name)
             if 'A' in options.coverage or 'U' in options.coverage:
