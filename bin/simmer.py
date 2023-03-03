@@ -877,6 +877,8 @@ class TestJob(Job):
         self.job_dir = os.path.join(self.rcfg.regression_dir, simname)
         self._log_path = os.path.join(self.job_dir, self.LOG_NAME)
 
+        sim_opts += " +SIMRESULTS={} ".format(self.job_dir)
+
         super(TestJob, self).pre_run()
 
         sockets = []
