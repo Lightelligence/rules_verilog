@@ -34,7 +34,7 @@ SIM_CMD_TEMPLATE = jinja2.Template("""
 run {{ options.wave_start }} ns
 {% endif -%}
 {% if options.wave_type == 'shm' -%}
-database -open -shm shm_db -into {{ waves_db }} -default
+database -shm -open shm_db -into {{ waves_db }} -default {{ options.delta }}
 {% for probe in options.probes -%}
 probe -database shm_db {{ probe }} -all -dynamic -memories -depth all -packed {{ options.probe_packed }} -unpacked {{ options.probe_unpacked }}
 {% endfor -%}
@@ -313,6 +313,10 @@ def parse_args(argv):
                         type=int,
                         default=None,
                         help='Specify the sim time in ns to start the waveform collection.')
+    gdebug.add_argument('--wave-delta',
+                        default=False,
+                        action='store_true',
+                        help='Capture delta-cycles for SHM waveform types.')
     gdebug.add_argument('--probe-packed',
                         type=int,
                         default=2048,
@@ -942,6 +946,8 @@ class TestJob(Job):
                 sim_opts += " +fsdb+autoflush "
             sim_opts += " -input {} ".format(waves_tcl)
             options.probes = options.waves if options.waves != [] else [default_capture]
+            if options.wave_delta is True:
+                options.delta = "-event"
             with open(waves_tcl, 'w') as filep:
                 tmp = locals()
                 del tmp['self']
