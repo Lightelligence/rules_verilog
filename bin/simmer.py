@@ -332,7 +332,7 @@ def parse_args(argv):
     gdebug.add_argument('--profile',
                         default=False,
                         action='store_true',
-                        help='Dump simulation profiling information to stdout.')
+                        help='Dump simulation profiling information to file. (Cadence only.)')
     gdebug.add_argument('--verbosity',
                         type=str,
                         default=None,
@@ -997,6 +997,8 @@ class TestJob(Job):
         if options.mce:
             sim_opts += " -mce "
             sim_opts += " -mce_nacc_module_with_strength_keywords 0 "
+        if options.profile:
+            sim_opts += " -profile "
 
         sim_opts += " -f {} ".format(self.vcomper.bazel_runtime_args)
 
