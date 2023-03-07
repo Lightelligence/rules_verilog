@@ -30,6 +30,7 @@ error_signature = [
     r"Warning-.SVART-NAFRLTS",
     r"Warning-.FCIELIE",
     r"Warning:.*AxiPC.sv",
+    r"Warning: Unknown pin",
     r"Error!!",
     r"Error:",
     r"ERROR..FAILURE",
