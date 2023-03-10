@@ -2,7 +2,9 @@
 -uvm
 -64bit
 -verbose
+-newperf
 -licqueue
+-plusperf
 -elaborate
 -access rwc
 -define TBV

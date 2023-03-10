@@ -60,6 +60,7 @@ run
 
 SIM_TEMPLATE = jinja2.Template("""#!/bin/bash
 export PROJ_DIR={{ job.vcomper.rcfg.proj_dir }}
+export SIMRESULTS={{ job.job_dir }}
 
 ARGS=$@
 
@@ -67,7 +68,8 @@ function testFunction {
     # Variable to accumulate return codes
     declare -i result=0
 
- {% for socket_name, socket_command, socket_file in sockets %}
+ {%- for socket_name, socket_command, socket_file in sockets %}
+
     ##################################################
     # Remove previous socket file if it exists
     rm -f {{ socket_file }}
@@ -86,11 +88,19 @@ function testFunction {
            exit 1
         fi
     done
- {% endfor %}
+ {%- endfor %}
+
+ {%- if pre_run != '' %}
+
+    ##################################################
+    # Pre Simulation Command
+    cd $PROJ_DIR
+    bazel run {{ pre_run }} | tee {{ job.job_dir }}/pre_run.stdout
+ {%- endif %}
 
     ##################################################
     # Main Simulation
-    cd {{ job.job_dir }}
+    cd $SIMRESULTS
     uname -n
     echo -n "# " >> {{ testscript }} ; uname -n >> {{ testscript }}
     ln -snf {{ job.vcomper.bazel_runfiles_main }} bazel_runfiles_main
@@ -332,7 +342,7 @@ def parse_args(argv):
     gdebug.add_argument('--profile',
                         default=False,
                         action='store_true',
-                        help='Dump simulation profiling information to stdout.')
+                        help='Dump simulation profiling information to file. (Cadence only.)')
     gdebug.add_argument('--verbosity',
                         type=str,
                         default=None,
@@ -926,6 +936,8 @@ class TestJob(Job):
         bazel_test_cfg_sim_args = ["".join(btcsa) for btcsa in bazel_test_cfg_sim_args.items()]
         sim_opts += ' ' + (' '.join(bazel_test_cfg_sim_args)).replace('\"', ' ')
 
+        pre_run = dynamic_args['pre_run']
+
         default_capture = 'tb_top'
         waves_db = self.job_dir
         waves_tcl = os.path.join(self.job_dir, "waves.tcl")
@@ -997,6 +1009,8 @@ class TestJob(Job):
         if options.mce:
             sim_opts += " -mce "
             sim_opts += " -mce_nacc_module_with_strength_keywords 0 "
+        if options.profile:
+            sim_opts += " -profile "
 
         sim_opts += " -f {} ".format(self.vcomper.bazel_runtime_args)
 
