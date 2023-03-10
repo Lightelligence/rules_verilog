@@ -75,7 +75,7 @@ def _verilog_dv_test_cfg_impl(ctx):
         "sim_opts": sim_opts,
         "uvm_testname": uvm_testname,
         "tags": ctx.attr.tags,
-        "pre_run": pre_run
+        "pre_run": pre_run,
     }
     out = ctx.outputs.dynamic_args
     ctx.actions.write(
@@ -140,7 +140,7 @@ verilog_dv_test_cfg = rule(
         "pre_run": attr.string(
             doc = "Simmer has the ability to execute a user-specified bazel run command before starting the RTL simulation process.\n" +
                   "This attribute is where the user can define that bazel run command, on a per-test basis.\n" +
-                  "For example, if the use wants to run 'bazel run //foo:bar' before their simulation, set this attribute to '//foo:bar'."
+                  "For example, if the use wants to run 'bazel run //foo:bar' before their simulation, set this attribute to '//foo:bar'.",
         ),
         "timeout": attr.int(
             default = -1,
