@@ -8,6 +8,7 @@ DVTestInfo = provider(fields = {
     "tb": "The verilog_dv_tb (verilog compile) associated with this test. Must be a Label of type verilog_dv_tb.",
     "tags": "Additional tags to be able to filter in simmer.",
     "timeout": "Duration in minutes before the test will be killed due to timeout.",
+    "pre_run": "Bazel run command that can be executed immediately before dv_tb simulation.",
 })
 
 DVTBInfo = provider(fields = {
@@ -18,6 +19,7 @@ def _verilog_dv_test_cfg_impl(ctx):
     parent_uvm_testnames = [dep[DVTestInfo].uvm_testname for dep in reversed(ctx.attr.inherits) if hasattr(dep[DVTestInfo], "uvm_testname")]
     parent_tbs = [dep[DVTestInfo].tb for dep in reversed(ctx.attr.inherits) if hasattr(dep[DVTestInfo], "tb")]
     parent_timeouts = [dep[DVTestInfo].timeout for dep in reversed(ctx.attr.inherits) if hasattr(dep[DVTestInfo], "timeout")]
+    parent_pre_run = [dep[DVTestInfo].pre_run for dep in reversed(ctx.attr.inherits) if hasattr(dep[DVTestInfo], "pre_run")]
 
     sim_opts = {}
 
@@ -50,11 +52,18 @@ def _verilog_dv_test_cfg_impl(ctx):
     else:
         tb = parent_tbs[0]
 
+    pre_run = None
+    if ctx.attr.pre_run:
+        pre_run = ctx.attr.pre_run
+    elif len(parent_pre_run):
+        pre_run = parent_pre_run[0]
+
     provider_args["uvm_testname"] = uvm_testname
     provider_args["tb"] = tb
     provider_args["timeout"] = timeout
     provider_args["sim_opts"] = sim_opts
     provider_args["tags"] = ctx.attr.tags
+    provider_args["pre_run"] = pre_run
 
     for socket_name, socket_command in ctx.attr.sockets.items():
         if "{socket_file}" not in socket_command:
@@ -66,6 +75,7 @@ def _verilog_dv_test_cfg_impl(ctx):
         "sim_opts": sim_opts,
         "uvm_testname": uvm_testname,
         "tags": ctx.attr.tags,
+        "pre_run": pre_run
     }
     out = ctx.outputs.dynamic_args
     ctx.actions.write(
@@ -126,6 +136,11 @@ verilog_dv_test_cfg = rule(
                   "The socket_file is a path to a unique temporary file in the simulation results directory created by simmer.\n" +
                   "The socket_command is a bash command that must contain a python string formatter of \"{socket_file}\".\n" +
                   "The socket_command will be run from the root of the project tree.",
+        ),
+        "pre_run": attr.string(
+            doc = "Simmer has the ability to execute a user-specified bazel run command before starting the RTL simulation process.\n" +
+                  "This attribute is where the user can define that bazel run command, on a per-test basis.\n" +
+                  "For example, if the use wants to run 'bazel run //foo:bar' before their simulation, set this attribute to '//foo:bar'."
         ),
         "timeout": attr.int(
             default = -1,
