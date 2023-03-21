@@ -90,7 +90,7 @@ function testFunction {
     done
  {%- endfor %}
 
- {%- if pre_run != '' %}
+ {%- if pre_run is not none %}
 
     ##################################################
     # Pre Simulation Command
