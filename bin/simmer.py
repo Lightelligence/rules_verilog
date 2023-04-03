@@ -1143,7 +1143,7 @@ class TestJob(Job):
     def _get_stats_from_log_file(self):
         stats_re = re.compile(
             '.*Test Duration: (?P<duration>[0-9]+:[0-9]+:[0-9]+).*Average cycles/sec: (?P<cps>[0-9]+\.[0-9]+).*')
-        with open(self._log_path, 'r') as log_file:
+        with open(self._log_path, 'r', encoding="utf8", errors='ignore') as log_file:
             for line in log_file:
                 match = stats_re.match(line)
                 if match:
