@@ -83,7 +83,8 @@ def _verilog_rtl_library_impl(ctx):
         pass
     else:
         for src in srcs:
-            if "_pkg" in src.basename:
+            _, ext = src.path.rsplit(".", 1)
+            if ext not in ["h"] and "_pkg" in src.basename:
                 fail("Package files should not declared in a verilog_rtl_library. Use a verilog_rtl_pkg instead. {} is declared in {}".format(src, ctx.label))
 
     if ctx.attr.is_shell_of:
