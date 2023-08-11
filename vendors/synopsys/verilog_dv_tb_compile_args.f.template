@@ -1,0 +1,4 @@
+-sverilog
+{COMPILE_ARGS}
+{DEFINES}
+{FLISTS}

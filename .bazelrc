@@ -1,0 +1,8 @@
+# Cadence Xcelium requires $HOME to be set
+test --action_env=HOME
+
+# Lightelligence Specific
+build --@rules_verilog//:verilog_dv_unit_test_command="runmod -t xrun --"
+build --@rules_verilog//:verilog_rtl_cdc_test_command="runmod -t jg --"
+build --@rules_verilog//:verilog_rtl_unit_test_command="runmod -t xrun --"
+build --@rules_verilog//:verilog_rtl_lint_test_command="runmod -t xrun --"
