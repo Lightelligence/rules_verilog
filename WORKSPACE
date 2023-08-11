@@ -1,9 +1,9 @@
 workspace(name = "rules_verilog")
 
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
-load("@rules_verilog//:deps.bzl", "verilog_dependencies")
+load("@rules_python//python:repositories.bzl", "py_repositories")
 
-verilog_dependencies()
+py_repositories()
 
 load("@rules_python//python:pip.bzl", "pip_install")
 

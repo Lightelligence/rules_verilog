@@ -34,9 +34,9 @@ SIM_CMD_TEMPLATE = jinja2.Template("""
 run {{ options.wave_start }} ns
 {% endif -%}
 {% if options.wave_type == 'shm' -%}
-database -shm -open shm_db -into {{ waves_db }} -default {{ options.delta }}
+database -open shm_db -shm -into {{ waves_db }} -default {{ options.delta }}
 {% for probe in options.probes -%}
-probe -database shm_db {{ probe }} -all -dynamic -memories -depth all -packed {{ options.probe_packed }} -unpacked {{ options.probe_unpacked }}
+probe -database shm_db {{ probe }} -all -memories -depth {{ options.depth_n }} -packed {{ options.probe_packed }} -unpacked {{ options.probe_unpacked }}
 {% endfor -%}
 run
 {% endif -%}
@@ -327,6 +327,10 @@ def parse_args(argv):
                         default=False,
                         action='store_true',
                         help='Capture delta-cycles for SHM waveform types.')
+    gdebug.add_argument('--depth-n',
+                        type=int,
+                        default=100,
+                        help='Probe hirarchical depth. Only used with --waves. Default is all')
     gdebug.add_argument('--probe-packed',
                         type=int,
                         default=2048,
@@ -949,7 +953,8 @@ class TestJob(Job):
                 waves_db = os.path.join(waves_db, "waves.vcd")
             if options.wave_type == 'fsdb':
                 waves_db = os.path.join(waves_db, "waves.fsdb")
-                verdi_pli = os.path.join(os.environ['VERDI_HOME'], 'share/PLI/IUS/LINUX64/boot',
+                verdi_pli = os.path.join(os.environ['VERDI_HOME'],
+                                         'share/PLI/IUS/LINUX64/boot',
                                          'debpli.so:novas_pli_boot')
                 sim_opts += " -loadpli1 {} ".format(verdi_pli)
                 sim_opts += " +UVM_VERDI_TRACE=UVM_AWARE+HIER+RAL+TLM+COMPWAVE "
