@@ -1,0 +1,13 @@
+# Code Owners for a file
+#filename @username1 @username2
+
+# All group members as Code Owners for a file
+#filename @groupname
+
+# All group members as Code Owners for a directory
+#directoryname/ @groupname
+
+# Code Owners for a directory
+#directoryname/ @username1 @username2
+
+* @lwang @glu @Fuqiang
