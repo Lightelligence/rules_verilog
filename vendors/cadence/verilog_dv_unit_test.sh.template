@@ -6,10 +6,10 @@
     -libext .svh \
     -libext .v \
     -libext .vams \
-    -timescale 100fs/100fs \
-    -vtimescale 100fs/100fs \
-    -define TIMESCALE_STEP_FS=100 \
-    -define TIMESCALE_PREC_FS=100 \
+    -timescale 1ps/1ps \
+    -vtimescale 1ps/1ps \
+    -define TIMESCALE_STEP_FS=1000 \
+    -define TIMESCALE_PREC_FS=1000 \
     -enable_single_yvlib \
     {DPI_LIBS} \
     {DEFAULT_SIM_OPTS} \
