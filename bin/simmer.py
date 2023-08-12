@@ -696,8 +696,8 @@ class VCompJob(Job):
             'UVM_REGEX_NO_DPI',
             'UVM_NO_DEPRECATED',
             'UVM_OBJECT_MUST_HAVE_CONSTRUCTOR',
-            'TIMESCALE_STEP_FS=100',
-            'TIMESCALE_PREC_FS=100',
+            'TIMESCALE_STEP_FS=1000',
+            'TIMESCALE_PREC_FS=1000',
         ]
         if options.simulator == 'vcs':
             additional_defines.extend(additional_vcs_defines)
