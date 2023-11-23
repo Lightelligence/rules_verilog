@@ -29,10 +29,11 @@ from lib import rv_utils
 
 log = None
 
-SIM_CMD_TEMPLATE = jinja2.Template("""
+WAVE_CMD_TEMPLATE = jinja2.Template("""
 {% if options.wave_start -%}
 run {{ options.wave_start }} ns
 {% endif -%}
+
 {% if options.wave_type == 'shm' -%}
 database -open shm_db -shm -into {{ waves_db }} -default {{ options.delta }}
 {% for probe in options.probes -%}
@@ -40,6 +41,7 @@ probe -database shm_db {{ probe }} -all -memories -depth {{ options.depth_n }} -
 {% endfor -%}
 run
 {% endif -%}
+
 {% if options.wave_type == 'vcd' -%}
 database -open -vcd vcd_db -into {{ waves_db }} -default
 {% for probe in options.probes -%}
@@ -47,6 +49,7 @@ probe -database vcd_db {{ probe }} -all -memories -depth all -vcd -packed {{ opt
 {% endfor -%}
 run
 {% endif -%}
+
 {% if options.wave_type == 'fsdb' -%}
 {% if options.simulator == 'xrun' -%}call {% endif -%}fsdbDumpfile {{ waves_db }}
 {% for probe in options.probes -%}
@@ -55,10 +58,20 @@ run
 {% if options.simulator == 'xrun' -%}call {% endif -%}fsdbDumpSVA 0 {{ probe }}
 {% endfor -%}
 run
+exit
 {% endif -%}
+
+{% if options.wave_type == 'ida' -%}
+ida_database -open -name {{ waves_db }} -wave_glitch_recording
+ida_probe -log
+ida_probe -wave -wave_probe_args="[scope -top] -all -memories -depth all"
+run
+exit
+{% endif -%}
+
 """)
 
-SIM_TEMPLATE = jinja2.Template("""#!/bin/bash
+SIM_TEMPLATE = jinja2.Template("""#!/usr/bin/env bash
 export PROJ_DIR={{ job.vcomper.rcfg.proj_dir }}
 export SIMRESULTS={{ job.job_dir }}
 
@@ -108,7 +121,7 @@ function testFunction {
   {% if options.simulator == 'vcs' -%}
     time runmod -t vcs -- {{ vcomp_dir }}/simv {{ gui }} $ARGS {{ sim_opts }} | tee {{ job._logpath }}
   {% endif -%}
-  {% if options.simulator == 'xrun' -%} 
+  {% if options.simulator == 'xrun' -%}
     time runmod -t xrun -- -l {{ job.job_dir}}/cmp.log {{ gui }} -R -xmlibdirname {{ job.vcomper.job_dir }} $ARGS {{ sim_opts }} -f external/rules_verilog/vendors/cadence/verilog_dv_default_sim_opts.f | tee {{ job._log_path }}
   {% endif -%}
     SIMULATION_PID=$!
@@ -158,7 +171,7 @@ testFunction
 
 """)
 
-RERUN_TEMPLATE = jinja2.Template("""#!/bin/bash
+RERUN_TEMPLATE = jinja2.Template("""#!/usr/bin/env bash
 shopt -s expand_aliases
 
 ARGS=$@
@@ -169,9 +182,9 @@ simmer -t {{ job.vcomper.name }}:{{ job.name }} --seed {{ seed }} {{ cmd_line_si
 
 """)
 
-COMPILE_TEMPLATE = jinja2.Template("""#!/bin/bash
+COMPILE_TEMPLATE = jinja2.Template("""#!/usr/bin/env bash
 
-cd {{bazel_runfiles_main}} && \\
+cd {{ bazel_runfiles_main }} && \\
   runmod -t {{ options.simulator }} -- \\
     {% if options.simulator == 'xrun' -%}
     -xmlibdirname {{ VCOMP_DIR }} \\
@@ -211,6 +224,7 @@ cd {{bazel_runfiles_main}} && \\
     {% if options.simulator == 'xrun' -%}
     +vpiSyncPerf \\
     -createdebugdb \\
+    -debug_opts verisium_pp \\
     {% endif -%}
     {% if options.simulator == 'vcs' -%}
     -kdb \\
@@ -231,7 +245,7 @@ cd {{bazel_runfiles_main}} && \\
     -l {{ VCOMP_DIR }}/cmp.log \\
 """)
 
-BUGGER_TEMPLATE = jinja2.Template("""#!/bin/bash
+BUGGER_TEMPLATE = jinja2.Template("""#!/usr/bin/env bash
 
 ARGS=$@
 
@@ -317,7 +331,7 @@ def parse_args(argv):
     gdebug.add_argument('--wave-type',
                         type=str,
                         default=None,
-                        choices=[None, 'shm', 'fsdb', 'vcd'],
+                        choices=[None, 'shm', 'fsdb', 'vcd', 'ida'],
                         help='Specify the waveform format')
     gdebug.add_argument('--wave-start',
                         type=int,
@@ -948,6 +962,9 @@ class TestJob(Job):
         if options.waves is not None:
             if options.wave_type == 'shm':
                 waves_db = os.path.join(waves_db, "waves.shm")
+            if options.wave_type == 'ida':
+                waves_db = os.path.join(waves_db, "waves.ida")
+                sim_opts += " -debug_opts verisium_pp "
             if options.wave_type == 'vcd':
                 default_capture = 'tb_top.dut'
                 waves_db = os.path.join(waves_db, "waves.vcd")
@@ -969,7 +986,7 @@ class TestJob(Job):
                 tmp = locals()
                 del tmp['self']
                 tmp['job'] = self
-                filep.write(SIM_CMD_TEMPLATE.render(**tmp))
+                filep.write(WAVE_CMD_TEMPLATE.render(**tmp))
         else:
             nwaves_tcl = os.path.join(self.job_dir, "nwaves.tcl")
             sim_opts += " -input {} ".format(nwaves_tcl)
@@ -1081,7 +1098,7 @@ class TestJob(Job):
             os.system("ln -snf %s .last_sim" % self.job_dir)
             log.debug("created link to sim dir as '.last_sim'")
 
-        self.main_cmdline = '/bin/bash %s' % (testscript)
+        self.main_cmdline = '/usr/bin/bash %s' % (testscript)
 
     def post_run(self):
         super(TestJob, self).post_run()
