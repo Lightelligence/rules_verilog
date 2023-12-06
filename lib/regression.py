@@ -9,6 +9,8 @@ import shlex
 import subprocess
 import sys
 from tempfile import TemporaryFile
+import datetime
+import json
 
 ################################################################################
 # rules_verilog lib imports
@@ -26,6 +28,7 @@ class RegressionConfig():
         self.options = options
         self.log = log
 
+        self.tests_to_tags = {}
         self.max_bench_name_length = 20
         self.max_test_name_length = 20
 
@@ -33,12 +36,15 @@ class RegressionConfig():
 
         self.proj_dir = self.options.proj_dir
         self.regression_dir = rv_utils.calc_simresults_location(self.proj_dir)
+
         if not os.path.exists(self.regression_dir):
             os.mkdir(self.regression_dir)
 
         self.invocation_dir = os.getcwd()
 
-        self.test_discovery()
+        if not self.options.no_compile or not os.path.exists(self.proj_dir + "/" + "all_vcomp.json") or not os.path.exists(self.proj_dir + "/" + "tests_to_tags.json"):
+            self.test_discovery_all()
+        self.test_discovery_match()
 
         total_tests = sum([iterations for vcomp in self.all_vcomp.values() for test, iterations in vcomp.items()])
         if total_tests == 0:
@@ -68,7 +74,27 @@ class RegressionConfig():
     def format_test_name(self, b, t, i):
         return "{:{}s}  {:{}s}  {:-4d}".format(b, self.max_bench_name_length, t, self.max_test_name_length, i)
 
-    def test_discovery(self):
+    def dict_to_json(self, d, j):
+        try:
+            with open(self.proj_dir + "/" + j, "w") as f:
+                json.dump(d, f, indent=4)
+        except Exception as e:
+            self.log.critical("Create '%s' file failed because '%s'", j, e)
+
+    def json_to_dict(self, j):
+        if os.path.exists(self.proj_dir + "/" + j):
+            try:
+                with open(self.proj_dir + "/" + j, "r") as f:
+                    bazel_data = f.read()
+            except Exception as e:
+                self.log.critical("Open '%s' file failed because '%s'", j, e)
+            d = json.loads(bazel_data)
+            return d
+        else:
+            self.log.critical("There is not '%s', Please compile first!", j)
+            sys.exit(0)
+
+    def test_discovery_all(self):
         """Look for all tests in the checkout and filter down to what was specified on the CLI"""
         self.log.summary("Starting test discovery")
         dtp = rv_utils.DatetimePrinter(self.log)
@@ -88,13 +114,12 @@ class RegressionConfig():
                 self.log.critical("bazel bench discovery failed: %s", stderr.decode('ascii'))
 
         dtp.stop_and_print()
-        all_vcomp = stdout.decode('ascii').split('\n')
-        all_vcomp = dict([(av, {}) for av in all_vcomp if av])
+        self.all_vcomp = stdout.decode('ascii').split('\n')
+        self.all_vcomp = dict([(av, {}) for av in self.all_vcomp if av])
 
-        tests_to_tags = {}
         vcomp_to_query_results = {}
 
-        for vcomp, tests in all_vcomp.items():
+        for vcomp, tests in self.all_vcomp.items():
             vcomp_path, _ = vcomp.split(':')
             test_wildcard = os.path.join(vcomp_path, "tests", "...")
             if self.options.allow_no_run:
@@ -124,7 +149,7 @@ class RegressionConfig():
             query_results = re.sub("\([a-z0-9]{7,64}\) *", "", query_results)
             vcomp_to_query_results[vcomp] = query_results
 
-        for vcomp, tests in all_vcomp.items():
+        for vcomp, tests in self.all_vcomp.items():
             query_results = vcomp_to_query_results[vcomp]
             cmd = "bazel build {} --aspects @rules_verilog//verilog/private:dv.bzl%verilog_dv_test_cfg_info_aspect".format(
                 query_results)
@@ -153,13 +178,13 @@ class RegressionConfig():
 
             matching_tests = [(mt.group('test'), eval("[%s]" % mt.group('tags'))) for mt in ttv
                               if mt.group('vcomp') == vcomp]
-            tests_to_tags.update(matching_tests)
+            self.tests_to_tags.update(matching_tests)
             tests.update(dict([(t[0], 0) for t in matching_tests]))
 
         table_output = []
         table_output.append(self.table_format("bench", "test", "count"))
         table_output.append(self.table_format("-----", "----", "-----"))
-        for vcomp, tests in all_vcomp.items():
+        for vcomp, tests in self.all_vcomp.items():
             bench = vcomp.split(':')[1]
             for i, (test_target, count) in enumerate(tests.items()):
                 test = test_target.split(':')[1]
@@ -169,6 +194,16 @@ class RegressionConfig():
                     table_output.append(self.table_format('', test, str(count)))
 
         self.log.debug("Tests available:\n%s", "\n".join(table_output))
+
+        #trans global dict to json
+        self.dict_to_json(self.all_vcomp, "all_vcomp.json")
+        self.dict_to_json(self.tests_to_tags, "tests_to_tags.json")
+
+    def test_discovery_match(self):
+        # read json file
+        if self.options.no_compile:
+            self.all_vcomp = self.json_to_dict("all_vcomp.json")
+            self.tests_to_tags = self.json_to_dict("tests_to_tags.json")
 
         # bti is bench-test-iteration
         for ta in self.options.tests:
@@ -194,17 +229,17 @@ class RegressionConfig():
                 tglob = btglob
 
             query = "*:{}".format(bglob) # Matching against a bazel label
-            vcomp_match = fnmatch.filter(all_vcomp.keys(), query)
+            vcomp_match = fnmatch.filter(self.all_vcomp.keys(), query)
 
             self.log.debug("Looking for tests matching %s", ta)
 
             for vcomp in vcomp_match:
-                tests = all_vcomp[vcomp]
+                tests = self.all_vcomp[vcomp]
                 query = "*:{}".format(tglob) # Matching against a bazel label
                 test_match = fnmatch.filter(tests, query)
                 for test in test_match:
                     # Filter tests againsts tags
-                    test_tags = set(tests_to_tags[test])
+                    test_tags = set(self.tests_to_tags[test])
                     if ta.tag and not ((ta.tag & test_tags) == ta.tag):
                         self.log.debug("  Skipping %s because it did not match --tag=%s", test, ta.tag)
                         continue
@@ -228,18 +263,18 @@ class RegressionConfig():
                     tests[test] = new_max
 
         # Now prune down all the tests and benches that aren't active
-        for vcomp, tests in all_vcomp.items():
-            all_vcomp[vcomp] = dict([(t, i) for t, i in tests.items() if i])
-        all_vcomp = dict([(vcomp, tests) for vcomp, tests in all_vcomp.items() if len(tests)])
+        for vcomp, tests in self.all_vcomp.items():
+            self.all_vcomp[vcomp] = dict([(t, i) for t, i in tests.items() if i])
+        self.all_vcomp = dict([(vcomp, tests) for vcomp, tests in self.all_vcomp.items() if len(tests)])
 
         table_output = []
         table_output.append(self.table_format("bench", "test", "count"))
         table_output.append(self.table_format("-----", "----", "-----"))
-        vcomps = list(all_vcomp.keys())
+        vcomps = list(self.all_vcomp.keys())
         vcomps.sort()
         for vcomp in vcomps:
             bench = vcomp.split(':')[1]
-            tests = all_vcomp[vcomp]
+            tests = self.all_vcomp[vcomp]
             test_targets = list(tests.keys())
             test_targets.sort()
             for i, test_target in enumerate(test_targets):
@@ -252,7 +287,7 @@ class RegressionConfig():
 
         self.log.info("Tests to run:\n%s", "\n".join(table_output))
 
-        self.all_vcomp = all_vcomp
+        #self.all_vcomp = all_vcomp
 
         if self.options.discovery_only:
             self.log.info("Ran with --discovery-only option. Exiting.")
