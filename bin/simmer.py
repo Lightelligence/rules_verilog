@@ -326,13 +326,17 @@ def parse_args(argv):
     gdebug.add_argument('--waves',
                         default=None,
                         nargs='*',
-                        help=('Enable waveform capture. Optionally pass a list of HDL '
+                        help=('aaa Enable waveform capture. Optionally pass a list of HDL '
                               'paths to reduce probe scope. Default is tb_top.'))
     gdebug.add_argument('--wave-type',
                         type=str,
                         default=None,
                         choices=[None, 'shm', 'fsdb', 'vcd', 'ida'],
                         help='Specify the waveform format')
+    gdebug.add_argument('--wave-tcl',
+                        type=str,
+                        default=None,
+                        help='Load the local wave.tcl file for waveform. Only used with --wave-tcl + path of wave.tcl')
     gdebug.add_argument('--wave-start',
                         type=int,
                         default=None,
@@ -958,7 +962,13 @@ class TestJob(Job):
 
         default_capture = 'tb_top'
         waves_db = self.job_dir
-        waves_tcl = os.path.join(self.job_dir, "waves.tcl")
+        if options.wave_tcl:
+          if os.path.exists(options.wave_tcl):
+            waves_tcl = options.wave_tcl
+          else:
+            raise ValueError("{} not exists".format(options.wave_tcl))
+        else:
+          waves_tcl = os.path.join(self.job_dir, "waves.tcl")
         if options.waves is not None:
             if options.wave_type == 'shm':
                 waves_db = os.path.join(waves_db, "waves.shm")
