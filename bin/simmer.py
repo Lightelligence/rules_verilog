@@ -326,7 +326,7 @@ def parse_args(argv):
     gdebug.add_argument('--waves',
                         default=None,
                         nargs='*',
-                        help=('aaa Enable waveform capture. Optionally pass a list of HDL '
+                        help=('Enable waveform capture. Optionally pass a list of HDL '
                               'paths to reduce probe scope. Default is tb_top.'))
     gdebug.add_argument('--wave-type',
                         type=str,
