@@ -11,6 +11,7 @@ import re
 LOGGER_INDENT = 8
 SIMRESULTS = os.environ.get('SIMRESULTS', '')
 
+
 class DatetimePrinter():
 
     def __init__(self, log):
@@ -40,6 +41,7 @@ class IterationCfg():
     def __lt__(self, other):
         return self.jobs[0].name < other.jobs[0].name
 
+
 def create_regression_log_file(path):
     target_folder = os.path.join(path, 'regression_results')
 
@@ -54,15 +56,15 @@ def create_regression_log_file(path):
 
     with open(log_file_path, 'w') as file:
         file.write("Regression log created at " + current_time)
-    
+
     print(f"Regression log created at: {log_file_path}")
     return log_file_path
 
 
 def print_summary(rcfg, vcomp_jobs, icfgs, jm):
     total_tests = sum([icfg.target for _, (icfgs, _) in rcfg.all_vcomp.items() for icfg in icfgs])
-    if total_tests>1:
-       REGRESSION_LOG_PATH = create_regression_log_file(rcfg.regression_dir)
+    if total_tests > 1:
+        REGRESSION_LOG_PATH = create_regression_log_file(rcfg.regression_dir)
 
     table_data = [("bench", "test", "passed", "skipped", "failed", "logs")]
     separator = [""] * len(table_data[0])
@@ -131,21 +133,20 @@ def print_summary(rcfg, vcomp_jobs, icfgs, jm):
             table_data[i] = ['-' * cw for cw in column_widths]
     table_data_formatted = [formatter.format(*i) for i in table_data]
     rcfg.log.summary("Job Results\n%s", "\n".join(table_data_formatted))
-    if total_tests>1:
-       with open(REGRESSION_LOG_PATH, 'a') as file:
-           formatted_string = "Job Results\n" + "\n".join(map(str, table_data_formatted))
-           file.write(formatted_string)      
+    if total_tests > 1:
+        with open(REGRESSION_LOG_PATH, 'a') as file:
+            formatted_string = "Job Results\n" + "\n".join(map(str, table_data_formatted))
+            file.write(formatted_string)
 
     table_data = [("", "", "passed", "skipped", "failed", "")]
     table_data.append(['-' * len(i) for i in table_data[0]])
     table_data.append(("", "", str(total_passed), str(total_skipped), str(total_failed), ""))
     table_data_formatted = [formatter.format(*i) for i in table_data]
     rcfg.log.summary("Simulation Summary\n%s", "\n".join(table_data_formatted))
-    if total_tests>1:
-       with open(REGRESSION_LOG_PATH, 'a') as file:
-           formatted_string = "\n" + "Simulation Summary\n" + "\n".join(map(str, table_data_formatted))
-           file.write(formatted_string)      
-
+    if total_tests > 1:
+        with open(REGRESSION_LOG_PATH, 'a') as file:
+            formatted_string = "\n" + "Simulation Summary\n" + "\n".join(map(str, table_data_formatted))
+            file.write(formatted_string)
 
 
 def calc_simresults_location(checkout_path):

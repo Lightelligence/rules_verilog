@@ -42,7 +42,9 @@ class RegressionConfig():
 
         self.invocation_dir = os.getcwd()
 
-        if not self.options.no_compile or not os.path.exists(self.proj_dir + "/" + "all_vcomp.json") or not os.path.exists(self.proj_dir + "/" + "tests_to_tags.json"):
+        if not self.options.no_compile or not os.path.exists(
+                self.proj_dir + "/" + "all_vcomp.json") or not os.path.exists(self.proj_dir + "/" +
+                                                                              "tests_to_tags.json"):
             self.test_discovery_all()
         self.test_discovery_match()
 
