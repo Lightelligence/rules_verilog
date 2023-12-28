@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+
+export PROJ_DIR={{ job.vcomper.rcfg.proj_dir }}
+export SIMRESULTS={{ job.job_dir }}
+
+ARGS=$@
+
+function testFunction {
+    # Variable to accumulate return codes
+    declare -i result=0
+
+ {%- for socket_name, socket_command, socket_file in sockets %}
+
+    ##################################################
+    # Remove previous socket file if it exists
+    rm -f {{ socket_file }}
+    # spawn {{ socket_name }} socket
+    {{ socket_command }} > {{ job.job_dir }}/{{ socket_name }}.log 2>&1 &
+    {{ socket_name|upper }}_PID=$!
+    echo "Socket {{ socket_name }} process: ${{ socket_name|upper }}_PID"
+    # Wait for socket to actually be created
+    while [ ! -e {{ socket_file }} ];
+    do
+        echo "Waiting for {{ socket_name }} to create {{ socket_file }}"
+        sleep 1
+        if ! ps -p ${{ socket_name|upper }}_PID > /dev/null
+        then
+           echo "Error {{ socket_name }} returned without creating {{ socket_file }} see {{ job.job_dir }}/{{ socket_name }}.log"
+           exit 1
+        fi
+    done
+ {%- endfor %}
+
+ {%- if pre_run is not none %}
+
+    ##################################################
+    # Pre Simulation Command
+    cd $PROJ_DIR
+    bazel run {{ pre_run }} | tee {{ job.job_dir }}/pre_run.stdout
+ {%- endif %}
+
+    ##################################################
+    # Main Simulation
+    cd $SIMRESULTS
+    uname -n
+    echo -n "# " >> {{ testscript }} ; uname -n >> {{ testscript }}
+    ln -snf {{ job.vcomper.bazel_runfiles_main }} bazel_runfiles_main
+    cd bazel_runfiles_main
+  {% if options.simulator == 'vcs' -%}
+    time runmod -t vcs -- {{ vcomp_dir }}/simv {{ gui }} $ARGS {{ sim_opts }} | tee {{ job._logpath }}
+  {% endif -%}
+  {% if options.simulator == 'xrun' -%}
+    time runmod -t xrun -- -l {{ job.job_dir }}/cmp.log {{ gui }} -R -xmlibdirname {{ job.vcomper.job_dir }} $ARGS {{ sim_opts }} -f external/rules_verilog/vendors/cadence/verilog_dv_default_sim_opts.f | tee {{ job._log_path }}
+  {% endif -%}
+    SIMULATION_PID=$!
+    wait $SIMULATION_PID
+    result+=$?
+    cd ../
+    echo "TEST END"
+
+    ##################################################
+    # Socket process exit code collection
+    declare -i socket_result=0
+ {%- for socket_name, socket_command, socket_file in sockets %}
+    wait ${{ socket_name|upper }}_PID
+    socket_result=$?
+    echo "socket {{ socket_name }} result: $socket_result"
+    if [ $socket_result -ne 0 ]; then
+      echo "%E- ERROR: {{ socket_name }} returned non-zero status"
+    fi
+    result+=socket_result
+ {% endfor %}
+
+ {% if options.skip_parse_sim_log == 0 -%}
+    ##################################################
+    # Parse simulation log
+    cd {{ job.job_dir }}
+    $PROJ_DIR/bazel-bin/external/rules_verilog/bin/check_test {{ job._log_path }}
+    result+=$?
+ {% endif -%}
+
+    return $result
+}
+
+function signal_exit {
+	echo  "CTRL-C trapped. Waiting for $myPID"
+}
+
+trap "echo trap_signal; signal_exit" TERM HUP INT USR1 USR2 1 2 3 15
+ps -p $$
+
+# This needs to be last in file or result shell returns will not be test pass/fail
+testFunction
+#sleep 20
+
+##################
+# Run invocations
+##################
