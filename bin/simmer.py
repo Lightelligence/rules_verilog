@@ -38,9 +38,9 @@ env = jinja2.Environment(loader=file_loader)
 
 COMPILE_TEMPLATE = env.get_template('compile_template.sh.j2')
 SIM_TEMPLATE = env.get_template('sim_template.sh.j2')
-WAVE_CMD_TEMPLATE = env.get_template('wave_cmd_template.j2')
-RERUN_TEMPLATE = env.get_template('rerun_template.j2')
-BUGGER_TEMPLATE = env.get_template('bugger_template.j2')
+WAVE_CMD_TEMPLATE = env.get_template('wave_cmd_template.tcl.j2')
+RERUN_TEMPLATE = env.get_template('rerun_template.sh.j2')
+BUGGER_TEMPLATE = env.get_template('bugger_template.sh.j2')
 # For publishing test results to azure pipeline or jenkins
 JUNIT_TEMPLATE = env.get_template('junit_tempalte.j2')
 
