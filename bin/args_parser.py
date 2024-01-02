@@ -243,7 +243,7 @@ def add_flow_control_arguments(parser):
 
 def add_basic_arguments(parser):
     parser.add_argument(
-        '-t',
+        '-t', '--tests',
         dest='tests',
         default=[],
         action=parser_actions.TestAction,
