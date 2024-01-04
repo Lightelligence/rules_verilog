@@ -19,7 +19,7 @@ def add_debug_arguments(parser):
     gdebug.add_argument('--wave-type',
                         type=str,
                         default=None,
-                        choices=[None, 'shm', 'fsdb', 'vcd', 'ida'],
+                        choices=[None, 'shm', 'fsdb', 'vcd', 'ida', 'vwdb'],
                         help='Specify the waveform format')
     gdebug.add_argument('--wave-tcl',
                         type=str,
@@ -31,8 +31,8 @@ def add_debug_arguments(parser):
                         help=('Exclude the specified object or the specified scope from the probe. Only used with --wave '
                               'Examples: '
                               '--wave-exclude "a_inst" '
-                              '--wave-exclude {a_inst tb_top.dut.b} '
-                              '--wave-exclude "tb_top.dut*" '
+                              '--wave-exclude {a_inst b_inst} '
+                              '--wave-exclude "c_inst*" '
                               ))
 
     gdebug.add_argument('--wave-start',

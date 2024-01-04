@@ -387,7 +387,10 @@ class TestJob(Job):
                 waves_db = os.path.join(waves_db, "waves.shm")
             elif options.wave_type == 'ida':
                 waves_db = os.path.join(waves_db, "waves.ida")
-                sim_opts += " -debug_opts verisium_pp "
+                sim_opts += ' -debug_opts verisium_pp '
+            elif options.wave_type == 'vwdb':
+                wave_path = os.path.join(wave_path, 'waves.vwdb')
+                #sim_opts += ' +vwdb+strength '
             elif options.wave_type == 'vcd':
                 default_capture = 'tb_top.dut'
                 waves_db = os.path.join(waves_db, "waves.vcd")
@@ -565,6 +568,8 @@ class TestJob(Job):
                 wave_path = os.path.join(wave_path, 'waves.vcd')
             elif options.wave_type == 'ida':
                 wave_path = os.path.join(wave_path, 'waves.ida')
+            elif options.wave_type == 'vwdb':
+                wave_path = os.path.join(wave_path, 'waves.vwdb')
             elif options.wave_type == 'fsdb':
                 wave_path = os.path.join(wave_path, 'waves.fsdb')
             else:
