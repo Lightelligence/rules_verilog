@@ -27,21 +27,21 @@ def add_debug_arguments(parser):
                         help='Load the local wave.tcl file for waveform. Only used with --wave-tcl + path of wave.tcl')
     gdebug.add_argument('--wave-exclude',
                         type=str,
-                        default=None,
-                        help=('Exclude the specified object or the specified scope from the probe. Only used with --wave '
-                              'Examples: '
-                              '--wave-exclude "a_inst" '
-                              '--wave-exclude {a_inst b_inst} '
-                              '--wave-exclude "c_inst*" '
+                        default="",
+                        help=('Exclude the specified object or the specified scope from the probe. Only used with --wave.\n'
+                              'Examples: \n'
+                              '--wave-exclude "a_inst" \n'
+                              '--wave-exclude {a_inst b_inst} \n'
+                              '--wave-exclude "a_inst*" \n'
                               ))
 
     gdebug.add_argument('--wave-start',
                         type=int,
-                        default=1,
+                        default=0,
                         help='Specify the sim time in ns to start dumping the waveform.')
     gdebug.add_argument('--wave-end',
                         type=int,
-                        default=None,
+                        default=9999999,
                         help='Specify the sim time in ns to end dumping the waveform.')
     gdebug.add_argument('--wave-delta',
                         default=False,
