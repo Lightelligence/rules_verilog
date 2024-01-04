@@ -9,6 +9,7 @@ DVTestInfo = provider(fields = {
     "tags": "Additional tags to be able to filter in simmer.",
     "timeout": "Duration in minutes before the test will be killed due to timeout.",
     "pre_run": "Bazel run command that can be executed immediately before dv_tb simulation.",
+    "description": "Test scenario descriptions.",
 })
 
 DVTBInfo = provider(fields = {
@@ -58,12 +59,17 @@ def _verilog_dv_test_cfg_impl(ctx):
     elif len(parent_pre_run):
         pre_run = parent_pre_run[0]
 
+    description = ''
+    if ctx.attr.description:
+        description = ctx.attr.description
+
     provider_args["uvm_testname"] = uvm_testname
     provider_args["tb"] = tb
     provider_args["timeout"] = timeout
     provider_args["sim_opts"] = sim_opts
     provider_args["tags"] = ctx.attr.tags
     provider_args["pre_run"] = pre_run
+    provider_args["description"] = description
 
     for socket_name, socket_command in ctx.attr.sockets.items():
         if "{socket_file}" not in socket_command:
@@ -146,6 +152,9 @@ verilog_dv_test_cfg = rule(
             default = -1,
             doc = "Duration in minutes before the test will be killed due to timeout.\n" +
                   "This option is inheritable.",
+        ),
+        "description": attr.string(
+            doc = "The test scenario descriptions"
         ),
     },
     outputs = {
