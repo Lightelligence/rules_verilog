@@ -1,16 +1,27 @@
-{% if options.wave_start -%}
-run {{ options.wave_start }} ns
+{% if options.wave_type == 'ida' -%}
+ida_database -open -name {{ waves_db }}
+ida_probe -log -status -emptyok
+ida_probe -start_time={{ options.wave_start }}ns -end_time={{ options.wave_end }}ns
+ida_probe -wave -wave_probe_args="[scope -top] -all -memories -depth {{ options.wave_depth }} -exclude {{ options.wave_exclude }} -packed {{ options.probe_packed }} -unpacked {{ options.probe_unpacked }}"
+run
+exit
 {% endif -%}
 
 {% if options.wave_type == 'shm' -%}
+{% if options.wave_start -%}
+run {{ options.wave_start }}ns
+{% endif -%}
 database -open shm_db -shm -into {{ waves_db }} -default {{ options.delta }}
 {% for probe in options.probes -%}
-probe -database shm_db {{ probe }} -all -memories -depth {{ options.depth_n }} -packed {{ options.probe_packed }} -unpacked {{ options.probe_unpacked }}
+probe -database shm_db {{ probe }} -all -memories -depth {{ options.wave_depth }} -packed {{ options.probe_packed }} -unpacked {{ options.probe_unpacked }}
 {% endfor -%}
 run
 {% endif -%}
 
 {% if options.wave_type == 'vcd' -%}
+{% if options.wave_start -%}
+run {{ options.wave_start }}ns
+{% endif -%}
 database -open -vcd vcd_db -into {{ waves_db }} -default
 {% for probe in options.probes -%}
 probe -database vcd_db {{ probe }} -all -memories -depth all -vcd -packed {{ options.probe_packed }} -unpacked {{ options.probe_unpacked }}
@@ -19,20 +30,15 @@ run
 {% endif -%}
 
 {% if options.wave_type == 'fsdb' -%}
+{% if options.wave_start -%}
+run {{ options.wave_start }}ns
+{% endif -%}
 {% if options.simulator == 'xrun' -%}call {% endif -%}fsdbDumpfile {{ waves_db }}
 {% for probe in options.probes -%}
 {% if options.simulator == 'xrun' -%}call {% endif -%}fsdbDumpvars 0 {{ probe }}
 {% if options.simulator == 'xrun' -%}call {% endif -%}fsdbDumpMDA 0 {{ probe }}
 {% if options.simulator == 'xrun' -%}call {% endif -%}fsdbDumpSVA 0 {{ probe }}
 {% endfor -%}
-run
-exit
-{% endif -%}
-
-{% if options.wave_type == 'ida' -%}
-ida_database -open -name {{ waves_db }} -wave_glitch_recording
-ida_probe -log
-ida_probe -wave -wave_probe_args="[scope -top] -all -memories -depth {{ options.depth_n }}"
 run
 exit
 {% endif -%}

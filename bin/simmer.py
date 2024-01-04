@@ -393,7 +393,8 @@ class TestJob(Job):
                 waves_db = os.path.join(waves_db, "waves.vcd")
             elif options.wave_type == 'fsdb':
                 waves_db = os.path.join(waves_db, "waves.fsdb")
-                verdi_pli = os.path.join(os.environ['VERDI_HOME'], 'share/PLI/IUS/LINUX64/boot', 'debpli.so:novas_pli_boot')
+                verdi_pli = os.path.join(os.environ['VERDI_HOME'], 'share/PLI/IUS/LINUX64/boot',
+                                         'debpli.so:novas_pli_boot')
                 sim_opts += " -loadpli1 {} ".format(verdi_pli)
                 sim_opts += " +UVM_VERDI_TRACE=UVM_AWARE+HIER+RAL+TLM+COMPWAVE "
                 sim_opts += " +fsdb+delta +fsdb+force +fsdb+functions +fsdb+struct=on "
@@ -566,11 +567,16 @@ class TestJob(Job):
                 wave_path = os.path.join(wave_path, 'waves.ida')
             elif options.wave_type == 'fsdb':
                 wave_path = os.path.join(wave_path, 'waves.fsdb')
-            elif os.path.exists(wave_path):
+            else:
+                raise ValueError("Not allowed wave: {}".format(options.wave_type))
+
+            if os.path.exists(wave_path):
                 log.info("Waves available: {}".format(wave_path))
             else:
                 log.error("Dumped waves, but waves file doesn't exist.")
+
         sys.stdout.flush()
+
         if self.rcfg.tidy and self.jobstatus.successful:
             log.debug("tidy=%s removing %s", self.rcfg.tidy, self.job_dir)
             os.system("rm -rf {}".format(self.job_dir))
