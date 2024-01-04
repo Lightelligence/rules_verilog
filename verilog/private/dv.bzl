@@ -208,7 +208,6 @@ def _verilog_dv_library_impl(ctx):
 
 verilog_dv_library = rule(
     doc = """A DV Library.
-    
     Creates a generated flist file from a list of source files.
     """,
     implementation = _verilog_dv_library_impl,
@@ -322,9 +321,8 @@ def _verilog_dv_tb_impl(ctx):
 
 verilog_dv_tb = rule(
     doc = """A DV Testbench.
-    
     rules_verilog uses two separate rules to strongly differentiate between
-    compilation and simulation. verilog_dv_tb is used for compilation and    
+    compilation and simulation. verilog_dv_tb is used for compilation and
     verilog_dv_test_cfg is used for simulation.
 
     A verilog_dv_tb describes how to compile a testbench. It is not a
@@ -449,7 +447,7 @@ def _verilog_dv_unit_test_impl(ctx):
 verilog_dv_unit_test = rule(
     # TODO this could just be a specific use case of verilog_test
     doc = """Compiles and runs a small unit test for DV.
-    
+
     This is typically a unit test for a single verilog_dv_library and its dependencies.
     Additional sim options may be passed after '--' in the bazel command.
     Interactive example:
