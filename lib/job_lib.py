@@ -408,7 +408,7 @@ class JobManager():
         self.log.info("Waiting until all jobs are completed.")
         while len(self._todo) or len(self._ready) or len(self._active):
             self.log.debug("still waiting")
-            time.sleep(10)
+            time.sleep(30)
 
     def stop(self):
         """Stop the job runner thread (cpu intenstive). This is really more of a pause than a full stop&exit."""
