@@ -27,7 +27,7 @@ def add_debug_arguments(parser):
                         help='Load the local wave.tcl file for waveform. Only used with --wave-tcl + path of wave.tcl')
     gdebug.add_argument('--wave-exclude',
                         type=str,
-                        default="",
+                        default="x",
                         help=('Exclude the specified object or the specified scope from the probe. Only used with --wave.\n'
                               'Examples: \n'
                               '--wave-exclude "a_inst" \n'
