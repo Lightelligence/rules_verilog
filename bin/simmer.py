@@ -381,24 +381,27 @@ class TestJob(Job):
                 raise ValueError("{} not exists".format(options.wave_tcl))
         else:
             waves_tcl = os.path.join(self.job_dir, "waves.tcl")
+
         if options.waves is not None:
             if options.wave_type == 'shm':
                 waves_db = os.path.join(waves_db, "waves.shm")
-            if options.wave_type == 'ida':
+            elif options.wave_type == 'ida':
                 waves_db = os.path.join(waves_db, "waves.ida")
                 sim_opts += " -debug_opts verisium_pp "
-            if options.wave_type == 'vcd':
+            elif options.wave_type == 'vcd':
                 default_capture = 'tb_top.dut'
                 waves_db = os.path.join(waves_db, "waves.vcd")
-            if options.wave_type == 'fsdb':
+            elif options.wave_type == 'fsdb':
                 waves_db = os.path.join(waves_db, "waves.fsdb")
-                verdi_pli = os.path.join(os.environ['VERDI_HOME'], 'share/PLI/IUS/LINUX64/boot',
-                                         'debpli.so:novas_pli_boot')
+                verdi_pli = os.path.join(os.environ['VERDI_HOME'], 'share/PLI/IUS/LINUX64/boot', 'debpli.so:novas_pli_boot')
                 sim_opts += " -loadpli1 {} ".format(verdi_pli)
                 sim_opts += " +UVM_VERDI_TRACE=UVM_AWARE+HIER+RAL+TLM+COMPWAVE "
                 sim_opts += " +fsdb+delta +fsdb+force +fsdb+functions +fsdb+struct=on "
                 sim_opts += " +fsdb+parameter=on +fsdb+sva_status +fsdb+sva_success "
                 sim_opts += " +fsdb+autoflush "
+            else:
+                raise ValueError("{} not allowed".format(options.wave_type))
+
             sim_opts += " -input {} ".format(waves_tcl)
             options.probes = options.waves if options.waves != [] else [default_capture]
             if options.wave_delta is True:
@@ -557,11 +560,13 @@ class TestJob(Job):
             wave_path = self.job_dir
             if options.wave_type == 'shm':
                 wave_path = os.path.join(wave_path, 'waves.shm')
-            if options.wave_type == 'vcd':
+            elif options.wave_type == 'vcd':
                 wave_path = os.path.join(wave_path, 'waves.vcd')
-            if options.wave_type == 'fsdb':
+            elif options.wave_type == 'ida':
+                wave_path = os.path.join(wave_path, 'waves.ida')
+            elif options.wave_type == 'fsdb':
                 wave_path = os.path.join(wave_path, 'waves.fsdb')
-            if os.path.exists(wave_path):
+            elif os.path.exists(wave_path):
                 log.info("Waves available: {}".format(wave_path))
             else:
                 log.error("Dumped waves, but waves file doesn't exist.")
