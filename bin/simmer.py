@@ -170,6 +170,8 @@ class VCompJob(Job):
                                                          "{}_compile_warning_waivers".format(bazel_target))
 
         xprop_cmd = None
+        if options.mce: #XPROP is not supported if mce
+            options.xprop = None
         if options.xprop:
             if options.simulator == 'vcs':
                 xprop_file = os.path.join(self.bench_dir, 'vcs_xprop.cfg')
@@ -458,7 +460,11 @@ class TestJob(Job):
                 sim_opts += " -R "
         if options.mce:
             sim_opts += " -mce "
-            sim_opts += " -mce_nacc_module_with_strength_keywords 0 "
+            sim_opts += " -mce_pie "
+            sim_opts += " -mce_newperf "
+            sim_opts += " -mce_parallel_probing 0 "
+            sim_opts += " -mce_sim_cpu_configuration {} ".format(options.mce_sim_cfg)
+            sim_opts += " -mce_sim_thread_count {} ".format(options.mce_sim_count)
         if options.profile:
             sim_opts += " -profile "
 
