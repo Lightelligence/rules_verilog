@@ -7,9 +7,9 @@ call xmDumpSVA
 
 {% if options.wave_type == 'ida' -%}
 ida_database -open -name {{ waves_db }}
-ida_probe -log -status -emptyok
-ida_probe -start_time={{ options.wave_start }}ns -end_time={{ options.wave_end }}ns
-ida_probe -wave -wave_probe_args="[scope -top] -all -memories -depth {{ options.wave_depth }} -exclude {{ options.wave_exclude }} -packed {{ options.probe_packed }} -unpacked {{ options.probe_unpacked }}"
+ida_probe -log -status
+ida_probe -flow -start_time={{ options.wave_start }}ns -end_time={{ options.wave_end }}ns
+ida_probe -wave -wave_probe_args="[scope -top] -all -memories -emptyok -depth {{ options.wave_depth }} -exclude {{ options.wave_exclude }} -packed {{ options.probe_packed }} -unpacked {{ options.probe_unpacked }}"
 run
 exit
 {% endif -%}

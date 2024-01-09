@@ -25,15 +25,15 @@ def add_debug_arguments(parser):
                         type=str,
                         default=None,
                         help='Load the local wave.tcl file for waveform. Only used with --wave-tcl + path of wave.tcl')
-    gdebug.add_argument(
-        '--wave-exclude',
-        type=str,
-        default="x",
-        help=('Exclude the specified object or the specified scope from the probe. Only used with --wave.\n'
-              'Examples: \n'
-              '--wave-exclude "a_inst" \n'
-              '--wave-exclude {a_inst b_inst} \n'
-              '--wave-exclude "a_inst*" \n'))
+    gdebug.add_argument('--wave-exclude',
+                        type=str,
+                        default="x",
+                        help=('Exclude the specified object or the specified scope from the probe. '
+                              'Only used with --wave.\n'
+                              'Examples: \n'
+                              '--wave-exclude "a_inst" \n'
+                              '--wave-exclude {a_inst b_inst} \n'
+                              '--wave-exclude "a_inst*" \n'))
 
     gdebug.add_argument('--wave-start',
                         type=int,
@@ -184,20 +184,27 @@ def add_test_configuration_arguments(parser):
 def add_regression_arguments(parser):
     gregre = parser.add_argument_group("Regression arguments")
 
-    gregre.add_argument('--mce', default=False, action='store_true', help='Multicore license enable for xrun.')
+    gregre.add_argument('--mce',
+                        default=False,
+                        action='store_true',
+                        help='Multicore license enable for xrun. Only used for Gatesim!')
     gregre.add_argument('--mce-build-count',
-                        default=0,
+                        type=int,
+                        default=4,
                         help=("Number of threads to be used for mce elaboration. "
-                              "0(default) means a full range, used with --mce"))
+                              "0 means a full range, used with --mce"))
     gregre.add_argument('--mce-build-cfg',
+                        type=str,
                         default='single-socket',
                         choices=['single-socket', 'all-cores'],
                         help="The number of cores to be used for build, used with --mce")
     gregre.add_argument('--mce-sim-count',
-                        default=0,
+                        type=int,
+                        default=4,
                         help=("Number of threads to be used for mce simulation. "
-                              "0(default) means a full range, used with --mce"))
+                              "0 means a full range, used with --mce"))
     gregre.add_argument('--mce-sim-cfg',
+                        type=str,
                         default='single-socket',
                         choices=['single-socket', 'single-threaded', 'partial-socket', 'all-cores'],
                         help="The number of cores to be used for sim, used with --mce")
