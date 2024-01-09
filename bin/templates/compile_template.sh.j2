@@ -10,6 +10,12 @@ cd {{ bazel_runfiles_main }} && \
       {% if options.xprof -%}
         -xprof \
       {% endif -%}
+      {% if options.mce -%}
+        -mce \
+        -mce_newperf \
+        -mce_build_cpu_configuration {{ options.mce_build_cfg }} \
+        -mce_build_thread_count {{ options.mce_build_count }} \
+      {% endif -%}
     {% endif -%}
     {% if options.simulator == 'vcs' -%}
       -full64 +v2k +vpi -notice -licqueue \
@@ -39,7 +45,6 @@ cd {{ bazel_runfiles_main }} && \
     {% if enable_debug_access > 0 -%}
       {% if options.simulator == 'xrun' -%}
         +vpiSyncPerf \
-        -createdebugdb \
         -debug_opts verisium_pp \
       {% endif -%}
       {% if options.simulator == 'vcs' -%}
