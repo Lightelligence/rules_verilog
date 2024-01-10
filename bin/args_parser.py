@@ -288,7 +288,7 @@ def add_basic_arguments(parser):
         help=
         ('Test names to run. This option has some smarts depending on tool invocation directory.\n'
          'If you run in a "bench" directory, just specify a single "glob" of tests that you want to run.\n'
-         'E.g. in digital/dv/benches/mosaic_tb to run all tests in mosaic_tb:\n'
+         'E.g. in digital/dv/benches/sys_tb to run all tests in sys_tb:\n'
          '  > simmer -t *\n'
          'If you run at a higher level, or elsewhere in the checkout, you can specify two globs separated by a colon:\n'
          ' bench_glob:test_glob\n'
@@ -299,10 +299,10 @@ def add_basic_arguments(parser):
          'if we follow naming conventions, you can run all register and interrupt tests:\n'
          ' > simmer -t *:intr* -t *:reg_walk\n'
          'You could also run only specific benches to create different layers:\n'
-         ' > simmer -t mosaic_tb:*quick* -t vector_add_tb:*\n'
+         ' > simmer -t sys_tb:*quick* -t vector_add_tb:*\n'
          'Finally, the number of iterations may also be specified by an optional "@"\n'
          'The following runs each mosaic test 5 times, which only running the vector_add tests once\n'
-         ' > simmer -t mosaic_tb:*quick*@5 -t vector_add_tb:*@1\n'))
+         ' > simmer -t sys_tb:*quick*@5 -t vector_add_tb:*@1\n'))
 
     parser.add_argument('--tag',
                         type=str,
@@ -323,8 +323,8 @@ def add_basic_arguments(parser):
                         help='Exclude tests that match this tag. Affects all test globs')
     parser.add_argument('--simulator',
                         type=str,
-                        default=None,
-                        choices=[None, 'vcs', 'xrun'],
+                        default='XRUN',
+                        choices=['VCS', 'XRUN'],
                         help='Declares the platform to use for compile and simulation.')
 
 
@@ -372,8 +372,8 @@ def parse_args(argv):
     reproduce_args = [arg for arg in argv if arg not in skip_list]
     setattr(options, 'reproduce_args', reproduce_args)
     SIM_LICENSES = 0
-    if options.simulator == 'vcs' or (SIM_PLATFORM.lower() == 'vcs' and options.simulator != 'xrun'):
-        options.simulator = 'vcs'
+    if options.simulator.upper() == 'VCS' or (SIM_PLATFORM.upper() == 'VCS' and options.simulator.upper() != 'XRUN'):
+        options.simulator = 'VCS'
         if options.waves is not None:
             if options.wave_type is None:
                 options.wave_type = 'fsdb'
@@ -381,8 +381,8 @@ def parse_args(argv):
                 print('-E- SHM waveform capture format not supported by VCS!')
                 sys.exit(99)
         SIM_LICENSES = int(VCS_LICENSES)
-    if options.simulator == 'xrun' or (SIM_PLATFORM.lower() == 'xrun' and options.simulator != 'vcs'):
-        options.simulator = 'xrun'
+    if options.simulator.upper() == 'XRUN' or (SIM_PLATFORM.upper() == 'XRUN' and options.simulator.upper() != 'VCS'):
+        options.simulator = 'XRUN'
         if options.waves is not None:
             if options.wave_type is None:
                 options.wave_type = 'shm'
