@@ -36,7 +36,8 @@ dir_path = os.path.dirname(os.path.realpath(__file__))
 file_loader = jinja2.FileSystemLoader(searchpath=os.path.join(dir_path, 'templates'))
 env = jinja2.Environment(loader=file_loader)
 
-COMPILE_TEMPLATE = env.get_template('compile_template.sh.j2')
+XRUN_COMPILE_TEMPLATE = env.get_template('xrun_compile_template.sh.j2')
+VCS_COMPILE_TEMPLATE = env.get_template('vcs_compile_template.sh.j2')
 SIM_TEMPLATE = env.get_template('sim_template.sh.j2')
 WAVE_CMD_TEMPLATE = env.get_template('wave_cmd_template.tcl.j2')
 RERUN_TEMPLATE = env.get_template('rerun_template.sh.j2')
@@ -129,7 +130,7 @@ class VCompJob(Job):
             'TIMESCALE_STEP_FS=1000',
             'TIMESCALE_PREC_FS=1000',
         ]
-        if options.simulator == 'vcs':
+        if options.simulator.upper() == 'VCS':
             additional_defines.extend(additional_vcs_defines)
         if options.rtl_defines is not None:
             additional_defines.extend(options.rtl_defines)
@@ -163,7 +164,7 @@ class VCompJob(Job):
         self.bazel_runfiles_main = os.path.join(bazel_bin, relpath, "{}.runfiles".format(bazel_target), "__main__")
 
         self.bazel_compile_args = os.path.join(self.bazel_runfiles_main, relpath,
-                                               "{}_compile_args_{}.f".format(bazel_target, options.simulator))
+                                               "{}_compile_args_{}.f".format(bazel_target, options.simulator.lower()))
         self.bazel_runtime_args = os.path.join(self.bazel_runfiles_main, relpath,
                                                "{}_runtime_args.f".format(bazel_target))
         self.compile_warning_waivers_path = os.path.join(self.bazel_runfiles_main, relpath,
@@ -173,10 +174,10 @@ class VCompJob(Job):
         if options.mce: #XPROP is not supported if mce
             options.xprop = None
         if options.xprop:
-            if options.simulator == 'vcs':
+            if options.simulator.upper() == 'VCS':
                 xprop_file = os.path.join(self.bench_dir, 'vcs_xprop.cfg')
                 xprop_cmd = "-xprop={}".format(xprop_file)
-            if options.simulator == 'xrun':
+            if options.simulator.upper() == 'XRUN':
                 if options.xprop == 'F':
                     xprop_file = 'fox_xprop.txt'
                 else:
@@ -186,17 +187,30 @@ class VCompJob(Job):
 
         vcomp_sh_path = os.path.join(self.job_dir, "vcomp.sh")
         with open(vcomp_sh_path, 'w') as filep:
-            filep.write(
-                COMPILE_TEMPLATE.render(
-                    VCOMP_DIR=self.job_dir,
-                    cov_opts=cov_opts,
-                    bazel_runfiles_main=self.bazel_runfiles_main,
-                    bazel_compile_args=self.bazel_compile_args,
-                    enable_debug_access=enable_debug_access,
-                    xprop_cmd=xprop_cmd,
-                    additional_defines=additional_defines,
-                    options=options,
-                ))
+            if options.simulator.upper() == 'XRUN':
+                filep.write(
+                    XRUN_COMPILE_TEMPLATE.render(
+                        VCOMP_DIR=self.job_dir,
+                        cov_opts=cov_opts,
+                        bazel_runfiles_main=self.bazel_runfiles_main,
+                        bazel_compile_args=self.bazel_compile_args,
+                        enable_debug_access=enable_debug_access,
+                        xprop_cmd=xprop_cmd,
+                        additional_defines=additional_defines,
+                        options=options,
+                    ))
+            if options.simulator.upper() == 'VCS':
+                filep.write(
+                    VCS_COMPILE_TEMPLATE.render(
+                        VCOMP_DIR=self.job_dir,
+                        cov_opts=cov_opts,
+                        bazel_runfiles_main=self.bazel_runfiles_main,
+                        bazel_compile_args=self.bazel_compile_args,
+                        enable_debug_access=enable_debug_access,
+                        xprop_cmd=xprop_cmd,
+                        additional_defines=additional_defines,
+                        options=options,
+                    ))
 
         log.debug("bazel_runfiles_main: %s", self.bazel_runfiles_main)
 
@@ -456,7 +470,7 @@ class TestJob(Job):
             sim_opts += ' +uvm_set_config_string=' + ' +uvm_set_config_string='.join(options.uvm_set_config_string)
         if options.gui:
             sim_opts += " -gui "
-            if options.simulator == 'xrun':
+            if options.simulator.upper() == 'XRUN':
                 sim_opts += " -R "
         if options.mce:
             sim_opts += " -mce "

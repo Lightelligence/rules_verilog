@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+
+cd {{ bazel_runfiles_main }} && \
+
+runmod -t xrun -- \
+  -xmlibdirname {{ VCOMP_DIR }} \
+  {% for define in additional_defines -%}
+    -define {{ define }} \
+  {% endfor -%}
+  {% if options.xprof -%}
+    -xprof \
+  {% endif -%}
+  {% if options.mce -%}
+    -mce \
+    -mce_newperf \
+    -mce_build_cpu_configuration {{ options.mce_build_cfg }} \
+    -mce_build_thread_count {{ options.mce_build_count }} \
+  {% endif -%}
+  {% if xprop_cmd is not none -%}
+    {{ xprop_cmd }} \
+  {% endif -%}
+  {% if enable_debug_access > 0 -%}
+    +vpiSyncPerf \
+    -debug_opts verisium_pp \
+  {% endif -%}
+  {% if enable_debug_access > 1 -%}
+    +fsmdebug \
+    -linedebug \
+    -uvmlinedebug \
+  {% endif -%}
+  {% if cov_opts is not none -%}
+    {{ cov_opts }} \
+  {% endif -%}
+  -f {{ bazel_compile_args }} \
+  -l {{ VCOMP_DIR }}/cmp.log

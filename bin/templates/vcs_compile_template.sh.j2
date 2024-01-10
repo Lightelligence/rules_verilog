@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+
+cd {{ bazel_runfiles_main }} && \
+
+runmod -t vcs -- \
+  -full64 \
+  +v2k \
+  +vpi \
+  -notice \
+  -licqueue \
+  -V -DVCS -CFLAGS -LDFLAGS \
+  -assert svaext \
+  -partcomp \
+  -pcmakeprof -j4 \
+  -reportstats \
+  -lca -lrt -simprofile time \
+  -ntb_opts uvm-1.2 \
+  +lint=PCWM-L,TFIPC-L,PCWM \
+  -xlrm floating_pnt_constraint \
+  -xlrm uniq_prior_final \
+  -Mdir={{ VCOMP_DIR }}/csrc \
+  -Mlib={{ VCOMP_DIR }}/csrc \
+  +libext+.sv+.svh+.v+.vams \
+  +systemverilogext+.sv+.svh \
+  -timescale=1ns/1ns \
+  {% for define in additional_defines -%}
+    +define+{{ define }} \
+  {% endfor -%}
+  {% if enable_debug_access == 0 -%}
+    -debug_access+pp \
+  {% endif -%}
+  {% if enable_debug_access > 0 -%}
+    -kdb \
+    -debug_region=cell+lib \
+    -debug_access+all+designer+simctrl \
+    +define+UVM_VERDI_COMPWAVE \
+  {% endif -%}
+  {% if enable_debug_access > 1 -%}
+    +fsmdebug \
+    -linedebug \
+    -uvmlinedebug \
+  {% endif -%}
+  {% if cov_opts is not none -%}
+    {{ cov_opts }} \
+  {% endif -%}
+  -f {{ bazel_compile_args }} \
+  -l {{ VCOMP_DIR }}/cmp.log \
+  -o {{ VCOMP_DIR }}/simv
