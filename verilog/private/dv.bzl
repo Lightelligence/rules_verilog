@@ -59,7 +59,7 @@ def _verilog_dv_test_cfg_impl(ctx):
     elif len(parent_pre_run):
         pre_run = parent_pre_run[0]
 
-    description = ''
+    description = None
     if ctx.attr.description:
         description = ctx.attr.description
 

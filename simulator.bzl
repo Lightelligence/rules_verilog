@@ -32,15 +32,15 @@ VCS_DPI_HEADERS = ["svdpi.h", "svdpi_src.h"]
 VARS = ["PROJ_DIR", "MODULEPATH"]
 
 def _xcelium_setup_impl(repository_ctx):
-    if repository_ctx.attr.name != "xcelium":
-        fail("Name xcelium_setup rule: 'xcelium'!")
+    if repository_ctx.attr.name.upper() != "XCELIUM":
+        fail("Name xcelium_setup rule: 'XCELIUM'!")
     result = repository_ctx.execute(
         ["runmod", "xrun", "--", "printenv", "XCELIUMHOME"],
         environment = repository_ctx.os.environ,
         # working_directory="..",
     )
     if result.return_code:
-        fail("{}\n{}\nFailed running find xcelium command".format(result.stdout, result.stderr))
+        fail("{}\n{}\nFailed running find XCELIUM command".format(result.stdout, result.stderr))
     xcelium_home = result.stdout.strip()
     include = "{}/tools.lnx86/include".format(xcelium_home)
     for hdr in XRUN_DPI_HEADERS:
@@ -55,15 +55,15 @@ xcelium_setup = repository_rule(
 )
 
 def _vcs_setup_impl(repository_ctx):
-    if repository_ctx.attr.name != "vcs":
-        fail("Name vcs_setup rule: 'vcs'!")
+    if repository_ctx.attr.name.upper() != "VCS":
+        fail("Name vcs_setup rule: 'VCS'!")
     result = repository_ctx.execute(
         ["runmod", "vcs", "--", "printenv", "VCS_HOME"],
         environment = repository_ctx.os.environ,
         # working_directory="..",
     )
     if result.return_code:
-        fail("{}\n{}\nFailed running find vcs command".format(result.stdout, result.stderr))
+        fail("{}\n{}\nFailed running find VCS command".format(result.stdout, result.stderr))
     vcs_home = result.stdout.strip()
     include = "{}/include".format(vcs_home)
     for hdr in VCS_DPI_HEADERS:
