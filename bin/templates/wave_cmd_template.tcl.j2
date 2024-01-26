@@ -1,8 +1,11 @@
 {% if options.wave_type == 'vwdb' -%}
 call xmDumpfile {{ waves_db }}
-call xmDumpLog
-call xmDumpvars 0 +all +dynamic $uvm:{uvm_test_top}
+{% for probe in options.probes -%}
+call xmDumpvars {{ options.wave_depth }} {{ probe }} +all +packed_limit={{ options.probe_packed }} +unpacked_limit={{ options.probe_unpacked }}
+{% endfor -%}
 call xmDumpSVA
+run
+exit
 {% endif -%}
 
 {% if options.wave_type == 'ida' -%}

@@ -405,7 +405,7 @@ class TestJob(Job):
                 waves_db = os.path.join(waves_db, "waves.ida")
                 sim_opts += ' -debug_opts verisium_pp '
             elif options.wave_type == 'vwdb':
-                wave_path = os.path.join(wave_path, 'waves.vwdb')
+                waves_db = os.path.join(waves_db, 'waves.vwdb')
                 #sim_opts += ' +vwdb+strength '
             elif options.wave_type == 'vcd':
                 default_capture = 'tb_top.dut'
@@ -589,7 +589,7 @@ class TestJob(Job):
             elif options.wave_type == 'ida':
                 wave_path = os.path.join(wave_path, 'waves.ida')
             elif options.wave_type == 'vwdb':
-                wave_path = os.path.join(wave_path, 'waves.vwdb')
+                wave_path = os.path.join(wave_path, 'waves.vwdb.shm')
             elif options.wave_type == 'fsdb':
                 wave_path = os.path.join(wave_path, 'waves.fsdb')
             else:
@@ -597,6 +597,7 @@ class TestJob(Job):
 
             if os.path.exists(wave_path):
                 log.info("Waves available: {}".format(wave_path))
+                os.system("chmod -R 755 {}".format(wave_path))
             else:
                 log.error("Dumped waves, but waves file doesn't exist.")
 
