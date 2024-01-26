@@ -3,7 +3,7 @@ import os
 from lib import parser_actions
 
 PROJ_DIR = os.environ.get('PROJ_DIR', os.getcwd())
-SIM_PLATFORM = os.environ.get('SIM_PLATFORM', 'xrun')
+SIM_PLATFORM = os.environ.get('SIM_PLATFORM', 'XRUN')
 VCS_LICENSES = os.environ.get('VCS_LICENSES', 0)
 XRUN_LICENSES = os.environ.get('XRUN_LICENSES', 0)
 COVFILE = PROJ_DIR + os.environ.get('COVFILE', "coverage.ccf")
@@ -187,7 +187,7 @@ def add_regression_arguments(parser):
     gregre.add_argument('--mce',
                         default=False,
                         action='store_true',
-                        help='Multicore license enable for xrun. Only used for Gatesim!')
+                        help='Multicore license enable for XRUN. Only used for Gatesim!')
     gregre.add_argument('--mce-build-count',
                         type=int,
                         default=4,
