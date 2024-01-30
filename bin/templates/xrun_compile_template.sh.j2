@@ -3,7 +3,9 @@
 cd {{ bazel_runfiles_main }} && \
 
 runmod -t xrun -- \
+  {% if options.msie_prim is none-%}
   -xmlibdirname {{ VCOMP_DIR }} \
+  {% endif -%}
   {% for define in additional_defines -%}
     -define {{ define }} \
   {% endfor -%}
@@ -30,6 +32,22 @@ runmod -t xrun -- \
   {% endif -%}
   {% if cov_opts is not none -%}
     {{ cov_opts }} \
+  {% endif -%}
+  {% if options.msie_href -%}
+    -primtop {{ options.msie_href }} -genhref {{ options.proj_dir }}/{{ relpath }}/hdl/href.txt \
+  {% endif -%}
+  {% if options.msie_prim -%}
+    -mkprimsnap -top {{ options.msie_prim }} -name {{ options.msie_prim }} -snapshot {{ options.msie_prim }} \
+    -href {{ options.proj_dir }}/{{ relpath }}/hdl/href.txt \
+    -xmlibdirname {{ VCOMP_DIR }}/prim \
+  {% endif -%}
+  {% if options.msie_incr -%}
+    -primname {{ options.msie_incr }} \
+      -primlibdir {{ VCOMP_DIR }}/prim \
+  {% endif -%}    
+  {% if options.msie -%}
+    -primtop {{ options.msie }} \
+    -top incr_pkg \
   {% endif -%}
   -f {{ bazel_compile_args }} \
   -l {{ VCOMP_DIR }}/cmp.log
