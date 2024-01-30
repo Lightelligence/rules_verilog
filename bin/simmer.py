@@ -159,19 +159,25 @@ class VCompJob(Job):
         assert p.returncode == 0
         stdout, stderr = p.communicate()
         bazel_bin = re.search("bazel-bin: (.*)", stdout.decode('ascii')).group(1)
-
         # This is a gross assumption, but I can't see an easier way to find this in bazel
         self.bazel_runfiles_main = os.path.join(bazel_bin, relpath, "{}.runfiles".format(bazel_target), "__main__")
 
-        self.bazel_compile_args = os.path.join(self.bazel_runfiles_main, relpath,
-                                               "{}_compile_args_{}.f".format(bazel_target, options.simulator.lower()))
+        if options.msie_prim:
+            self.bazel_compile_args = os.path.join("{}/{}/hdl/prim.f".format(options.proj_dir, relpath))
+        elif options.msie_incr:
+            self.bazel_compile_args = os.path.join(options.proj_dir, relpath,
+                                                   "{}/{}/hdl/incr.f".format(options.proj_dir, relpath))
+        else:
+            self.bazel_compile_args = os.path.join(
+                self.bazel_runfiles_main, relpath, "{}_compile_args_{}.f".format(bazel_target,
+                                                                                 options.simulator.lower()))
         self.bazel_runtime_args = os.path.join(self.bazel_runfiles_main, relpath,
                                                "{}_runtime_args.f".format(bazel_target))
         self.compile_warning_waivers_path = os.path.join(self.bazel_runfiles_main, relpath,
                                                          "{}_compile_warning_waivers".format(bazel_target))
-
         xprop_cmd = None
-        if options.mce: #XPROP is not supported if mce
+        if options.mce or options.msie or options.msie_prim or options.msie_href:
+            #XPROP is not supported if mce or msie
             options.xprop = None
         if options.xprop:
             if options.simulator.upper() == 'VCS':
@@ -196,6 +202,7 @@ class VCompJob(Job):
                         bazel_compile_args=self.bazel_compile_args,
                         enable_debug_access=enable_debug_access,
                         xprop_cmd=xprop_cmd,
+                        relpath=relpath,
                         additional_defines=additional_defines,
                         options=options,
                     ))

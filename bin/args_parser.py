@@ -252,6 +252,38 @@ def add_regression_arguments(parser):
                         action='store_true',
                         help=('By default simmer will clean up simulation results when the tests '
                               'pass. This flag prevents that cleanup.'))
+    gregre.add_argument('--msie',
+                        type=str,
+                        default=None,
+                        nargs='?',
+                        const='tb_top',
+                        help='Incremental compile single_step(auto) mode\n'
+                        'Need user create incr_pkg.sv in benches/tb_name/tests \n'
+                        'incr_pkg.svh is used to include tests. eg: \n'
+                        'module incr_pkg;\n'
+                        '  import uvm_pkg::*;\n'
+                        '  `include"base_test.svh"\n'
+                        '  `include"sw_test.svh"\n'
+                        'endmodule\n')
+    gregre.add_argument('--msie-href',
+                        type=str,
+                        nargs='?',
+                        const='tb_top',
+                        default=None,
+                        help='Gen href in benches/tb_name/hdl/href.txt \n'
+                        'Need define prim top, default is tb_top'
+                        'eg. --msie-href pcpu')
+    gregre.add_argument('--msie-prim',
+                        type=str,
+                        nargs='?',
+                        const='tb_top',
+                        default=None,
+                        help='Compile prim lib, need define prim top, default is tb_top')
+    gregre.add_argument('--msie-incr',
+                        type=str,
+                        nargs='?',
+                        default=None,
+                        help='Compile incr, need define prim top, default is tb_top')
 
 
 def add_flow_control_arguments(parser):
@@ -396,5 +428,10 @@ def parse_args(argv):
         if options.parallel_max > int(SIM_LICENSES):
             print('-E- parse_args: --parallel-max is greater than available licenses')
             sys.exit(99)
+    if options.msie_href is not None:
+        options.no_run = True
+    if options.msie_prim is not None:
+        options.no_run = True
+
     options.proj_dir = PROJ_DIR
     return options
