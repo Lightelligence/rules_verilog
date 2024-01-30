@@ -119,6 +119,16 @@ class RegressionConfig():
         self.all_vcomp = stdout.decode('ascii').split('\n')
         self.all_vcomp = dict([(av, {}) for av in self.all_vcomp if av])
 
+        all_tbs = []
+        for ta in self.options.tests:
+            tb_name = ta.btiglob.split(":")[0]
+            query = "*:{}".format(tb_name) # Matching against a bazel label
+            tb_match = fnmatch.filter(self.all_vcomp.keys(), query)
+            all_tbs = all_tbs + tb_match
+
+        self.all_vcomp = stdout.decode('ascii').split('\n')
+        self.all_vcomp = dict([(av, {}) for av in all_tbs if av])
+
         vcomp_to_query_results = {}
 
         for vcomp, tests in self.all_vcomp.items():
