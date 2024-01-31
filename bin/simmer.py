@@ -145,6 +145,10 @@ class VCompJob(Job):
         os.system("env > {}".format(os.path.join(self.job_dir, 'env.out')))
         os.system("hostname > {}".format(os.path.join(self.job_dir, 'hostname.out')))
 
+        if options.msie_prim:
+            self.job_dir = self.job_dir + "_PRIM"
+            if not os.path.exists(self.job_dir):
+                os.mkdir(self.job_dir)
         if options.recompile:
             log.info("Removing vcomp library %s due to --recompile flag", self.job_dir)
             os.system("rm -rf {0}; mkdir -p {0}".format(self.job_dir))
@@ -164,10 +168,8 @@ class VCompJob(Job):
         
         for ta in options.tests:
             tb_name = ta.btiglob.split(":")[0]
-
         if options.msie_prim:
             self.bazel_compile_args = os.path.join("{}/{}/msie/{}_prim.f".format(options.proj_dir, relpath, tb_name))
-            self.job_dir = self.job_dir + "_PRIM"
         elif options.msie_incr:
             self.bazel_compile_args = os.path.join(options.proj_dir, relpath,
                                                    "{}/{}/msie/{}_incr.f".format(options.proj_dir, relpath, tb_name))

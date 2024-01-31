@@ -45,7 +45,8 @@ class RegressionConfig():
         if not self.options.no_compile or not os.path.exists(
                 self.proj_dir + "/" + "all_vcomp.json") or not os.path.exists(self.proj_dir + "/" +
                                                                               "tests_to_tags.json"):
-            self.test_discovery_all()
+            if not self.options.no_bazel:
+                self.test_discovery_all()
         self.test_discovery_match()
 
         total_tests = sum([iterations for vcomp in self.all_vcomp.values() for test, iterations in vcomp.items()])
@@ -213,7 +214,7 @@ class RegressionConfig():
 
     def test_discovery_match(self):
         # read json file
-        if self.options.no_compile:
+        if self.options.no_compile or self.options.no_bazel:
             self.all_vcomp = self.json_to_dict("all_vcomp.json")
             self.tests_to_tags = self.json_to_dict("tests_to_tags.json")
 

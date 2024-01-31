@@ -308,6 +308,10 @@ def add_flow_control_arguments(parser):
                         default=False,
                         action='store_true',
                         help='Perform test discovery, but do not compile or simulate')
+    gflowc.add_argument('--no-bazel',
+                        default=False,
+                        action='store_true',
+                        help='skip bazel build, can not use if any BUILD changes')
 
 
 def add_basic_arguments(parser):
