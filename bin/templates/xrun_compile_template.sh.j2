@@ -34,16 +34,16 @@ runmod -t xrun -- \
     {{ cov_opts }} \
   {% endif -%}
   {% if options.msie_href -%}
-    -primtop {{ options.msie_href }} -genhref {{ options.proj_dir }}/{{ relpath }}/hdl/href.txt \
+    -primtop {{ options.msie_href }} -genhref {{ options.proj_dir }}/{{ relpath }}/msie/{{ tb_name }}_href.txt \
   {% endif -%}
   {% if options.msie_prim -%}
     -mkprimsnap -top {{ options.msie_prim }} -name {{ options.msie_prim }} -snapshot {{ options.msie_prim }} \
-    -href {{ options.proj_dir }}/{{ relpath }}/hdl/href.txt \
-    -xmlibdirname {{ VCOMP_DIR }}/prim \
+    -href {{ options.proj_dir }}/{{ relpath }}/msie/{{ tb_name }}_href.txt \
+    -xmlibdirname {{ VCOMP_DIR }} \
   {% endif -%}
   {% if options.msie_incr -%}
     -primname {{ options.msie_incr }} \
-      -primlibdir {{ VCOMP_DIR }}/prim \
+      -primlibdir {{ VCOMP_DIR }}_PRIM \
   {% endif -%}    
   {% if options.msie -%}
     -primtop {{ options.msie }} \
