@@ -161,12 +161,16 @@ class VCompJob(Job):
         bazel_bin = re.search("bazel-bin: (.*)", stdout.decode('ascii')).group(1)
         # This is a gross assumption, but I can't see an easier way to find this in bazel
         self.bazel_runfiles_main = os.path.join(bazel_bin, relpath, "{}.runfiles".format(bazel_target), "__main__")
+        
+        for ta in options.tests:
+            tb_name = ta.btiglob.split(":")[0]
 
         if options.msie_prim:
-            self.bazel_compile_args = os.path.join("{}/{}/hdl/prim.f".format(options.proj_dir, relpath))
+            self.bazel_compile_args = os.path.join("{}/{}/msie/{}_prim.f".format(options.proj_dir, relpath, tb_name))
+            self.job_dir = self.job_dir + "_PRIM"
         elif options.msie_incr:
             self.bazel_compile_args = os.path.join(options.proj_dir, relpath,
-                                                   "{}/{}/hdl/incr.f".format(options.proj_dir, relpath))
+                                                   "{}/{}/msie/{}_incr.f".format(options.proj_dir, relpath, tb_name))
         else:
             self.bazel_compile_args = os.path.join(
                 self.bazel_runfiles_main, relpath, "{}_compile_args_{}.f".format(bazel_target,
@@ -192,6 +196,7 @@ class VCompJob(Job):
                 xprop_cmd = '-xfile {} -xverbose'.format(xprop_file)
 
         vcomp_sh_path = os.path.join(self.job_dir, "vcomp.sh")
+        
         with open(vcomp_sh_path, 'w') as filep:
             if options.simulator.upper() == 'XRUN':
                 filep.write(
@@ -203,6 +208,7 @@ class VCompJob(Job):
                         enable_debug_access=enable_debug_access,
                         xprop_cmd=xprop_cmd,
                         relpath=relpath,
+                        tb_name=tb_name,
                         additional_defines=additional_defines,
                         options=options,
                     ))
