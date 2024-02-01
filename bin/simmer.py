@@ -65,6 +65,8 @@ class VCompJob(Job):
 
         job_dir = "{}__VCOMP{}".format(self.name, self.rcfg.options.dir_suffix)
         self.job_dir = os.path.join(self.rcfg.regression_dir, job_dir)
+        if options.msie_prim:
+            self.job_dir = self.job_dir + "_PRIM"
         self.log_path = os.path.join(self.job_dir, "cmp.log")
 
         self.main_cmdline = None
@@ -146,7 +148,6 @@ class VCompJob(Job):
         os.system("hostname > {}".format(os.path.join(self.job_dir, 'hostname.out')))
 
         if options.msie_prim:
-            self.job_dir = self.job_dir + "_PRIM"
             if not os.path.exists(self.job_dir):
                 os.mkdir(self.job_dir)
         if options.recompile:
@@ -441,11 +442,12 @@ class TestJob(Job):
             options.probes = options.waves if options.waves != [] else [default_capture]
             if options.wave_delta is True:
                 options.delta = "-event"
-            with open(waves_tcl, 'w') as filep:
-                tmp = locals()
-                del tmp['self']
-                tmp['job'] = self
-                filep.write(WAVE_CMD_TEMPLATE.render(**tmp))
+            if not options.wave_tcl:
+                with open(waves_tcl, 'w') as filep:
+                    tmp = locals()
+                    del tmp['self']
+                    tmp['job'] = self
+                    filep.write(WAVE_CMD_TEMPLATE.render(**tmp))
         else:
             nwaves_tcl = os.path.join(self.job_dir, "nwaves.tcl")
             sim_opts += " -input {} ".format(nwaves_tcl)
