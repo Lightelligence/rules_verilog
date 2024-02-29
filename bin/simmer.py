@@ -426,6 +426,9 @@ class TestJob(Job):
             elif options.wave_type == 'vcd':
                 default_capture = 'tb_top.dut'
                 waves_db = os.path.join(waves_db, "waves.vcd")
+            elif options.wave_type == 'evcd':
+                default_capture = 'tb_top.dut'
+                waves_db = os.path.join(waves_db, "waves.evcd")
             elif options.wave_type == 'fsdb':
                 waves_db = os.path.join(waves_db, "waves.fsdb")
                 verdi_pli = os.path.join(os.environ['VERDI_HOME'], 'share/PLI/IUS/LINUX64/boot',
@@ -603,6 +606,8 @@ class TestJob(Job):
                 wave_path = os.path.join(wave_path, 'waves.shm')
             elif options.wave_type == 'vcd':
                 wave_path = os.path.join(wave_path, 'waves.vcd')
+            elif options.wave_type == 'evcd':
+                wave_path = os.path.join(wave_path, 'waves.evcd')
             elif options.wave_type == 'ida':
                 wave_path = os.path.join(wave_path, 'waves.ida')
             elif options.wave_type == 'vwdb':

@@ -19,7 +19,7 @@ def add_debug_arguments(parser):
     gdebug.add_argument('--wave-type',
                         type=str,
                         default=None,
-                        choices=[None, 'shm', 'fsdb', 'vcd', 'ida', 'vwdb'],
+                        choices=[None, 'shm', 'fsdb', 'vcd', 'evcd', 'ida', 'vwdb'],
                         help='Specify the waveform format')
     gdebug.add_argument('--wave-tcl',
                         type=str,
