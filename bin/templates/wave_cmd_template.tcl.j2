@@ -39,6 +39,14 @@ probe -database vcd_db {{ probe }} -all -memories -depth all -vcd -packed {{ opt
 run
 {% endif -%}
 
+{% if options.wave_type == 'evcd' -%}
+database -open -evcd evcd_db -into {{ waves_db }}
+{% for probe in options.probes -%}
+probe -create {{ probe }} -evcd -database evcd_db 
+{% endfor -%}
+run
+{% endif -%}
+
 {% if options.wave_type == 'fsdb' -%}
 {% if options.wave_start -%}
 run {{ options.wave_start }}ns
@@ -52,3 +60,4 @@ run {{ options.wave_start }}ns
 run
 exit
 {% endif -%}
+
