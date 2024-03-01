@@ -42,8 +42,8 @@ class IterationCfg():
         return self.jobs[0].name < other.jobs[0].name
 
 
-def create_regression_log_file(path):
-    target_folder = os.path.join(path, 'regression_results')
+def create_regression_log_file(rcfg):
+    target_folder = os.path.join(rcfg.regression_dir, 'regression_results')
 
     if not os.path.exists(target_folder):
         os.makedirs(target_folder)
@@ -51,7 +51,12 @@ def create_regression_log_file(path):
 
     current_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    log_file_name = f"regression_{current_time}.log"
+    if len(rcfg.all_vcomp)>1:
+        log_file_name = f"regression_{current_time}.log"
+    else:
+        bench_name = next(iter(rcfg.all_vcomp.keys())).split(':')[1]
+        log_file_name = f"{bench_name}_regression_{current_time}.log"
+
     log_file_path = os.path.join(target_folder, log_file_name)
 
     with open(log_file_path, 'w') as file:
@@ -64,7 +69,8 @@ def create_regression_log_file(path):
 def print_summary(rcfg, vcomp_jobs, icfgs, jm):
     total_tests = sum([icfg.target for _, (icfgs, _) in rcfg.all_vcomp.items() for icfg in icfgs])
     if total_tests > 1:
-        REGRESSION_LOG_PATH = create_regression_log_file(rcfg.regression_dir)
+        if not rcfg.options.no_run:
+             REGRESSION_LOG_PATH = create_regression_log_file(rcfg)
 
     table_data = [("bench", "test", "passed", "skipped", "failed", "logs")]
     separator = [""] * len(table_data[0])
@@ -133,7 +139,7 @@ def print_summary(rcfg, vcomp_jobs, icfgs, jm):
             table_data[i] = ['-' * cw for cw in column_widths]
     table_data_formatted = [formatter.format(*i) for i in table_data]
     rcfg.log.summary("Job Results\n%s", "\n".join(table_data_formatted))
-    if total_tests > 1:
+    if total_tests > 1 and not rcfg.options.no_run:
         with open(REGRESSION_LOG_PATH, 'a') as file:
             formatted_string = "Job Results\n" + "\n".join(map(str, table_data_formatted))
             file.write(formatted_string)
@@ -143,7 +149,7 @@ def print_summary(rcfg, vcomp_jobs, icfgs, jm):
     table_data.append(("", "", str(total_passed), str(total_skipped), str(total_failed), ""))
     table_data_formatted = [formatter.format(*i) for i in table_data]
     rcfg.log.summary("Simulation Summary\n%s", "\n".join(table_data_formatted))
-    if total_tests > 1:
+    if total_tests > 1 and not rcfg.options.no_run:
         with open(REGRESSION_LOG_PATH, 'a') as file:
             formatted_string = "\n" + "Simulation Summary\n" + "\n".join(map(str, table_data_formatted))
             file.write(formatted_string)
