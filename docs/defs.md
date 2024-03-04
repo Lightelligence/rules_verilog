@@ -70,7 +70,7 @@ A DV Testbench.
 ## verilog_dv_test_cfg
 
 <pre>
-verilog_dv_test_cfg(<a href="#verilog_dv_test_cfg-name">name</a>, <a href="#verilog_dv_test_cfg-abstract">abstract</a>, <a href="#verilog_dv_test_cfg-inherits">inherits</a>, <a href="#verilog_dv_test_cfg-no_run">no_run</a>, <a href="#verilog_dv_test_cfg-sim_opts">sim_opts</a>, <a href="#verilog_dv_test_cfg-sockets">sockets</a>, <a href="#verilog_dv_test_cfg-tb">tb</a>, <a href="#verilog_dv_test_cfg-timeout">timeout</a>, <a href="#verilog_dv_test_cfg-uvm_testname">uvm_testname</a>)
+verilog_dv_test_cfg(<a href="#verilog_dv_test_cfg-name">name</a>, <a href="#verilog_dv_test_cfg-abstract">abstract</a>, <a href="#verilog_dv_test_cfg-inherits">inherits</a>, <a href="#verilog_dv_test_cfg-no_run">no_run</a>, <a href="#verilog_dv_test_cfg-sim_opts">sim_opts</a>, <a href="#verilog_dv_test_cfg-sockets">sockets</a>, <a href="#verilog_dv_test_cfg-tb">tb</a>, <a href="#verilog_dv_test_cfg-timeout">timeout</a>, <a href="#verilog_dv_test_cfg-uvm_testname">uvm_testname</a>, <a href="#verilog_dv_test_cfg-description">description</a>)
 </pre>
 
 A DV test configuration.
@@ -93,6 +93,7 @@ A DV test configuration.
 | <a id="verilog_dv_test_cfg-tb"></a>tb |  The testbench to run this test on. This label must be a 'verilog_dv_tb' target.This attribute is inheritable. See 'inherits' attribute. Future: Allow tb to be a list of labels to allow a test to run on multiple verilog_dv_tb   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | None |
 | <a id="verilog_dv_test_cfg-timeout"></a>timeout |  Duration in minutes before the test will be killed due to timeout. This option is inheritable.   | Integer | optional | -1 |
 | <a id="verilog_dv_test_cfg-uvm_testname"></a>uvm_testname |  UVM testname eventually passed to simulator via plusarg +UVM_TESTNAME. This attribute is inheritable. See 'inherits' attribute.   | String | optional | "" |
+| <a id="verilog_dv_test_cfg-description"></a>description |  The test simulation scenarios. (e.g. description = """ This is the test description """, )  | String | optional | None |
 
 
 <a id="verilog_dv_unit_test"></a>

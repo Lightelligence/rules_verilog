@@ -9,6 +9,7 @@ DVTestInfo = provider(fields = {
     "tags": "Additional tags to be able to filter in simmer.",
     "timeout": "Duration in minutes before the test will be killed due to timeout.",
     "pre_run": "Bazel run command that can be executed immediately before dv_tb simulation.",
+    "description": "Test scenario descriptions.",
 })
 
 DVTBInfo = provider(fields = {
@@ -58,12 +59,17 @@ def _verilog_dv_test_cfg_impl(ctx):
     elif len(parent_pre_run):
         pre_run = parent_pre_run[0]
 
+    description = None
+    if ctx.attr.description:
+        description = ctx.attr.description
+
     provider_args["uvm_testname"] = uvm_testname
     provider_args["tb"] = tb
     provider_args["timeout"] = timeout
     provider_args["sim_opts"] = sim_opts
     provider_args["tags"] = ctx.attr.tags
     provider_args["pre_run"] = pre_run
+    provider_args["description"] = description
 
     for socket_name, socket_command in ctx.attr.sockets.items():
         if "{socket_file}" not in socket_command:
@@ -147,6 +153,9 @@ verilog_dv_test_cfg = rule(
             doc = "Duration in minutes before the test will be killed due to timeout.\n" +
                   "This option is inheritable.",
         ),
+        "description": attr.string(
+            doc = "The test scenario descriptions"
+        ),
     },
     outputs = {
         "dynamic_args": "%{name}_dynamic_args.py",
@@ -208,7 +217,6 @@ def _verilog_dv_library_impl(ctx):
 
 verilog_dv_library = rule(
     doc = """A DV Library.
-    
     Creates a generated flist file from a list of source files.
     """,
     implementation = _verilog_dv_library_impl,
@@ -322,9 +330,8 @@ def _verilog_dv_tb_impl(ctx):
 
 verilog_dv_tb = rule(
     doc = """A DV Testbench.
-    
     rules_verilog uses two separate rules to strongly differentiate between
-    compilation and simulation. verilog_dv_tb is used for compilation and    
+    compilation and simulation. verilog_dv_tb is used for compilation and
     verilog_dv_test_cfg is used for simulation.
 
     A verilog_dv_tb describes how to compile a testbench. It is not a
@@ -449,7 +456,7 @@ def _verilog_dv_unit_test_impl(ctx):
 verilog_dv_unit_test = rule(
     # TODO this could just be a specific use case of verilog_test
     doc = """Compiles and runs a small unit test for DV.
-    
+
     This is typically a unit test for a single verilog_dv_library and its dependencies.
     Additional sim options may be passed after '--' in the bazel command.
     Interactive example:

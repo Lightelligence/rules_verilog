@@ -158,7 +158,8 @@ def build_logger(name, level=logging.INFO, use_color=False, filehandler=None):
     log.addHandler(shandler)
 
     if filehandler:
-        fhandler = logging.FileHandler(filehandler)
+        # Change mode to 'w' to overwrite the file instead of appending
+        fhandler = logging.FileHandler(filehandler, mode='w')
         fhandler.setFormatter(formatter)
         log.addHandler(fhandler)
 

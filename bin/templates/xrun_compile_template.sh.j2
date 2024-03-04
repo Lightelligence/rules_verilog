@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+
+cd {{ bazel_runfiles_main }} && \
+
+runmod -t xrun -- \
+  {% if options.msie_prim is none-%}
+  -xmlibdirname {{ VCOMP_DIR }} \
+  {% endif -%}
+  {% for define in additional_defines -%}
+    -define {{ define }} \
+  {% endfor -%}
+  {% if options.xprof -%}
+    -xprof \
+  {% endif -%}
+  {% if options.mce -%}
+    -mce \
+    -mce_newperf \
+    -mce_build_cpu_configuration {{ options.mce_build_cfg }} \
+    -mce_build_thread_count {{ options.mce_build_count }} \
+  {% endif -%}
+  {% if xprop_cmd is not none -%}
+    {{ xprop_cmd }} \
+  {% endif -%}
+  {% if enable_debug_access > 0 -%}
+    +vpiSyncPerf \
+    -debug_opts verisium_pp \
+  {% endif -%}
+  {% if enable_debug_access > 1 -%}
+    +fsmdebug \
+    -linedebug \
+    -uvmlinedebug \
+  {% endif -%}
+  {% if cov_opts is not none -%}
+    {{ cov_opts }} \
+  {% endif -%}
+  {% if options.msie_href -%}
+    -primtop {{ options.msie_href }} -genhref {{ options.proj_dir }}/{{ relpath }}/msie/{{ tb_name }}_href.txt \
+  {% endif -%}
+  {% if options.msie_prim -%}
+    -mkprimsnap -top {{ options.msie_prim }} -name {{ options.msie_prim }} -snapshot {{ options.msie_prim }} \
+    -href {{ options.proj_dir }}/{{ relpath }}/msie/{{ tb_name }}_href.txt \
+    -xmlibdirname {{ VCOMP_DIR }} \
+  {% endif -%}
+  {% if options.msie_incr -%}
+    -primname {{ options.msie_incr }} \
+      -primlibdir {{ VCOMP_DIR }}_PRIM \
+  {% endif -%}    
+  {% if options.msie -%}
+    -primtop {{ options.msie }} \
+    -top incr_pkg \
+  {% endif -%}
+  -f {{ bazel_compile_args }} \
+  -l {{ VCOMP_DIR }}/cmp.log

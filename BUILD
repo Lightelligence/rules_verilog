@@ -1,6 +1,13 @@
 load("@rules_verilog//verilog:defs.bzl", "verilog_tool_encapsulation")
+load("@com_github_bazelbuild_buildtools//buildifier:def.bzl", "buildifier")
 
 package(default_visibility = ["//visibility:public"])
+
+buildifier(
+    name = "buildifier_fix",
+    lint_mode = "fix",
+    mode = "fix",
+)
 
 verilog_tool_encapsulation(
     name = "verilog_dv_unit_test_command",

@@ -309,7 +309,7 @@ class JobManager():
                             self._move_children_to_skipped(job)
                         self._active.pop(i)
                         self._last_done_or_idle_print = datetime.datetime.now()
-                        self._done.append(job)
+                        #self._done.append(job)
                         # Ideally this would be before post_run, but pass_fail status may be set there
                         self._move_todo_to_ready()
                         self._move_ready_to_active()
@@ -408,7 +408,7 @@ class JobManager():
         self.log.info("Waiting until all jobs are completed.")
         while len(self._todo) or len(self._ready) or len(self._active):
             self.log.debug("still waiting")
-            time.sleep(10)
+            time.sleep(30)
 
     def stop(self):
         """Stop the job runner thread (cpu intenstive). This is really more of a pause than a full stop&exit."""
