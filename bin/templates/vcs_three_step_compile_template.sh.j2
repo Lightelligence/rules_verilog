@@ -24,8 +24,6 @@ done < {{ vcs_vlogan_args|shell_quote }}
 vlogan_include_args=()
 vlogan_precompile_file_args=()
 vlogan_project_file_args=()
-vlogan_precompile_filelist_count=0
-vlogan_project_filelist_count=0
 while IFS=$'\t' read -r vcs_group vcs_flist || [[ -n "${vcs_group}${vcs_flist}" ]]; do
   [[ -z "${vcs_group}" || -z "${vcs_flist}" ]] && continue
   while IFS= read -r flist_line || [[ -n "${flist_line}" ]]; do
@@ -35,11 +33,9 @@ while IFS=$'\t' read -r vcs_group vcs_flist || [[ -n "${vcs_group}${vcs_flist}" 
   case "${vcs_group}" in
     precompile)
       vlogan_precompile_file_args+=(-file "${vcs_flist}")
-      ((vlogan_precompile_filelist_count += 1))
       ;;
     project)
       vlogan_project_file_args+=(-file "${vcs_flist}")
-      ((vlogan_project_filelist_count += 1))
       ;;
     *)
       printf 'ERROR: unknown VCS analysis group %s for %s\n' \
@@ -64,16 +60,11 @@ for uvm_source in "${uvm_sources[@]}"; do
   }
 done
 
-printf 'VCS incremental analysis groups: precompile (%s filelists), project (%s filelists)\n' \
-  "${vlogan_precompile_filelist_count}" \
-  "${vlogan_project_filelist_count}" |
-  tee -a {{ (VCOMP_DIR ~ '/cmp.log')|shell_quote }}
 {{ vcs_runner }} vlogan \
   -full64 \
   -incr_vlogan \
   {{ vcs_incr_vlogan_ignore_env }} \
   "${vlogan_args[@]}" \
-  "${vlogan_include_args[@]}" \
   {% for define in additional_defines -%}
     {{ ('+define+' ~ define)|shell_quote }} \
   {% endfor -%}
@@ -82,9 +73,34 @@ printf 'VCS incremental analysis groups: precompile (%s filelists), project (%s 
     +define+UVM_VCS_RECORD \
   {% endif -%}
   "${uvm_sources[@]}" \
-  "${vlogan_precompile_file_args[@]}" \
-  "${vlogan_project_file_args[@]}" \
   2>&1 | tee -a {{ (VCOMP_DIR ~ '/cmp.log')|shell_quote }}
+
+run_vlogan_group() {
+  local group_name="$1"
+  shift
+  (($# > 0)) || return 0
+  printf 'VCS incremental analysis group: %s (%s filelists)\n' \
+    "${group_name}" "$(($# / 2))" |
+    tee -a {{ (VCOMP_DIR ~ '/cmp.log')|shell_quote }}
+  {{ vcs_runner }} vlogan \
+    -full64 \
+    -incr_vlogan \
+    {{ vcs_incr_vlogan_ignore_env }} \
+    "${vlogan_args[@]}" \
+    "${vlogan_include_args[@]}" \
+    "$@" \
+    {% for define in additional_defines -%}
+      {{ ('+define+' ~ define)|shell_quote }} \
+    {% endfor -%}
+    {% if debug_mode == "gui" -%}
+      +define+UVM_VERDI_COMPWAVE \
+      +define+UVM_VCS_RECORD \
+    {% endif -%}
+    2>&1 | tee -a {{ (VCOMP_DIR ~ '/cmp.log')|shell_quote }}
+}
+
+run_vlogan_group precompile "${vlogan_precompile_file_args[@]}"
+run_vlogan_group project "${vlogan_project_file_args[@]}"
 
 {{ vcs_runner }} vcs \
   -full64 \

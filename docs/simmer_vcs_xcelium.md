@@ -216,22 +216,25 @@ verilog_dv_tb(
 
 This mode preserves every required VIP. It changes the compile staging:
 
-1. UVM, the transitive filelists selected by
-   `vcs_vlogan_precompile_deps`, and all remaining project filelists are
-   analyzed in that order by one `vlogan -incr_vlogan` command.
-2. The single analysis context preserves legacy preprocessor macros and
-   include guards across the frozen/project boundary.
-3. After a project-only source edit, VCS incremental analysis can reuse the
-   unchanged frozen prefix and analyze the affected project sources.
+1. The transitive filelists selected by `vcs_vlogan_precompile_deps` are
+   analyzed together by one `vlogan -incr_vlogan` command.
+2. All remaining filelists are analyzed together by a second command. Keeping
+   each group intact preserves legacy preprocessor macros shared across
+   consecutive filelists.
+3. After a project-only source edit, the unchanged frozen group exits without
+   parsing its sources while the project group is reanalyzed.
 4. `vcs` elaborates the analyzed design using the existing Partition Compile
    configuration and generates `simv`.
 
 Select only dependencies that are already reachable through the testbench
 `deps` or `shells`. Prefer a frozen vendor package target rather than a broad
 environment target that also owns frequently edited project sources.
-The selected filelists are moved before the other project filelists without
-changing their internal order. Keep the selected dependency set narrow and
-stable so edits do not invalidate the expensive prefix.
+Preprocessor macro state does not cross the two `vlogan` commands. The
+selected boundary must therefore be self-contained: downstream sources should
+`import` compiled packages and must not rely on include guards or other macros
+defined as side effects of compiling the frozen group. If the existing
+filelists depend on such global macro state, refactor that boundary before
+enabling this mode; grouping those filelists changes compile semantics.
 
 The persistent analysis library is `<tb>__VCS_VCOMP/vlogan_work`.
 GUI-specific UVM recorder defines use the sibling `vlogan_work_gui` so switching
@@ -256,8 +259,9 @@ existing targets.
 
 An exact automatic fingerprint hit still bypasses VCS entirely. The
 three-step benefit appears after a real project source change: simmer invokes
-the compile flow, incremental `vlogan` reuses the unchanged VIP prefix, and
-only affected project sources are reanalyzed before incremental elaboration.
+the compile flow, unchanged VIP analysis commands exit quickly, and only the
+changed project libraries and dependent libraries are parsed before incremental
+elaboration.
 
 ### VCS Partition Compile
 
