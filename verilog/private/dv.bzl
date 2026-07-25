@@ -764,7 +764,7 @@ verilog_dv_tb = rule(
             default = False,
             doc = (
                 "Use VCS three-step analysis/elaboration. Dependencies selected by vcs_vlogan_precompile_deps " +
-                "form one frozen vlogan -incr_vlogan group, and remaining filelists form one project group. " +
+                "form a frozen prefix before the remaining project filelists in one vlogan -incr_vlogan command. " +
                 "When enabled, extra_compile_args must be empty; put analysis options in vcs_vlogan_args and " +
                 "elaboration options in vcs_elab_args."
             ),
@@ -779,11 +779,9 @@ verilog_dv_tb = rule(
         "vcs_vlogan_precompile_deps": attr.label_list(
             providers = [VerilogInfo],
             doc = (
-                "Dependencies whose transitive VCS filelists form one frozen vlogan -incr_vlogan analysis group. " +
-                "Each selected dependency must already be reachable through deps or shells. The remaining " +
-                "filelists form one project analysis group. Preprocessor macros do not cross analysis groups, so " +
-                "the boundary must be self-contained and downstream sources must import compiled packages instead " +
-                "of depending on macro or include-guard side effects from the frozen group."
+                "Dependencies whose transitive VCS filelists form a frozen prefix in the single incremental " +
+                "vlogan analysis command. Each selected dependency must already be reachable through deps or " +
+                "shells. The remaining project filelists follow the prefix without changing their internal order."
             ),
         ),
         "vcs_elab_args": attr.string_list(
