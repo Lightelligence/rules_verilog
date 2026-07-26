@@ -220,7 +220,9 @@ This mode preserves every required VIP. It changes the compile staging:
    analyzed together by one `vlogan -incr_vlogan` command.
 2. All remaining filelists are analyzed together by a second command. Keeping
    each group intact preserves legacy preprocessor macros shared across
-   consecutive filelists.
+   consecutive filelists. Top-level `.vh` and `.svh` entries from frozen
+   filelists are replayed immediately before this project group so generated
+   RTL wrapper macros remain available without modifying RTL sources.
 3. After a project-only source edit, the unchanged frozen group exits without
    parsing its sources while the project group is reanalyzed.
 4. `vcs` elaborates the analyzed design using the existing Partition Compile
@@ -229,12 +231,13 @@ This mode preserves every required VIP. It changes the compile staging:
 Select only dependencies that are already reachable through the testbench
 `deps` or `shells`. Prefer a frozen vendor package target rather than a broad
 environment target that also owns frequently edited project sources.
-Preprocessor macro state does not cross the two `vlogan` commands. The
+Other preprocessor macro state does not cross the two `vlogan` commands. The
 selected boundary must therefore be self-contained: downstream sources should
-`import` compiled packages and must not rely on include guards or other macros
-defined as side effects of compiling the frozen group. If the existing
-filelists depend on such global macro state, refactor that boundary before
-enabling this mode; grouping those filelists changes compile semantics.
+`import` compiled packages and must not rely on nested include guards or other
+macros defined as side effects of compiling a frozen `.v` or `.sv` source. If
+the existing filelists depend on such global macro state, refactor that
+boundary before enabling this mode; grouping those filelists changes compile
+semantics.
 
 The persistent analysis library is `<tb>__VCS_VCOMP/vlogan_work`.
 GUI-specific UVM recorder defines use the sibling `vlogan_work_gui` so switching

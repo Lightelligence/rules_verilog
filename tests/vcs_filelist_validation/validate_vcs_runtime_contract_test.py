@@ -2236,7 +2236,11 @@ run_bounded_process([
         elab_args.write_text("-top\nunit_test_top\n", encoding="utf-8", newline="\n")
         first_flist = runfiles / "vip.f"
         second_flist = runfiles / "project.f"
-        first_flist.write_text("+incdir+vip/includes\nvip.sv\n", encoding="utf-8", newline="\n")
+        first_flist.write_text(
+            "+incdir+vip/includes\nvip_preamble.vh\nvip.sv\n",
+            encoding="utf-8",
+            newline="\n",
+        )
         second_flist.write_text("+incdir+project/includes\nproject.sv\n", encoding="utf-8", newline="\n")
         filelists = runfiles / "filelists.txt"
         filelists.write_text(
@@ -2326,6 +2330,9 @@ run_bounded_process([
         self.assertIn("+incdir+project/includes", second_analysis)
         self.assertIn("-file", first_analysis)
         self.assertIn("vip.f", first_analysis)
+        self.assertIn("vip_preamble.vh", second_analysis)
+        self.assertLess(second_analysis.index("vip_preamble.vh"), second_analysis.index("-file"))
+        self.assertNotIn("vip.sv", second_analysis)
         self.assertIn("project.f", second_analysis)
         self.assertIn("+define+PROJECT_DEFINE", first_analysis)
         self.assertNotIn(shell_path(vlogan_args), first_analysis)
