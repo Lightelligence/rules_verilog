@@ -2322,6 +2322,7 @@ run_bounded_process([
         self.assertEqual("vlogan", uvm_analysis[0])
         self.assertIn(shell_path(uvm_pkg), uvm_analysis)
         self.assertIn(shell_path(uvm_recorder), uvm_analysis)
+        self.assertIn("+incdir+{}".format(shell_path(uvm_recorder.parent)), uvm_analysis)
         self.assertIn("-kdb", uvm_analysis)
         self.assertNotIn("-file", uvm_analysis)
         self.assertEqual("vlogan", first_analysis[0])

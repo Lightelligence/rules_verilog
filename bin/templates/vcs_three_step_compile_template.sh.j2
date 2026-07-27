@@ -62,8 +62,11 @@ vcs_home="$(
     tail -n 1
 )"
 uvm_sources=("${vcs_home%/}/etc/uvm-1.2/uvm_pkg.sv")
+uvm_include_args=()
 {% if debug_mode in ["waves", "gui"] -%}
-  uvm_sources+=("${vcs_home%/}/etc/uvm-1.2/vcs/uvm_custom_install_vcs_recorder.sv")
+  uvm_recorder_dir="${vcs_home%/}/etc/uvm-1.2/vcs"
+  uvm_sources+=("${uvm_recorder_dir}/uvm_custom_install_vcs_recorder.sv")
+  uvm_include_args+=("+incdir+${uvm_recorder_dir}")
 {% endif -%}
 for uvm_source in "${uvm_sources[@]}"; do
   [[ -f "${uvm_source}" ]] || {
@@ -80,6 +83,7 @@ done
     -kdb \
   {% endif -%}
   "${vlogan_args[@]}" \
+  "${uvm_include_args[@]}" \
   {% for define in additional_defines -%}
     {{ ('+define+' ~ define)|shell_quote }} \
   {% endfor -%}
