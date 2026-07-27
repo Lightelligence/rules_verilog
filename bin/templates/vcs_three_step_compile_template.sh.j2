@@ -65,8 +65,16 @@ uvm_sources=("${vcs_home%/}/etc/uvm-1.2/uvm_pkg.sv")
 uvm_include_args=()
 {% if debug_mode in ["waves", "gui"] -%}
   uvm_recorder_dir="${vcs_home%/}/etc/uvm-1.2/vcs"
-  uvm_sources+=("${uvm_recorder_dir}/uvm_custom_install_vcs_recorder.sv")
-  uvm_include_args+=("+incdir+${uvm_recorder_dir}")
+  uvm_verdi_dir="${vcs_home%/}/etc/uvm-1.2/verdi"
+  uvm_sources+=(
+    "${uvm_recorder_dir}/uvm_custom_install_vcs_recorder.sv"
+    "${uvm_verdi_dir}/uvm_custom_install_verdi_recorder.sv"
+  )
+  uvm_include_args+=(
+    "+incdir+${uvm_recorder_dir}"
+    "+incdir+${uvm_verdi_dir}"
+    "+incdir+${uvm_verdi_dir}/dpi"
+  )
 {% endif -%}
 for uvm_source in "${uvm_sources[@]}"; do
   [[ -f "${uvm_source}" ]] || {

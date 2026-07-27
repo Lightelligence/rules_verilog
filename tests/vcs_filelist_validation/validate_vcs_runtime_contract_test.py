@@ -2255,6 +2255,9 @@ run_bounded_process([
         uvm_recorder = vcs_home / "etc" / "uvm-1.2" / "vcs" / "uvm_custom_install_vcs_recorder.sv"
         uvm_recorder.parent.mkdir()
         uvm_recorder.touch()
+        uvm_verdi_recorder = vcs_home / "etc" / "uvm-1.2" / "verdi" / "uvm_custom_install_verdi_recorder.sv"
+        uvm_verdi_recorder.parent.mkdir()
+        uvm_verdi_recorder.touch()
 
         captured = root / "calls.txt"
         stub = root / "vcs_stub.sh"
@@ -2322,7 +2325,10 @@ run_bounded_process([
         self.assertEqual("vlogan", uvm_analysis[0])
         self.assertIn(shell_path(uvm_pkg), uvm_analysis)
         self.assertIn(shell_path(uvm_recorder), uvm_analysis)
+        self.assertIn(shell_path(uvm_verdi_recorder), uvm_analysis)
         self.assertIn("+incdir+{}".format(shell_path(uvm_recorder.parent)), uvm_analysis)
+        self.assertIn("+incdir+{}".format(shell_path(uvm_verdi_recorder.parent)), uvm_analysis)
+        self.assertIn("+incdir+{}".format(shell_path(uvm_verdi_recorder.parent / "dpi")), uvm_analysis)
         self.assertIn("-kdb", uvm_analysis)
         self.assertIn("+define+UVM_VERDI_COMPWAVE", uvm_analysis)
         self.assertNotIn("+define+UVM_VCS_RECORD", uvm_analysis)
