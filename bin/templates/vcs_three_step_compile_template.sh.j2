@@ -62,7 +62,7 @@ vcs_home="$(
     tail -n 1
 )"
 uvm_sources=("${vcs_home%/}/etc/uvm-1.2/uvm_pkg.sv")
-{% if debug_mode == "gui" -%}
+{% if debug_mode in ["waves", "gui"] -%}
   uvm_sources+=("${vcs_home%/}/etc/uvm-1.2/vcs/uvm_custom_install_vcs_recorder.sv")
 {% endif -%}
 for uvm_source in "${uvm_sources[@]}"; do
@@ -76,6 +76,9 @@ done
   -full64 \
   -incr_vlogan \
   {{ vcs_incr_vlogan_ignore_env }} \
+  {% if debug_mode in ["waves", "gui"] -%}
+    -kdb \
+  {% endif -%}
   "${vlogan_args[@]}" \
   {% for define in additional_defines -%}
     {{ ('+define+' ~ define)|shell_quote }} \
@@ -99,6 +102,9 @@ run_vlogan_group() {
     -full64 \
     -incr_vlogan \
     {{ vcs_incr_vlogan_ignore_env }} \
+    {% if debug_mode in ["waves", "gui"] -%}
+      -kdb \
+    {% endif -%}
     "${vlogan_args[@]}" \
     "${vlogan_include_args[@]}" \
     "$@" \

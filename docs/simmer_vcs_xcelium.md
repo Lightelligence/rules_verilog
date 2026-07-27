@@ -239,13 +239,15 @@ the existing filelists depend on such global macro state, refactor that
 boundary before enabling this mode; grouping those filelists changes compile
 semantics.
 
-The persistent analysis library is `<tb>__VCS_VCOMP/vlogan_work`.
-GUI-specific UVM recorder defines use the sibling `vlogan_work_gui` so switching
-GUI mode does not invalidate the batch analysis database. Simmer ignores only
-volatile LSF host/job variables during VCS incremental-environment checks;
-tool, source, define and stable environment changes remain compile inputs.
-`--recompile` removes the analysis library along with the rest of the VCOMP
-directory.
+The persistent batch analysis library is `<tb>__VCS_VCOMP/vlogan_work`.
+Signal-only waves use the sibling `vlogan_work_waves`, and GUI-specific UVM
+recorder defines use `vlogan_work_gui`. Waves and GUI analysis run with `-kdb`
+and compile the VCS UVM recorder installer before elaboration, so their KDB and
+recording tops match the final debug build without invalidating the normal
+batch analysis database. Simmer ignores only volatile LSF host/job variables
+during VCS incremental-environment checks; tool, source, define and stable
+environment changes remain compile inputs. `--recompile` removes all analysis
+libraries along with the rest of the VCOMP directory.
 
 Analysis and elaboration options must be unambiguous in this flow:
 
