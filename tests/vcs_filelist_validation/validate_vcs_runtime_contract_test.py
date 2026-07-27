@@ -2739,9 +2739,42 @@ run_bounded_process([
         self.assertEqual(JobStatus.PASSED, vcomp.jobstatus)
         vcomp.write_compile_fingerprint.assert_called_once_with(vcomp.job_dir, vcomp.compile_fingerprint)
 
+    def test_vcs_tiny_multiline_make_clock_skew_allows_compile_fingerprint(self):
+        vcomp = self._run_vcs_compile_post_run(
+            "make[1]: Warning: File 'filelist.hsopt.objs' has modification time 0.0075 s in the \\\n"
+            "future\n"
+            "make[1]: warning:  Clock skew detected.  Your build may be incomplete.",
+            [],
+        )
+
+        self.assertEqual(JobStatus.PASSED, vcomp.jobstatus)
+        vcomp.write_compile_fingerprint.assert_called_once_with(vcomp.job_dir, vcomp.compile_fingerprint)
+
     def test_vcs_material_make_clock_skew_still_fails(self):
         vcomp = self._run_vcs_compile_post_run(
             "make[1]: Warning: File 'filelist.hsopt.objs' has modification time 0.1 s in the future\n"
+            "make[1]: warning:  Clock skew detected.  Your build may be incomplete.",
+            [],
+        )
+
+        self.assertEqual(JobStatus.FAILED, vcomp.jobstatus)
+        vcomp.write_compile_fingerprint.assert_not_called()
+
+    def test_vcs_material_multiline_make_clock_skew_still_fails(self):
+        vcomp = self._run_vcs_compile_post_run(
+            "make[1]: Warning: File 'filelist.hsopt.objs' has modification time 0.1 s in the \\\n"
+            "future\n"
+            "make[1]: warning:  Clock skew detected.  Your build may be incomplete.",
+            [],
+        )
+
+        self.assertEqual(JobStatus.FAILED, vcomp.jobstatus)
+        vcomp.write_compile_fingerprint.assert_not_called()
+
+    def test_vcs_incomplete_multiline_make_clock_skew_still_fails(self):
+        vcomp = self._run_vcs_compile_post_run(
+            "make[1]: Warning: File 'filelist.hsopt.objs' has modification time 0.0075 s in the \\\n"
+            "unexpected continuation\n"
             "make[1]: warning:  Clock skew detected.  Your build may be incomplete.",
             [],
         )

@@ -160,9 +160,10 @@ match the current inputs.
 
 VCS compile logs can contain a GNU make future-mtime warning when an NFS
 timestamp is less than 100 ms ahead of the execution host. Simmer treats that
-specific small skew and its paired clock-skew summary as benign. A larger skew
-or a clock-skew summary without a small future-mtime detail still fails the
-compile and prevents fingerprint reuse.
+specific small skew and its paired clock-skew summary as benign, including when
+GNU make wraps `in the future` across a backslash-continued line. A larger skew
+or a clock-skew summary without a complete small future-mtime detail still
+fails the compile and prevents fingerprint reuse.
 
 Use `--recompile` to force a clean VCS compile. It takes precedence over the
 default automatic cache for that invocation.

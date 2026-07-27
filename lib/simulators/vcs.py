@@ -664,17 +664,30 @@ class VcsSimulator(SimulatorInterface):
 
     def get_ignored_compile_warning_line_numbers(self, log_path):
         future_mtime_regex = re.compile(r"(?i)\bmake(?:\[\d+\])?:\s*warning:\s*file .+ has modification time "
-                                        r"([0-9]+(?:\.[0-9]+)?)\s+s in the future\b")
+                                        r"([0-9]+(?:\.[0-9]+)?)\s+s in the(?:\s+future\b|(?P<continued>\s*\\\s*$))")
+        future_mtime_continuation_regex = re.compile(r"(?i)^\s*future\b")
         clock_skew_regex = re.compile(r"(?i)\bmake(?:\[\d+\])?:\s*warning:\s*clock skew detected\.\s*"
                                       r"your build may be incomplete\.")
         benign_future_mtime_lines = set()
         clock_skew_summary_lines = set()
+        continued_future_mtime = None
 
         with open(log_path, 'r', encoding='utf-8', errors='ignore') as logp:
             for line_number, line in enumerate(logp, start=1):
+                if continued_future_mtime is not None:
+                    warning_line_number, skew_seconds = continued_future_mtime
+                    if (future_mtime_continuation_regex.search(line)
+                            and skew_seconds < _MAX_BENIGN_MAKE_CLOCK_SKEW_SECONDS):
+                        benign_future_mtime_lines.add(warning_line_number)
+                    continued_future_mtime = None
+
                 match = future_mtime_regex.search(line)
-                if match and float(match.group(1)) < _MAX_BENIGN_MAKE_CLOCK_SKEW_SECONDS:
-                    benign_future_mtime_lines.add(line_number)
+                if match:
+                    skew_seconds = float(match.group(1))
+                    if match.group("continued") is not None:
+                        continued_future_mtime = (line_number, skew_seconds)
+                    elif skew_seconds < _MAX_BENIGN_MAKE_CLOCK_SKEW_SECONDS:
+                        benign_future_mtime_lines.add(line_number)
                 if clock_skew_regex.search(line):
                     clock_skew_summary_lines.add(line_number)
 
