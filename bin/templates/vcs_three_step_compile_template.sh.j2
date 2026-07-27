@@ -87,8 +87,10 @@ done
   {% for define in additional_defines -%}
     {{ ('+define+' ~ define)|shell_quote }} \
   {% endfor -%}
-  {% if debug_mode == "gui" -%}
+  {% if debug_mode in ["waves", "gui"] -%}
     +define+UVM_VERDI_COMPWAVE \
+  {% endif -%}
+  {% if debug_mode == "gui" -%}
     +define+UVM_VCS_RECORD \
   {% endif -%}
   "${uvm_sources[@]}" \

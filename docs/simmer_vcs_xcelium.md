@@ -244,10 +244,12 @@ Signal-only waves use the sibling `vlogan_work_waves`, and GUI-specific UVM
 recorder defines use `vlogan_work_gui`. Waves and GUI analysis run with `-kdb`
 and compile the VCS UVM recorder installer before elaboration, so their KDB and
 recording tops match the final debug build without invalidating the normal
-batch analysis database. Simmer ignores only volatile LSF host/job variables
-during VCS incremental-environment checks; tool, source, define and stable
-environment changes remain compile inputs. `--recompile` removes all analysis
-libraries along with the rest of the VCOMP directory.
+batch analysis database. Waves define `UVM_VERDI_COMPWAVE` only while compiling
+that installer; the define is not propagated to design filelists, and waves do
+not enable `UVM_VCS_RECORD` or VPI. Simmer ignores only volatile LSF host/job
+variables during VCS incremental-environment checks; tool, source, define and
+stable environment changes remain compile inputs. `--recompile` removes all
+analysis libraries along with the rest of the VCOMP directory.
 
 Analysis and elaboration options must be unambiguous in this flow:
 
@@ -503,13 +505,13 @@ simmer -t <bench>:<test> --simulator VCS --vcs-xprop F
 ```
 
 VCS `--waves` is the lightweight signal-dump mode. It compiles with `-kdb`
-and the base `-debug_access`, but does not enable VPI, SmartLog, or UVM
-transaction-recording defines. VCS cannot combine SmartLog's `-sml` with
-`-fastpartcomp=jN`; use `--smartlog --no-vcs-partcomp` when Verdi log/source
-correlation is needed. `--gui` remains the full interactive-debug mode: it
-enables full reverse-debug access and explicitly adds
-`UVM_VERDI_COMPWAVE` and `UVM_VCS_RECORD`, but does not implicitly enable
-SmartLog.
+and the base `-debug_access`, but does not enable VPI, SmartLog, or propagate
+UVM transaction-recording defines to design sources. VCS cannot combine
+SmartLog's `-sml` with `-fastpartcomp=jN`; use
+`--smartlog --no-vcs-partcomp` when Verdi log/source correlation is needed.
+`--gui` remains the full interactive-debug mode: it enables full reverse-debug
+access and explicitly adds `UVM_VERDI_COMPWAVE` and `UVM_VCS_RECORD`, but does
+not implicitly enable SmartLog.
 
 The signal-only mode avoids the callback, driver, class, and VPI capabilities
 used for transaction-aware debug. GUI mode keeps VPI and UVM recording.
