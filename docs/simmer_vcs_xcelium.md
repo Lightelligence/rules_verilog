@@ -520,7 +520,10 @@ VCS wave dumping supports FSDB only.
 
 ### FSDB probe and viewer flow
 
-The default FSDB command probes `hdl_top`. Limit scope and time when possible:
+The default FSDB command probes `hdl_top` to depth 10. VCS wave builds retain
+`-kdb` and base debug access for source-code visibility, while FSDB contains HDL
+signals rather than the UVM VIP class hierarchy. Limit scope and time further
+when possible:
 
 ```bash
 simmer -t <bench>:<test> --simulator VCS \
@@ -539,8 +542,9 @@ SIMMER_WAVE_LAUNCHER="bsub -I -q syn" ./run_waves.sh
 
 The generated UCLI script uses the file ID returned by `dump -file`, so it does
 not assume `FSDB0` when another dump file is already open. The default
-`--wave-depth 999` maps to UCLI `-depth 0`, which is the documented unlimited
-hierarchy depth; explicit smaller depths are preserved.
+`--wave-depth` is 10. An explicit `--wave-depth 999` maps to UCLI `-depth 0`,
+which is the documented unlimited hierarchy depth; other explicit depths are
+preserved.
 
 VCS FSDB waves enable glitch and force information by default. Simmer passes
 `+fsdb+glitch=0` and `+fsdb+force` to `simv`; generated UCLI also runs
@@ -648,11 +652,15 @@ Use `--simmer-profile` to print phase and job timings after the summary:
 simmer -t <bench>:<test> --simulator VCS --simmer-profile
 ```
 
-The profile includes discovery, each Bazel command, Bazel external-repository
-events, TB setup, VCS compile, test config builds, simulation jobs, job
-directories, and commands. Repository rows are shown as `external_repo: NAME`
-at the finest granularity Bazel records. A cached repository has no fetch or
-repository-rule event, so it does not appear in that invocation.
+The profile includes discovery, each Bazel command, Bazel build-phase markers,
+Bazel external-repository events, TB setup, VCS compile, test config builds,
+simulation jobs, job directories, and commands. The scheduled testbench build
+also leaves `bazel_tb_profile.json` in its VCOMP directory for deeper analysis.
+Repository rows are shown as `external_repo: NAME` at the finest granularity
+Bazel records. Overlapping events for one repository are merged so these rows
+approximate wall-clock time instead of double-counting nested work. A cached
+repository has no fetch or repository-rule event, so it does not appear in that
+invocation.
 
 Generated unit-test scripts print the failed command, line and exit code before
 they close. For a script launched in a temporary terminal, keep the window open
@@ -754,8 +762,14 @@ seed and original simulator options. Run it directly from any directory. Set
 ## Saving disk space
 
 - Discovery metadata is cached under `.simmer/cache/` and can be deleted at any
-  time. `--no-bazel` accepts it only while BUILD, `.bzl`, MODULE/WORKSPACE and
-  Bazel configuration files (including `.bazelignore`) remain unchanged.
+  time. The cache tracks BUILD-prefixed files, `.bzl`, MODULE/WORKSPACE and
+  Bazel configuration files (including `.bazelignore`) inside the main
+  workspace. External IP/VIP repositories are intentionally excluded; run
+  `bazel clean` after changing them.
+- When discovery is cached and the existing TB runfiles and test-config outputs
+  are still present, simmer reuses those outputs instead of repeating
+  `bazel build`. A changed workspace metadata file invalidates discovery and
+  rebuilds them; `bazel clean` removes the outputs and also forces a rebuild.
 - Passing tests are removed by default. `--nt` intentionally retains them.
 - Do not enable waves, coverage, SmartLog, ICO artifacts or `--nt` in routine
   throughput regressions.

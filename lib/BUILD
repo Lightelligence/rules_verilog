@@ -26,7 +26,10 @@ py_library(
 py_library(
     name = "job_lib",
     srcs = ["job_lib.py"],
-    deps = [":runtime_options"],
+    deps = [
+        ":bazel_profile",
+        ":runtime_options",
+    ],
 )
 
 py_library(

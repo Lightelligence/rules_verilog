@@ -1544,7 +1544,7 @@ run_bounded_process([
         self.assertIn("run 80ns", rendered)
         self.assertIn("database -close shm_db", rendered)
 
-    def test_vcs_wave_template_uses_returned_fsdb_id_and_unlimited_default_depth(self):
+    def test_vcs_wave_template_uses_returned_fsdb_id_and_explicit_unlimited_depth(self):
         wave_template = self._read_repo_file("bin/templates/vcs_wave_cmd_template.tcl.j2")
         environment = jinja2.Environment(undefined=jinja2.StrictUndefined)
         environment.filters["tcl_quote"] = _vcs_tcl_quote

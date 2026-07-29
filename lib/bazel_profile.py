@@ -4,7 +4,7 @@ import json
 import re
 
 _REPOSITORY_RE = re.compile(r"(?:@@?|external[/\\])([A-Za-z0-9._+~-]+)")
-_REPOSITORY_NAME_RE = re.compile(r"repository(?: rule)?[=: ]+([A-Za-z0-9._+~-]+)", re.IGNORECASE)
+_REPOSITORY_NAME_RE = re.compile(r"repository(?: rule[=: ]+|[=:]+)([A-Za-z0-9._+~-]+)", re.IGNORECASE)
 
 
 def _repository_name(event, searchable):
@@ -42,10 +42,57 @@ def repository_timings(profile_path):
         if not repository or repository == "BazelRepositoryModule":
             continue
 
-        duration_s, count = totals.get(repository, (0.0, 0))
-        totals[repository] = (duration_s + event["dur"] / 1_000_000.0, count + 1)
+        intervals, unpositioned_duration_us, count = totals.get(repository, ([], 0, 0))
+        timestamp_us = event.get("ts")
+        if isinstance(timestamp_us, (int, float)):
+            intervals.append((timestamp_us, timestamp_us + event["dur"]))
+        else:
+            unpositioned_duration_us += event["dur"]
+        totals[repository] = (intervals, unpositioned_duration_us, count + 1)
 
-    return sorted(
-        [(duration_s, repository, count) for repository, (duration_s, count) in totals.items()],
-        reverse=True,
-    )
+    aggregated = []
+    for repository, (intervals, unpositioned_duration_us, count) in totals.items():
+        positioned_duration_us = 0
+        interval_end_us = None
+        for start_us, end_us in sorted(intervals):
+            if interval_end_us is None or start_us > interval_end_us:
+                positioned_duration_us += end_us - start_us
+                interval_end_us = end_us
+            elif end_us > interval_end_us:
+                positioned_duration_us += end_us - interval_end_us
+                interval_end_us = end_us
+        duration_s = (positioned_duration_us + unpositioned_duration_us) / 1_000_000.0
+        aggregated.append((duration_s, repository, count))
+
+    return sorted(aggregated, reverse=True)
+
+
+def phase_timings(profile_path):
+    """Return elapsed time between Bazel build-phase markers."""
+    with open(profile_path, encoding="utf-8") as profile_file:
+        events = json.load(profile_file).get("traceEvents", [])
+
+    markers = []
+    profile_end_us = 0
+    for event in events:
+        timestamp_us = event.get("ts")
+        if not isinstance(timestamp_us, (int, float)):
+            continue
+        duration_us = event.get("dur", 0)
+        if not isinstance(duration_us, (int, float)):
+            duration_us = 0
+        profile_end_us = max(profile_end_us, timestamp_us + duration_us)
+
+        if "build phase marker" not in str(event.get("cat", "")).lower():
+            continue
+        name = str(event.get("name", "")).strip()
+        if name:
+            markers.append((timestamp_us, name))
+
+    timings = []
+    markers = sorted(set(markers))
+    for index, (timestamp_us, name) in enumerate(markers):
+        next_timestamp_us = markers[index + 1][0] if index + 1 < len(markers) else profile_end_us
+        duration_s = max(0, next_timestamp_us - timestamp_us) / 1_000_000.0
+        timings.append((duration_s, name))
+    return timings

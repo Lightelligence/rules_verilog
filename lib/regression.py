@@ -41,22 +41,15 @@ DISCOVERY_ROOT_FILES = {
 }
 DISCOVERY_MAX_ARG_CHARS = 100000
 DISCOVERY_MAX_SOURCE_RETRIES = 2
-DISCOVERY_LOCAL_REPOSITORY_MAX_DEPTH = 32
-DISCOVERY_LOCAL_REPOSITORY_MAX_DIRS = 4096
-DISCOVERY_LOCAL_REPOSITORY_MAX_ENTRIES = 50000
-DISCOVERY_LOCAL_REPOSITORY_MAX_METADATA_FILES = 4096
-DISCOVERY_LOCAL_REPOSITORY_MAX_DECLARATION_BYTES = 4 * 1024 * 1024
-
-
-class _DiscoveryDependencyScanLimit(Exception):
-
-    def __init__(self, project_paths):
-        super().__init__("local repository metadata scan limit reached")
-        self.project_paths = project_paths
-
-
-class _UnresolvedLocalRepositoryDeclaration(Exception):
-    pass
+DISCOVERY_GIT_METADATA_PATHS = (
+    "BUILD",
+    "BUILD.bazel",
+    ":(glob)**/BUILD*",
+    ":(glob)**/*.bzl",
+    ":(glob)**/*.bazelrc",
+    ":(glob)**/.bazelrc*",
+    *sorted(DISCOVERY_ROOT_FILES),
+)
 
 
 def resolve_report_generation(report_option, total_simulations):
@@ -272,6 +265,7 @@ class RegressionConfig():
         """Publish all discovery payloads as one advisory-locked generation."""
         if manifest is None:
             manifest = self._discovery_dependency_manifest()
+        self._warn_if_discovery_uncacheable(manifest)
         with self._discovery_cache_lock(exclusive=True):
             self.dict_to_json(self.all_vcomp, "all_vcomp.json")
             self.dict_to_json(self.tests_to_tags, "tests_to_tags.json")
@@ -281,32 +275,45 @@ class RegressionConfig():
     def _have_discovery_cache(self):
         return all(os.path.exists(self._cache_path(filename)) for filename in DISCOVERY_CACHE_FILES)
 
+    def _warn_if_discovery_uncacheable(self, manifest):
+        reason = manifest.get("uncacheable_reason")
+        if manifest.get("cacheable", True) or not reason:
+            return
+        if getattr(self, "_discovery_uncacheable_warning_emitted", False):
+            return
+        location = reason.get("path", "unknown path")
+        if reason.get("line") is not None:
+            location = "{}:{}".format(location, reason["line"])
+        self.log.warning("Test discovery cache disabled: %s (%s)", reason.get("detail", reason.get("kind", "unknown")),
+                         location)
+        self._discovery_uncacheable_warning_emitted = True
+
+    @staticmethod
+    def _manifest_relative_path(path, project_root):
+        return os.path.relpath(os.path.realpath(path), project_root).replace(os.sep, "/")
+
     def _discovery_dependency_manifest(self):
         submodule_state = self._git_submodule_state()
-        cacheable = True
-        try:
-            dependency_paths = sorted(set(self._iter_discovery_dependency_paths(submodule_state)))
-        except _DiscoveryDependencyScanLimit as exc:
-            dependency_paths = sorted(set(exc.project_paths))
-            cacheable = False
-        files = []
         project_root = os.path.realpath(self.proj_dir)
+        dependency_paths = sorted(set(self._iter_discovery_dependency_paths(submodule_state)))
+        files = []
         for path in dependency_paths:
-            relative_path = os.path.relpath(os.path.realpath(path), project_root).replace(os.sep, "/")
+            relative_path = self._manifest_relative_path(path, project_root)
             try:
                 with open(path, "rb") as filep:
                     digest = hashlib.sha256(filep.read()).hexdigest()
             except OSError:
                 digest = "missing"
             files.append({"path": relative_path, "sha256": digest})
-        return {
-            "schema_version": 3,
-            "cacheable": cacheable,
+        manifest = {
+            "schema_version": 5,
+            "cacheable": True,
             "allow_no_run": bool(self.options.allow_no_run),
             "discovery_query": self._build_vcomp_discovery_query(),
             "git_submodules": submodule_state,
             "files": files,
         }
+        return manifest
 
     def _git_submodule_state(self):
         result = subprocess.run(
@@ -321,7 +328,7 @@ class RegressionConfig():
     @staticmethod
     def _is_discovery_dependency(relative_path):
         filename = os.path.basename(relative_path)
-        return (filename in ("BUILD", "BUILD.bazel") or filename.endswith(".bzl") or filename.startswith(".bazelrc")
+        return (filename.startswith("BUILD") or filename.endswith(".bzl") or filename.startswith(".bazelrc")
                 or filename.endswith(".bazelrc") or relative_path in DISCOVERY_ROOT_FILES)
 
     def _bazelrc_dependency_paths(self):
@@ -357,117 +364,22 @@ class RegressionConfig():
                 continue
 
     def _write_discovery_manifest(self):
+        manifest = self._discovery_dependency_manifest()
+        self._warn_if_discovery_uncacheable(manifest)
         with self._discovery_cache_lock(exclusive=True):
-            self.dict_to_json(self._discovery_dependency_manifest(), "discovery_manifest.json")
-
-    @staticmethod
-    def _local_repository_paths(metadata_path):
-        try:
-            with open(metadata_path, "r", encoding="utf-8", errors="surrogateescape") as filep:
-                source = filep.read(DISCOVERY_LOCAL_REPOSITORY_MAX_DECLARATION_BYTES + 1)
-            if len(source) > DISCOVERY_LOCAL_REPOSITORY_MAX_DECLARATION_BYTES:
-                raise _UnresolvedLocalRepositoryDeclaration(metadata_path)
-            tree = ast.parse(source, filename=metadata_path)
-        except OSError:
-            return []
-        except (SyntaxError, ValueError):
-            if "local_repository" in source or "new_local_repository" in source:
-                raise _UnresolvedLocalRepositoryDeclaration(metadata_path)
-            return []
-
-        paths = []
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Call):
-                continue
-            function_name = None
-            if isinstance(node.func, ast.Name):
-                function_name = node.func.id
-            elif isinstance(node.func, ast.Attribute):
-                function_name = node.func.attr
-            repository_function_names = {"local_repository", "new_local_repository"}
-            wrapped_function_name = None
-            if node.args:
-                if isinstance(node.args[0], ast.Name):
-                    wrapped_function_name = node.args[0].id
-                elif isinstance(node.args[0], ast.Attribute):
-                    wrapped_function_name = node.args[0].attr
-            direct_declaration = function_name in repository_function_names
-            wrapped_declaration = wrapped_function_name in repository_function_names
-            if not direct_declaration and not wrapped_declaration:
-                continue
-            resolved_path = False
-            for keyword in node.keywords:
-                if keyword.arg != "path":
-                    continue
-                if isinstance(keyword.value, ast.Constant) and isinstance(keyword.value.value, str):
-                    paths.append(keyword.value.value)
-                    resolved_path = True
-                break
-            if not resolved_path:
-                raise _UnresolvedLocalRepositoryDeclaration(metadata_path)
-        return paths
-
-    def _iter_local_repository_metadata(self, repository_root):
-        repository_root = os.path.realpath(repository_root)
-        if not os.path.isdir(repository_root):
-            return
-
-        pending = [(repository_root, 0)]
-        directories_seen = 0
-        entries_seen = 0
-        metadata_files_seen = 0
-        metadata_paths = []
-        while pending:
-            directory, depth = pending.pop()
-            directories_seen += 1
-            if directories_seen > DISCOVERY_LOCAL_REPOSITORY_MAX_DIRS:
-                return None
-            try:
-                entries = os.scandir(directory)
-            except OSError:
-                return None
-            with entries:
-                for entry in entries:
-                    try:
-                        if entry.is_symlink():
-                            if entry.name not in ("BUILD", "BUILD.bazel") and not entry.name.endswith(".bzl"):
-                                continue
-                            entries_seen += 1
-                            if entries_seen > DISCOVERY_LOCAL_REPOSITORY_MAX_ENTRIES:
-                                return None
-                            metadata_files_seen += 1
-                            if metadata_files_seen > DISCOVERY_LOCAL_REPOSITORY_MAX_METADATA_FILES:
-                                return None
-                            metadata_paths.append(entry.path)
-                            continue
-                        if entry.is_dir(follow_symlinks=False):
-                            if entry.name in (".git", ".simmer") or entry.name.startswith("bazel-"):
-                                continue
-                            entries_seen += 1
-                            if entries_seen > DISCOVERY_LOCAL_REPOSITORY_MAX_ENTRIES:
-                                return None
-                            if depth >= DISCOVERY_LOCAL_REPOSITORY_MAX_DEPTH:
-                                return None
-                            pending.append((entry.path, depth + 1))
-                            continue
-                        if not entry.is_file(follow_symlinks=False):
-                            continue
-                    except OSError:
-                        return None
-                    entries_seen += 1
-                    if entries_seen > DISCOVERY_LOCAL_REPOSITORY_MAX_ENTRIES:
-                        return None
-                    if entry.name not in ("BUILD", "BUILD.bazel") and not entry.name.endswith(".bzl"):
-                        continue
-                    metadata_files_seen += 1
-                    if metadata_files_seen > DISCOVERY_LOCAL_REPOSITORY_MAX_METADATA_FILES:
-                        return None
-                    metadata_paths.append(entry.path)
-        return metadata_paths
+            self.dict_to_json(manifest, "discovery_manifest.json")
 
     def _iter_project_discovery_dependency_paths(self, submodule_state):
         indexed_result = subprocess.run(
-            ["git", "ls-files", "--cached", "--others", "--exclude-standard"],
+            [
+                "git",
+                "ls-files",
+                "--cached",
+                "--others",
+                "--exclude-standard",
+                "--",
+                *DISCOVERY_GIT_METADATA_PATHS,
+            ],
             cwd=self.proj_dir,
             check=False,
             capture_output=True,
@@ -481,12 +393,7 @@ class RegressionConfig():
                 "--ignored",
                 "--exclude-standard",
                 "--",
-                ":(glob)**/BUILD",
-                ":(glob)**/BUILD.bazel",
-                ":(glob)**/*.bzl",
-                ":(glob)**/*.bazelrc",
-                ":(glob)**/.bazelrc*",
-                *sorted(DISCOVERY_ROOT_FILES),
+                *DISCOVERY_GIT_METADATA_PATHS,
             ],
             cwd=self.proj_dir,
             check=False,
@@ -529,37 +436,11 @@ class RegressionConfig():
         yield from self._bazelrc_dependency_paths()
 
     def _iter_discovery_dependency_paths(self, submodule_state=None):
+        """Yield main-workspace metadata; external IP/VIP changes require bazel clean."""
         if submodule_state is None:
             submodule_state = self._git_submodule_state()
         project_paths = list(self._iter_project_discovery_dependency_paths(submodule_state))
         yield from project_paths
-
-        repository_roots = set()
-        project_root = os.path.realpath(self.proj_dir)
-        for metadata_path in project_paths:
-            metadata_path = os.path.realpath(metadata_path)
-            try:
-                if os.path.commonpath((project_root, metadata_path)) != project_root:
-                    continue
-            except ValueError:
-                continue
-            if not self._is_discovery_dependency(os.path.relpath(metadata_path, project_root)):
-                continue
-            try:
-                repository_paths = self._local_repository_paths(metadata_path)
-            except _UnresolvedLocalRepositoryDeclaration:
-                raise _DiscoveryDependencyScanLimit(project_paths)
-            for repository_path in repository_paths:
-                if not os.path.isabs(repository_path):
-                    repository_path = os.path.join(project_root, repository_path)
-                repository_root = os.path.realpath(repository_path)
-                if repository_root != project_root:
-                    repository_roots.add(repository_root)
-        for repository_root in sorted(repository_roots):
-            metadata_paths = self._iter_local_repository_metadata(repository_root)
-            if metadata_paths is None:
-                raise _DiscoveryDependencyScanLimit(project_paths)
-            yield from metadata_paths
 
     def _discovery_cache_is_fresh(self):
         try:
@@ -568,6 +449,7 @@ class RegressionConfig():
                     return False
                 _, _, _, cached_manifest = self._read_discovery_cache_locked()
                 if not cached_manifest.get("cacheable", True):
+                    self._warn_if_discovery_uncacheable(cached_manifest)
                     return False
                 current_manifest = self._discovery_dependency_manifest()
         except (OSError, ValueError, json.JSONDecodeError):
@@ -584,6 +466,7 @@ class RegressionConfig():
                     return False
                 all_vcomp, tests_to_tags, tests_to_simulator, cached_manifest = self._read_discovery_cache_locked()
                 if not cached_manifest.get("cacheable", True):
+                    self._warn_if_discovery_uncacheable(cached_manifest)
                     return False
                 if cached_manifest != self._discovery_dependency_manifest():
                     self.log.debug("Discovery cache dependency manifest changed")
