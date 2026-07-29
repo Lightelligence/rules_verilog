@@ -758,14 +758,14 @@ seed and original simulator options. Run it directly from any directory. Set
 ## Saving disk space
 
 - Discovery metadata is cached under `.simmer/cache/` and can be deleted at any
-  time. `--no-bazel` accepts it only while BUILD, `.bzl`, MODULE/WORKSPACE and
-  Bazel configuration files (including `.bazelignore`) remain unchanged.
-  Git-backed `local_repository` dependencies use the Git index to track only
-  Bazel metadata instead of walking large source trees. A
-  `new_local_repository` with `build_file` or `build_file_content` tracks that
-  injected metadata without scanning the vendor source root. If another local
-  repository cannot be inspected safely, simmer disables discovery reuse and
-  records the repository path and reason in `discovery_manifest.json`.
+  time. The cache tracks BUILD-prefixed files, `.bzl`, MODULE/WORKSPACE and
+  Bazel configuration files (including `.bazelignore`) inside the main
+  workspace. External IP/VIP repositories are intentionally excluded; run
+  `bazel clean` after changing them.
+- When discovery is cached and the existing TB runfiles and test-config outputs
+  are still present, simmer reuses those outputs instead of repeating
+  `bazel build`. A changed workspace metadata file invalidates discovery and
+  rebuilds them; `bazel clean` removes the outputs and also forces a rebuild.
 - Passing tests are removed by default. `--nt` intentionally retains them.
 - Do not enable waves, coverage, SmartLog, ICO artifacts or `--nt` in routine
   throughput regressions.

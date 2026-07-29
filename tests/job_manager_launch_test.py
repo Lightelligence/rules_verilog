@@ -301,6 +301,42 @@ class JobManagerLaunchTest(unittest.TestCase):
 
         self.assertEqual("bazel build //pkg/tests:second", job.main_cmdline)
 
+    def test_cached_discovery_reuses_existing_tb_and_test_cfg_outputs(self):
+        project_dir = tempfile.mkdtemp()
+        os.makedirs(os.path.join(project_dir, "bazel-bin", "pkg", "tb.runfiles", "__main__"))
+        tests_dir = os.path.join(project_dir, "bazel-bin", "pkg", "tests")
+        os.makedirs(tests_dir)
+        Path(tests_dir, "first_dynamic_args.py").touch()
+        log = _Logger()
+        rcfg = SimpleNamespace(
+            options=SimpleNamespace(timeout=1, no_compile=False, no_bazel=False),
+            log=log,
+            proj_dir=project_dir,
+            use_cached_discovery=True,
+        )
+        vcomper = SimpleNamespace(job_dir="vcomp_dir", add_dependency=lambda _job: None)
+
+        job = BazelTBJob(rcfg, "//pkg:tb", vcomper, additional_targets=["//pkg/tests:first"])
+
+        self.assertNotIn("bazel build", job.main_cmdline)
+        self.assertIn("cached or discovery-built", job.main_cmdline)
+
+    def test_cached_discovery_rebuilds_outputs_missing_after_bazel_clean(self):
+        project_dir = tempfile.mkdtemp()
+        os.makedirs(os.path.join(project_dir, "bazel-bin", "pkg", "tb.runfiles", "__main__"))
+        log = _Logger()
+        rcfg = SimpleNamespace(
+            options=SimpleNamespace(timeout=1, no_compile=False, no_bazel=False),
+            log=log,
+            proj_dir=project_dir,
+            use_cached_discovery=True,
+        )
+        vcomper = SimpleNamespace(job_dir="vcomp_dir", add_dependency=lambda _job: None)
+
+        job = BazelTBJob(rcfg, "//pkg:tb", vcomper, additional_targets=["//pkg/tests:first"])
+
+        self.assertEqual("bazel build //pkg/tests:first", job.main_cmdline)
+
     def test_no_compile_still_builds_test_configs(self):
         log = _Logger()
         rcfg = SimpleNamespace(options=SimpleNamespace(timeout=1, no_compile=True, no_bazel=False), log=log)
