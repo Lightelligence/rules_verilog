@@ -520,7 +520,10 @@ VCS wave dumping supports FSDB only.
 
 ### FSDB probe and viewer flow
 
-The default FSDB command probes `hdl_top`. Limit scope and time when possible:
+The default FSDB command probes `hdl_top` to depth 10. VCS wave builds retain
+`-kdb` and base debug access for source-code visibility, while FSDB contains HDL
+signals rather than the UVM VIP class hierarchy. Limit scope and time further
+when possible:
 
 ```bash
 simmer -t <bench>:<test> --simulator VCS \
@@ -539,8 +542,9 @@ SIMMER_WAVE_LAUNCHER="bsub -I -q syn" ./run_waves.sh
 
 The generated UCLI script uses the file ID returned by `dump -file`, so it does
 not assume `FSDB0` when another dump file is already open. The default
-`--wave-depth 999` maps to UCLI `-depth 0`, which is the documented unlimited
-hierarchy depth; explicit smaller depths are preserved.
+`--wave-depth` is 10. An explicit `--wave-depth 999` maps to UCLI `-depth 0`,
+which is the documented unlimited hierarchy depth; other explicit depths are
+preserved.
 
 VCS FSDB waves enable glitch and force information by default. Simmer passes
 `+fsdb+glitch=0` and `+fsdb+force` to `simv`; generated UCLI also runs

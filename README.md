@@ -133,7 +133,7 @@ The generated FSDB controls are:
 | simmer argument | Effect |
 |-----------------|--------|
 | `--waves [scope ...]` | Enables FSDB, glitch capture, and force/release/deposit metadata; no scope defaults to `hdl_top`. |
-| `--wave-depth N` | Applies depth `N` to every selected scope. The default captures all hierarchy. |
+| `--wave-depth N` | Applies depth `N` to every selected scope. The default is 10; use 999 for all hierarchy. |
 | `--wave-start NS` | Starts dumping at an absolute, non-negative simulation time in ns. |
 | `--wave-end NS` | Stops dumping at an absolute time in ns; it must be greater than `--wave-start`. |
 | `--wave-tcl FILE` | Uses a VCS UCLI file instead of generated scope, depth, and time commands. |
