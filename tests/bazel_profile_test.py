@@ -8,6 +8,42 @@ from lib import bazel_profile
 
 class BazelProfileTest(unittest.TestCase):
 
+    def test_phase_timings_measure_intervals_between_build_phase_markers(self):
+        profile = {
+            "traceEvents": [
+                {
+                    "ph": "i",
+                    "cat": "build phase marker",
+                    "name": "Launch Blaze",
+                    "ts": 1_000_000
+                },
+                {
+                    "ph": "i",
+                    "cat": "build phase marker",
+                    "name": "Analyze",
+                    "ts": 3_500_000
+                },
+                {
+                    "ph": "X",
+                    "cat": "action",
+                    "name": "compile",
+                    "ts": 4_000_000,
+                    "dur": 1_000_000
+                },
+            ],
+        }
+        with tempfile.NamedTemporaryFile("w", delete=False, encoding="utf-8") as profile_file:
+            json.dump(profile, profile_file)
+            profile_path = profile_file.name
+
+        try:
+            self.assertEqual(
+                [(2.5, "Launch Blaze"), (1.5, "Analyze")],
+                bazel_profile.phase_timings(profile_path),
+            )
+        finally:
+            os.remove(profile_path)
+
     def test_repository_timings_aggregate_real_repository_events(self):
         profile = {
             "traceEvents": [

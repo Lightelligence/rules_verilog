@@ -8,12 +8,14 @@ import ast
 import datetime
 import enum
 import os
+import shlex
 import signal
 import socket
 import subprocess
 import threading
 import time
 
+from lib import bazel_profile
 from lib.runtime_options import normalize_test_runtime_options
 
 
@@ -1192,20 +1194,45 @@ class BazelTBJob(Job):
             self.vcomper.add_dependency(self)
 
         self.job_dir = self.vcomper.job_dir # Don't actually need a dir, but jobrunner/manager want it defined
+        self.bazel_profile_path = None
         if self.rcfg.options.no_bazel:
             self.main_cmdline = "echo \"Bypassing {} due to --no-compile/--no-bazel\"".format(target)
         elif not self.bazel_targets:
             self.main_cmdline = "echo \"Using cached or discovery-built Bazel outputs for {}\"".format(target)
         else:
-            self.main_cmdline = "bazel build {}".format(" ".join(self.bazel_targets))
+            command = ["bazel", "build"]
+            if getattr(self.rcfg.options, "simmer_profile", False):
+                self.bazel_profile_path = os.path.join(self.job_dir, "bazel_tb_profile.json")
+                command.append("--profile={}".format(self.bazel_profile_path))
+            command.extend(self.bazel_targets)
+            self.main_cmdline = shlex.join(command)
+
+    def pre_run(self):
+        super(BazelTBJob, self).pre_run()
+        if self.bazel_profile_path and os.path.exists(self.bazel_profile_path):
+            os.remove(self.bazel_profile_path)
 
     def post_run(self):
         super(BazelTBJob, self).post_run()
+        self._collect_bazel_profile()
         if self.job_lib.returncode == 0:
             self.jobstatus = JobStatus.PASSED
         else:
             self.jobstatus = JobStatus.FAILED
             self.log.error("%s failed. Log in %s", self, os.path.join(self.job_dir, "stderr.log"))
+
+    def _collect_bazel_profile(self):
+        if not self.bazel_profile_path or not os.path.exists(self.bazel_profile_path):
+            return
+        try:
+            for duration, phase in bazel_profile.phase_timings(self.bazel_profile_path):
+                self.rcfg.profile_events.append((duration, "bazel_build_phase: {}".format(phase), self.bazel_target))
+            for duration, repository, event_count in bazel_profile.repository_timings(self.bazel_profile_path):
+                detail = "build; {} repository event(s)".format(event_count)
+                self.rcfg.profile_events.append((duration, "external_repo: {}".format(repository), detail))
+            self.rcfg.profile_events.append((0.0, "bazel_build_profile", self.bazel_profile_path))
+        except (OSError, ValueError, TypeError) as exc:
+            self.log.warning("Could not parse Bazel profile %s: %s", self.bazel_profile_path, exc)
 
     def __repr__(self):
         return 'Bazel("{}")'.format(self.bazel_target)

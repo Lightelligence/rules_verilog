@@ -263,6 +263,29 @@ class JobManagerLaunchTest(unittest.TestCase):
 
         self.assertEqual("bazel build //pkg:tb //pkg/tests:first //pkg/tests:second", job.main_cmdline)
 
+    def test_bazel_tb_job_records_bazel_profile_when_simmer_profile_is_enabled(self):
+        profile_dir = tempfile.mkdtemp()
+        log = _Logger()
+        rcfg = SimpleNamespace(
+            options=SimpleNamespace(timeout=1, no_compile=False, no_bazel=False, simmer_profile=True),
+            log=log,
+            profile_events=[],
+        )
+        vcomper = SimpleNamespace(job_dir=profile_dir, add_dependency=lambda _job: None)
+        job = BazelTBJob(rcfg, "//pkg:tb", vcomper)
+
+        self.assertIn("--profile=", job.main_cmdline)
+        self.assertIn("bazel_tb_profile.json", job.main_cmdline)
+
+        with open(job.bazel_profile_path, "w", encoding="utf-8") as profile_file:
+            profile_file.write('{"traceEvents": [{"ph": "i", "cat": "build phase marker", '
+                               '"name": "Analyze", "ts": 0}, '
+                               '{"ph": "X", "cat": "action", "name": "compile", "ts": 0, "dur": 2000000}]}')
+        job._collect_bazel_profile()
+
+        self.assertIn((2.0, "bazel_build_phase: Analyze", "//pkg:tb"), rcfg.profile_events)
+        self.assertIn((0.0, "bazel_build_profile", job.bazel_profile_path), rcfg.profile_events)
+
     def test_bazel_tb_job_skips_targets_built_during_discovery(self):
         log = _Logger()
         rcfg = SimpleNamespace(options=SimpleNamespace(timeout=1, no_compile=False, no_bazel=False), log=log)

@@ -49,3 +49,34 @@ def repository_timings(profile_path):
         [(duration_s, repository, count) for repository, (duration_s, count) in totals.items()],
         reverse=True,
     )
+
+
+def phase_timings(profile_path):
+    """Return elapsed time between Bazel build-phase markers."""
+    with open(profile_path, encoding="utf-8") as profile_file:
+        events = json.load(profile_file).get("traceEvents", [])
+
+    markers = []
+    profile_end_us = 0
+    for event in events:
+        timestamp_us = event.get("ts")
+        if not isinstance(timestamp_us, (int, float)):
+            continue
+        duration_us = event.get("dur", 0)
+        if not isinstance(duration_us, (int, float)):
+            duration_us = 0
+        profile_end_us = max(profile_end_us, timestamp_us + duration_us)
+
+        if "build phase marker" not in str(event.get("cat", "")).lower():
+            continue
+        name = str(event.get("name", "")).strip()
+        if name:
+            markers.append((timestamp_us, name))
+
+    timings = []
+    markers = sorted(set(markers))
+    for index, (timestamp_us, name) in enumerate(markers):
+        next_timestamp_us = markers[index + 1][0] if index + 1 < len(markers) else profile_end_us
+        duration_s = max(0, next_timestamp_us - timestamp_us) / 1_000_000.0
+        timings.append((duration_s, name))
+    return timings
