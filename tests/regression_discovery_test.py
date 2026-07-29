@@ -182,6 +182,10 @@ class RegressionDiscoveryTest(unittest.TestCase):
         ):
             self.assertIn(str(expected), dependencies)
         self.assertEqual(3, run.call_count)
+        indexed_command = run.call_args_list[1].args[0]
+        self.assertIn("--", indexed_command)
+        self.assertIn(":(glob)**/BUILD", indexed_command)
+        self.assertIn(":(glob)**/*.bzl", indexed_command)
 
     def test_cache_manifest_tracks_imported_bazelrc(self):
         proj_dir = Path(tempfile.mkdtemp())

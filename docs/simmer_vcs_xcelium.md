@@ -653,8 +653,10 @@ Bazel external-repository events, TB setup, VCS compile, test config builds,
 simulation jobs, job directories, and commands. The scheduled testbench build
 also leaves `bazel_tb_profile.json` in its VCOMP directory for deeper analysis.
 Repository rows are shown as `external_repo: NAME` at the finest granularity
-Bazel records. A cached repository has no fetch or repository-rule event, so it
-does not appear in that invocation.
+Bazel records. Overlapping events for one repository are merged so these rows
+approximate wall-clock time instead of double-counting nested work. A cached
+repository has no fetch or repository-rule event, so it does not appear in that
+invocation.
 
 Generated unit-test scripts print the failed command, line and exit code before
 they close. For a script launched in a temporary terminal, keep the window open

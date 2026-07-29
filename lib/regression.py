@@ -666,7 +666,15 @@ class RegressionConfig():
 
     def _iter_project_discovery_dependency_paths(self, submodule_state):
         indexed_result = subprocess.run(
-            ["git", "ls-files", "--cached", "--others", "--exclude-standard"],
+            [
+                "git",
+                "ls-files",
+                "--cached",
+                "--others",
+                "--exclude-standard",
+                "--",
+                *DISCOVERY_GIT_METADATA_PATHS,
+            ],
             cwd=self.proj_dir,
             check=False,
             capture_output=True,
