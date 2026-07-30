@@ -453,14 +453,13 @@ class RegressionDiscoveryTest(unittest.TestCase):
 
         self.assertNotEqual(initial, config._discovery_dependency_manifest())
 
-    def test_test_cfg_query_uses_the_public_macro_identity(self):
+    def test_test_cfg_query_uses_rule_marker_for_wrapped_macros(self):
         config = self._config(Path(tempfile.mkdtemp()))
 
         query = config._build_test_cfg_query("//benches/soc_tb:soc_tb")
 
-        self.assertIn("attr(generator_function, verilog_dv_test_cfg,", query)
-        self.assertNotIn("dv_test_cfg_rule", query)
-        self.assertNotIn("base_cfg", query)
+        self.assertIn("attr(verilog_dv_test_cfg_marker, 1,", query)
+        self.assertNotIn("generator_function", query)
 
     def test_discovery_batches_cquery_and_build(self):
         proj_dir = Path(tempfile.mkdtemp())

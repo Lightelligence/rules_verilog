@@ -241,6 +241,10 @@ _verilog_dv_test_cfg_rule = rule(
                   "Unlike other inheritable attributes, values in sim_opts are not entirely overridden. Instead, the dictionary is 'updated' with new values at each successive level.\n" +
                   "This allows for the override of individual simopts for finer-grained control.",
         ),
+        "verilog_dv_test_cfg_marker": attr.bool(
+            default = True,
+            doc = "Internal marker used by simmer discovery. Public macros do not expose this attribute.",
+        ),
         "no_run": attr.bool(
             default = False,
             doc = "Set to True to skip running this test.\n" +
