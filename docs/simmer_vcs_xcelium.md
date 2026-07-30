@@ -766,10 +766,12 @@ seed and original simulator options. Run it directly from any directory. Set
   Bazel configuration files (including `.bazelignore`) inside the main
   workspace. External IP/VIP repositories are intentionally excluded; run
   `bazel clean` after changing them.
-- When discovery is cached and the existing TB runfiles and test-config outputs
-  are still present, simmer reuses those outputs instead of repeating
-  `bazel build`. A changed workspace metadata file invalidates discovery and
-  rebuilds them; `bazel clean` removes the outputs and also forces a rebuild.
+- Cached discovery reuses existing test-config outputs, but normal compile
+  runs still issue an incremental `bazel build` for each selected testbench.
+  This refreshes runfiles and compile-input digests after Verilog source
+  changes while letting Bazel reuse unchanged outputs. Targets built during
+  the current discovery pass are not built twice. A changed workspace metadata
+  file invalidates discovery, and `bazel clean` removes all cached outputs.
 - Passing tests are removed by default. `--nt` intentionally retains them.
 - Do not enable waves, coverage, SmartLog, ICO artifacts or `--nt` in routine
   throughput regressions.
