@@ -240,12 +240,19 @@ the existing filelists depend on such global macro state, refactor that
 boundary before enabling this mode; grouping those filelists changes compile
 semantics.
 
-The persistent analysis library is `<tb>__VCS_VCOMP/vlogan_work`.
-GUI-specific UVM recorder defines use the sibling `vlogan_work_gui` so switching
-GUI mode does not invalidate the batch analysis database. Simmer ignores only
+The persistent batch analysis library is `<tb>__VCS_VCOMP/vlogan_work`.
+Signal-only waves use the sibling `vlogan_work_waves`, and GUI-specific UVM
+recorder defines use `vlogan_work_gui`. Waves and GUI analysis run with `-kdb`
+and compile the VCS and Verdi UVM recorder installers into a separate
+`UVM_RECORDERS` logical library before elaboration. This keeps recorder-only
+sources, include paths, and defines out of `DEFAULT`, so repeated debug builds
+can reuse unchanged frozen and project analysis. Waves define
+`UVM_VERDI_COMPWAVE` only while compiling those installers; the define is not
+propagated to UVM or design filelists, and waves do not enable
+`UVM_VCS_RECORD` or VPI. Simmer ignores only
 volatile LSF host/job variables during VCS incremental-environment checks;
 tool, source, define and stable environment changes remain compile inputs.
-`--recompile` removes the analysis library along with the rest of the VCOMP
+`--recompile` removes all analysis libraries along with the rest of the VCOMP
 directory.
 
 Analysis and elaboration options must be unambiguous in this flow:
@@ -502,13 +509,13 @@ simmer -t <bench>:<test> --simulator VCS --vcs-xprop F
 ```
 
 VCS `--waves` is the lightweight signal-dump mode. It compiles with `-kdb`
-and the base `-debug_access`, but does not enable VPI, SmartLog, or UVM
-transaction-recording defines. VCS cannot combine SmartLog's `-sml` with
-`-fastpartcomp=jN`; use `--smartlog --no-vcs-partcomp` when Verdi log/source
-correlation is needed. `--gui` remains the full interactive-debug mode: it
-enables full reverse-debug access and explicitly adds
-`UVM_VERDI_COMPWAVE` and `UVM_VCS_RECORD`, but does not implicitly enable
-SmartLog.
+and the base `-debug_access`, but does not enable VPI, SmartLog, or propagate
+UVM transaction-recording defines to design sources. VCS cannot combine
+SmartLog's `-sml` with `-fastpartcomp=jN`; use
+`--smartlog --no-vcs-partcomp` when Verdi log/source correlation is needed.
+`--gui` remains the full interactive-debug mode: it enables full reverse-debug
+access and explicitly adds `UVM_VERDI_COMPWAVE` and `UVM_VCS_RECORD`, but does
+not implicitly enable SmartLog.
 
 The signal-only mode avoids the callback, driver, class, and VPI capabilities
 used for transaction-aware debug. GUI mode keeps VPI and UVM recording.

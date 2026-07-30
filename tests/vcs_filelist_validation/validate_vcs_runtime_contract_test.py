@@ -2252,6 +2252,12 @@ run_bounded_process([
         uvm_pkg = vcs_home / "etc" / "uvm-1.2" / "uvm_pkg.sv"
         uvm_pkg.parent.mkdir(parents=True)
         uvm_pkg.touch()
+        uvm_recorder = vcs_home / "etc" / "uvm-1.2" / "vcs" / "uvm_custom_install_vcs_recorder.sv"
+        uvm_recorder.parent.mkdir()
+        uvm_recorder.touch()
+        uvm_verdi_recorder = vcs_home / "etc" / "uvm-1.2" / "verdi" / "uvm_custom_install_verdi_recorder.sv"
+        uvm_verdi_recorder.parent.mkdir()
+        uvm_verdi_recorder.touch()
 
         captured = root / "calls.txt"
         stub = root / "vcs_stub.sh"
@@ -2281,7 +2287,7 @@ run_bounded_process([
             additional_defines=["PROJECT_DEFINE"],
             bazel_runfiles_main=shell_path(runfiles),
             cov_opts="",
-            debug_mode="default",
+            debug_mode="waves",
             options=SimpleNamespace(
                 dtl=False,
                 fgp=None,
@@ -2291,15 +2297,15 @@ run_bounded_process([
                 vso=False,
                 vso_cbv=False,
                 vso_ccex=False,
-                waves=None,
+                waves=[],
                 xprop_was_explicit=False,
             ),
             partcomp_opts="-partcomp -fastpartcomp=j2",
-            vcs_analysis_work_dir=shell_path(vcomp_dir / "vlogan_work"),
+            vcs_analysis_work_dir=shell_path(vcomp_dir / "vlogan_work_waves"),
             vcs_elab_args=shell_path(elab_args),
             vcs_incr_vlogan_ignore_env="-vts_ignore_env=HOSTNAME,LSB_JOBID",
             vcs_runner=shlex.quote(shell_path(stub)),
-            vcs_setup_file=shell_path(vcomp_dir / "synopsys_sim.setup"),
+            vcs_setup_file=shell_path(vcomp_dir / "synopsys_sim_waves.setup"),
             vcs_vlogan_args=shell_path(vlogan_args),
             vcs_vlogan_filelists=shell_path(filelists),
             vso_build_name="",
@@ -2311,16 +2317,36 @@ run_bounded_process([
         subprocess.run(["bash", script.name], cwd=root, check=True)
 
         calls = captured.read_text(encoding="utf-8").split("<CALL>\n")[1:]
-        self.assertEqual(4, len(calls))
+        self.assertEqual(5, len(calls))
         uvm_analysis = calls[0].splitlines()
-        first_analysis = calls[1].splitlines()
-        second_analysis = calls[2].splitlines()
-        elaboration = calls[3].splitlines()
+        recorder_analysis = calls[1].splitlines()
+        first_analysis = calls[2].splitlines()
+        second_analysis = calls[3].splitlines()
+        elaboration = calls[4].splitlines()
         self.assertEqual("vlogan", uvm_analysis[0])
         self.assertIn(shell_path(uvm_pkg), uvm_analysis)
+        self.assertIn("-kdb", uvm_analysis)
+        self.assertNotIn("+define+UVM_VERDI_COMPWAVE", uvm_analysis)
+        self.assertNotIn("+define+UVM_VCS_RECORD", uvm_analysis)
+        self.assertNotIn("-work", uvm_analysis)
         self.assertNotIn("-file", uvm_analysis)
+        self.assertEqual("vlogan", recorder_analysis[0])
+        self.assertIn(shell_path(uvm_recorder), recorder_analysis)
+        self.assertIn(shell_path(uvm_verdi_recorder), recorder_analysis)
+        self.assertIn("+incdir+{}".format(shell_path(uvm_recorder.parent)), recorder_analysis)
+        self.assertIn("+incdir+{}".format(shell_path(uvm_verdi_recorder.parent)), recorder_analysis)
+        self.assertIn("+incdir+{}".format(shell_path(uvm_verdi_recorder.parent / "dpi")), recorder_analysis)
+        self.assertIn("-work", recorder_analysis)
+        self.assertIn("UVM_RECORDERS", recorder_analysis)
+        self.assertNotIn("-L", recorder_analysis)
+        self.assertIn("-kdb", recorder_analysis)
+        self.assertIn("+define+UVM_VERDI_COMPWAVE", recorder_analysis)
+        self.assertNotIn("+define+UVM_VCS_RECORD", recorder_analysis)
+        self.assertNotIn("-file", recorder_analysis)
         self.assertEqual("vlogan", first_analysis[0])
         self.assertEqual("vlogan", second_analysis[0])
+        self.assertIn("-kdb", first_analysis)
+        self.assertIn("-kdb", second_analysis)
         self.assertIn("-incr_vlogan", first_analysis)
         self.assertIn("-vts_ignore_env=HOSTNAME,LSB_JOBID", first_analysis)
         self.assertIn("-sverilog", first_analysis)
@@ -2335,13 +2361,36 @@ run_bounded_process([
         self.assertNotIn("vip.sv", second_analysis)
         self.assertIn("project.f", second_analysis)
         self.assertIn("+define+PROJECT_DEFINE", first_analysis)
+        self.assertNotIn("+define+UVM_VERDI_COMPWAVE", first_analysis)
+        self.assertNotIn("+define+UVM_VCS_RECORD", first_analysis)
         self.assertNotIn(shell_path(vlogan_args), first_analysis)
         self.assertEqual("vcs", elaboration[0])
+        self.assertIn("-L", elaboration)
+        self.assertIn("UVM_RECORDERS", elaboration)
         self.assertIn("-partcomp", elaboration)
         self.assertIn("-fastpartcomp=j2", elaboration)
         self.assertIn(shell_path(elab_args), elaboration)
-        setup = (vcomp_dir / "synopsys_sim.setup").read_text(encoding="utf-8")
-        self.assertIn("DEFAULT : {}".format(shell_path(vcomp_dir / "vlogan_work")), setup)
+        setup = (vcomp_dir / "synopsys_sim_waves.setup").read_text(encoding="utf-8")
+        self.assertIn("DEFAULT : {}".format(shell_path(vcomp_dir / "vlogan_work_waves")), setup)
+        self.assertIn(
+            "UVM_RECORDERS : {}".format(shell_path(vcomp_dir / "vlogan_work_waves_uvm_recorders")),
+            setup,
+        )
+
+    def test_vcs_three_step_separates_analysis_libraries_by_debug_mode(self):
+        vcomp = SimpleNamespace(job_dir="/tmp/vcomp")
+        cases = (
+            ([], "vlogan_work", "synopsys_sim.setup"),
+            (["--waves"], "vlogan_work_waves", "synopsys_sim_waves.setup"),
+            (["--gui"], "vlogan_work_gui", "synopsys_sim_gui.setup"),
+        )
+
+        for debug_args, work_dir, setup_file in cases:
+            with self.subTest(debug_args=debug_args):
+                options = parse_args(["--simulator", "VCS"] + debug_args)
+                simulator = VcsSimulator(options, DummyRegressionConfig(), None)
+                self.assertEqual(os.path.join(vcomp.job_dir, work_dir), simulator.get_analysis_work_dir(vcomp))
+                self.assertEqual(os.path.join(vcomp.job_dir, setup_file), simulator.get_analysis_setup_file(vcomp))
 
     def test_vcs_three_step_resolves_generated_inputs_and_runtime_setup(self):
         root = Path(tempfile.mkdtemp(prefix="vcs_three_step_inputs_"))

@@ -5,11 +5,19 @@ trap 'rc=$?; printf "ERROR: VCS three-step compile failed at line %s (exit %s): 
 
 mkdir -p \
   {{ (VCOMP_DIR ~ '/csrc')|shell_quote }} \
-  {{ vcs_analysis_work_dir|shell_quote }}
-
-printf 'WORK > DEFAULT\nDEFAULT : %s\n' \
   {{ vcs_analysis_work_dir|shell_quote }} \
-  > {{ vcs_setup_file|shell_quote }}
+  {% if debug_mode in ["waves", "gui"] -%}
+    {{ (vcs_analysis_work_dir ~ '_uvm_recorders')|shell_quote }}
+  {% endif -%}
+
+{
+  printf 'WORK > DEFAULT\nDEFAULT : %s\n' \
+    {{ vcs_analysis_work_dir|shell_quote }}
+  {% if debug_mode in ["waves", "gui"] -%}
+    printf 'UVM_RECORDERS : %s\n' \
+      {{ (vcs_analysis_work_dir ~ '_uvm_recorders')|shell_quote }}
+  {% endif -%}
+} > {{ vcs_setup_file|shell_quote }}
 
 export SYNOPSYS_SIM_SETUP={{ vcs_setup_file|shell_quote }}
 : > {{ (VCOMP_DIR ~ '/cmp.log')|shell_quote }}
@@ -62,10 +70,25 @@ vcs_home="$(
     tail -n 1
 )"
 uvm_sources=("${vcs_home%/}/etc/uvm-1.2/uvm_pkg.sv")
-{% if debug_mode == "gui" -%}
-  uvm_sources+=("${vcs_home%/}/etc/uvm-1.2/vcs/uvm_custom_install_vcs_recorder.sv")
+{% if debug_mode in ["waves", "gui"] -%}
+  uvm_recorder_dir="${vcs_home%/}/etc/uvm-1.2/vcs"
+  uvm_verdi_dir="${vcs_home%/}/etc/uvm-1.2/verdi"
+  uvm_recorder_sources=(
+    "${uvm_recorder_dir}/uvm_custom_install_vcs_recorder.sv"
+    "${uvm_verdi_dir}/uvm_custom_install_verdi_recorder.sv"
+  )
+  uvm_recorder_include_args=(
+    "+incdir+${uvm_recorder_dir}"
+    "+incdir+${uvm_verdi_dir}"
+    "+incdir+${uvm_verdi_dir}/dpi"
+  )
 {% endif -%}
-for uvm_source in "${uvm_sources[@]}"; do
+for uvm_source in \
+  "${uvm_sources[@]}" \
+  {% if debug_mode in ["waves", "gui"] -%}
+    "${uvm_recorder_sources[@]}" \
+  {% endif -%}
+; do
   [[ -f "${uvm_source}" ]] || {
     printf 'ERROR: VCS UVM source does not exist: %s\n' "${uvm_source}" >&2
     exit 2
@@ -76,16 +99,35 @@ done
   -full64 \
   -incr_vlogan \
   {{ vcs_incr_vlogan_ignore_env }} \
+  {% if debug_mode in ["waves", "gui"] -%}
+    -kdb \
+  {% endif -%}
   "${vlogan_args[@]}" \
   {% for define in additional_defines -%}
     {{ ('+define+' ~ define)|shell_quote }} \
   {% endfor -%}
-  {% if debug_mode == "gui" -%}
-    +define+UVM_VERDI_COMPWAVE \
-    +define+UVM_VCS_RECORD \
-  {% endif -%}
   "${uvm_sources[@]}" \
   2>&1 | tee -a {{ (VCOMP_DIR ~ '/cmp.log')|shell_quote }}
+
+{% if debug_mode in ["waves", "gui"] -%}
+  {{ vcs_runner }} vlogan \
+    -full64 \
+    -incr_vlogan \
+    {{ vcs_incr_vlogan_ignore_env }} \
+    -work UVM_RECORDERS \
+    -kdb \
+    "${vlogan_args[@]}" \
+    "${uvm_recorder_include_args[@]}" \
+    {% for define in additional_defines -%}
+      {{ ('+define+' ~ define)|shell_quote }} \
+    {% endfor -%}
+    +define+UVM_VERDI_COMPWAVE \
+    {% if debug_mode == "gui" -%}
+      +define+UVM_VCS_RECORD \
+    {% endif -%}
+    "${uvm_recorder_sources[@]}" \
+    2>&1 | tee -a {{ (VCOMP_DIR ~ '/cmp.log')|shell_quote }}
+{% endif -%}
 
 run_vlogan_group() {
   local group_name="$1"
@@ -99,6 +141,9 @@ run_vlogan_group() {
     -full64 \
     -incr_vlogan \
     {{ vcs_incr_vlogan_ignore_env }} \
+    {% if debug_mode in ["waves", "gui"] -%}
+      -kdb \
+    {% endif -%}
     "${vlogan_args[@]}" \
     "${vlogan_include_args[@]}" \
     "$@" \
@@ -124,6 +169,9 @@ run_vlogan_group \
 
 {{ vcs_runner }} vcs \
   -full64 \
+  {% if debug_mode in ["waves", "gui"] -%}
+    -L UVM_RECORDERS \
+  {% endif -%}
   -Mdir={{ (VCOMP_DIR ~ '/csrc')|shell_quote }} \
   -Mlib={{ (VCOMP_DIR ~ '/csrc')|shell_quote }} \
   {% if options.fgp is not none -%}

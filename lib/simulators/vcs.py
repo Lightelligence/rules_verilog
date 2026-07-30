@@ -305,11 +305,21 @@ class VcsSimulator(SimulatorInterface):
             setattr(vcomp_job, attribute, resolved_path)
 
     def get_analysis_work_dir(self, vcomp_job):
-        dirname = "vlogan_work_gui" if self.options.gui else "vlogan_work"
+        if self.options.gui:
+            dirname = "vlogan_work_gui"
+        elif self.options.waves is not None:
+            dirname = "vlogan_work_waves"
+        else:
+            dirname = "vlogan_work"
         return os.path.join(vcomp_job.job_dir, dirname)
 
     def get_analysis_setup_file(self, vcomp_job):
-        dirname = "synopsys_sim_gui.setup" if self.options.gui else "synopsys_sim.setup"
+        if self.options.gui:
+            dirname = "synopsys_sim_gui.setup"
+        elif self.options.waves is not None:
+            dirname = "synopsys_sim_waves.setup"
+        else:
+            dirname = "synopsys_sim.setup"
         return os.path.join(vcomp_job.job_dir, dirname)
 
     def _get_ico_artifact_dir(self):
