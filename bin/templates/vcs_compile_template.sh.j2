@@ -47,7 +47,7 @@ cd {{ bazel_runfiles_main|shell_quote }}
     {% else -%}
       -kdb \
     {% endif -%}
-    -debug_access \
+    -debug_access+r \
   {% endif -%}
   {% if debug_mode == "gui" -%}
     -kdb \
