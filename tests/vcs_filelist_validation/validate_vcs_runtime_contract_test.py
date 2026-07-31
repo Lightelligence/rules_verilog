@@ -879,7 +879,8 @@ run_bounded_process([
             )
 
         waves = render("waves", waves=[])
-        self.assertIn("-debug_access", waves)
+        self.assertIn("-debug_access+r", waves)
+        self.assertNotIn("-debug_access \\", waves)
         self.assertNotIn("-debug_access+pp", waves)
         self.assertNotIn("+vpi", waves)
         self.assertNotIn("-debug_access+all+designer+simctrl", waves)
@@ -2281,7 +2282,7 @@ run_bounded_process([
             additional_defines=["PROJECT_DEFINE"],
             bazel_runfiles_main=shell_path(runfiles),
             cov_opts="",
-            debug_mode="default",
+            debug_mode="waves",
             options=SimpleNamespace(
                 dtl=False,
                 fgp=None,
@@ -2337,6 +2338,8 @@ run_bounded_process([
         self.assertIn("+define+PROJECT_DEFINE", first_analysis)
         self.assertNotIn(shell_path(vlogan_args), first_analysis)
         self.assertEqual("vcs", elaboration[0])
+        self.assertIn("-debug_access+r", elaboration)
+        self.assertNotIn("-debug_access", elaboration)
         self.assertIn("-partcomp", elaboration)
         self.assertIn("-fastpartcomp=j2", elaboration)
         self.assertIn(shell_path(elab_args), elaboration)

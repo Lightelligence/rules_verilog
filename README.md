@@ -115,9 +115,9 @@ VCS wave capture uses FSDB. These commands cover the generated simmer flow:
 # Default hdl_top scope, all hierarchy, full simulation.
 simmer -t 'sys_tb:smoke_test@1' --simulator VCS --waves
 
-# Selected scopes at UCLI depth 8: each scope plus seven nested levels.
+# Selected RTL and SystemVerilog interface scopes at UCLI depth 8.
 simmer -t 'sys_tb:smoke_test@1' --simulator VCS \
-  --waves hdl_top.dut hdl_top.env --wave-depth 8
+  --waves hdl_top.dut hdl_top.spi_apb_if hdl_top.mcp_axi_if --wave-depth 8
 
 # Capture only the 1000 ns through 50000 ns interval.
 simmer -t 'sys_tb:smoke_test@1' --simulator VCS \
@@ -129,6 +129,9 @@ simmer -t 'sys_tb:smoke_test@1' --simulator VCS --waves \
 ```
 
 The generated FSDB controls are:
+
+VCS wave builds use `-debug_access+r`, providing signal read access without
+enabling VPI or UVM transaction recording.
 
 | simmer argument | Effect |
 |-----------------|--------|
