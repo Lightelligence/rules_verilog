@@ -162,6 +162,7 @@ class HalLintLog(object):
     def prep_file_stats(self):
 
         self.files_with_notes = {}
+        self.dirs_with_notes = {}
 
         for issue in self.issues:
             if not issue.waived:
@@ -175,9 +176,9 @@ class HalLintLog(object):
             while os.path.basename(file_path) not in ['rtl', 'analog'] and loop_count <= 10:
                 base_dir = os.path.basename(file_path)
                 file_path = os.path.split(file_path)[0]
-                loop_count += 10
+                loop_count += 1
 
-            if loop_count == 10:
+            if loop_count > 10 or base_dir is None:
                 log.info("Couldn't resolve base directory for {}".format(orig_path))
                 return orig_path
 

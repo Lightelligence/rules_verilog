@@ -490,7 +490,7 @@ Batch VCS defaults are kept light:
 - no default `+vpi`
 - no default xprop
 - no default smartlog
-- `-fastpartcomp=j8`
+- allocation-aware `-fastpartcomp=jN` (the detected LSF/Slurm or affinity allocation)
 
 Enable debug features explicitly:
 

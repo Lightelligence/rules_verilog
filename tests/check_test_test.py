@@ -53,6 +53,22 @@ class CheckTestFastPathTest(unittest.TestCase):
         self.assertEqual(["PROJECT FAIL\n"], errors)
         self.assertTrue(finished)
 
+    def test_project_patterns_match_crlf_logs_on_static_fast_path(self):
+        pass_regex = check_test.compile_patterns([r"^PROJECT PASS$"])
+        fail_regex = check_test.compile_patterns([r"^PROJECT FAIL$"])
+        path = Path(tempfile.mkdtemp()) / "stdout.log"
+        path.write_bytes(b"PROJECT FAIL\r\nPROJECT PASS\r\n")
+
+        errors, _, _, finished = check_test.scan_static_log(
+            path,
+            25,
+            extra_error_regex=fail_regex,
+            required_finish_regex=pass_regex,
+        )
+
+        self.assertEqual(["PROJECT FAIL\n"], errors)
+        self.assertTrue(finished)
+
 
 if __name__ == "__main__":
     unittest.main()

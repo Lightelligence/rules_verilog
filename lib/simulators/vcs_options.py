@@ -151,5 +151,7 @@ def validate_vcs_runtime_options(options, parser):
     if options.waves is not None:
         if options.wave_type is None:
             options.wave_type = 'fsdb'
+        else:
+            options.wave_type = options.wave_type.lower()
         if options.wave_type != 'fsdb':
             parser.error("VCS supports only --wave-type fsdb. Stopping before Bazel starts.")

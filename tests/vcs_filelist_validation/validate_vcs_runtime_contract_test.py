@@ -1393,6 +1393,13 @@ run_bounded_process([
         with self.assertRaises(ValueError):
             self._validated(["--simulator", "XRUN", "--waves", "--wave-type", "unknown"])
 
+    def test_wave_type_validation_is_case_insensitive(self):
+        vcs_options, _ = self._validated(["--simulator", "VCS", "--waves", "--wave-type", "FSDB"])
+        xcelium_options, _ = self._validated(["--simulator", "XRUN", "--waves", "--wave-type", "VWDB"])
+
+        self.assertEqual("fsdb", vcs_options.wave_type)
+        self.assertEqual("vwdb", xcelium_options.wave_type)
+
     def test_xcelium_msie_incremental_requires_primary_snapshot_name(self):
         with self.assertRaises(SystemExit):
             parse_args(["--simulator", "XRUN", "--msie-incr"])
@@ -2420,6 +2427,9 @@ run_bounded_process([
         capture = simulator.get_wave_capture_options(test_job, "/tmp/waves.tcl")
         self.assertEqual("hdl_top", capture["default_capture"])
         self.assertIn("-debug_opts verisium_pp", capture["sim_opts"])
+        self.assertEqual(os.path.join(test_job.job_dir, "waves"), capture["waves_db"])
+        self.assertEqual(os.path.join(test_job.job_dir, "waves"),
+                         simulator.get_wave_artifact_path(test_job.job_dir, options.wave_type))
 
         vcomp = DummyVcompJob()
         Path(vcomp.bench_dir, "fox_xprop.txt").touch()

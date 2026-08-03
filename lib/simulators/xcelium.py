@@ -522,7 +522,11 @@ class XceliumSimulator(SimulatorInterface):
         if wave_type == 'vcd':
             return os.path.join(job_dir, 'waves.vcd')
         if wave_type == 'vwdb':
-            return os.path.join(job_dir, 'waves.db')
+            # xmDumpfile creates the Verisium database at the exact path passed
+            # to it.  The capture options pass ``<job_dir>/waves`` (a database
+            # directory), so use that same path when cleaning up and checking
+            # the completed artifact.
+            return os.path.join(job_dir, 'waves')
         raise ValueError("Not allowed wave: {}".format(wave_type))
 
     def setup_coverage_merge(self, vcomp_job):
