@@ -160,29 +160,39 @@ def scan_static_log(filepath, error_limit, extra_error_regex=None, required_fini
             if data.find(b"TEST_CHECK_") != -1:
                 return None
 
+            # Regexes supplied by projects commonly anchor a pattern with `$`.
+            # A byte regex sees the `\r` in a CRLF line ending, so `$` does not
+            # match before `\r\n` even though the text-mode fallback does. Keep
+            # the mmap fast path for the common LF case, and normalize only
+            # logs that actually contain CRLF line endings so both paths have
+            # identical matching semantics.
+            search_data = data
+            if data.find(b"\r\n") != -1:
+                search_data = data[:].replace(b"\r\n", b"\n")
+
             error_lines = []
             seen_line_starts = set()
             error_patterns = [err_regex.pattern]
             if extra_error_regex is not None:
                 error_patterns.append(extra_error_regex.pattern)
             byte_error_regex = re.compile(compile_patterns(error_patterns).pattern.encode('utf-8'), re.MULTILINE)
-            for match in byte_error_regex.finditer(data):
-                line_start = data.rfind(b'\n', 0, match.start()) + 1
+            for match in byte_error_regex.finditer(search_data):
+                line_start = search_data.rfind(b'\n', 0, match.start()) + 1
                 if line_start in seen_line_starts:
                     continue
-                line_end = data.find(b'\n', match.end())
-                line_end = len(data) if line_end == -1 else line_end + 1
-                error_lines.append(decode_line(data[line_start:line_end]))
+                line_end = search_data.find(b'\n', match.end())
+                line_end = len(search_data) if line_end == -1 else line_end + 1
+                error_lines.append(decode_line(search_data[line_start:line_end]))
                 seen_line_starts.add(line_start)
                 if len(error_lines) >= error_limit:
                     break
-            seed_lines = find_lines(data, [b"SVSEED", b"random seed used"])
-            run_time_lines = find_lines(data, [b"real\t"], required_marker=b"user\t")
+            seed_lines = find_lines(search_data, [b"SVSEED", b"random seed used"])
+            run_time_lines = find_lines(search_data, [b"real\t"], required_marker=b"user\t")
             if required_finish_regex is None:
-                found_finish = any(data.find(signature.encode('utf-8')) != -1 for signature in finish_signatures)
+                found_finish = any(search_data.find(signature.encode('utf-8')) != -1 for signature in finish_signatures)
             else:
                 required_bytes = re.compile(required_finish_regex.pattern.encode('utf-8'), re.MULTILINE)
-                found_finish = required_bytes.search(data) is not None
+                found_finish = required_bytes.search(search_data) is not None
             return error_lines, seed_lines, run_time_lines, found_finish
 
 

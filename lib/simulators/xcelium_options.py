@@ -7,6 +7,8 @@ def validate_xcelium_runtime_options(options, parser):
     if options.waves is not None:
         if options.wave_type is None:
             options.wave_type = 'vwdb'
+        else:
+            options.wave_type = options.wave_type.lower()
         if options.wave_type not in ['shm', 'vcd', 'vwdb']:
             parser.error("Xcelium supports only --wave-type shm, vcd, or vwdb. Stopping before Bazel starts.")
     if options.wave_delta and (options.waves is None or options.wave_type != 'shm'):

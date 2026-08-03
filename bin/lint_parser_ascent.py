@@ -80,6 +80,7 @@ class AscentMessage(object):
 class AscentLintLog(object):
 
     def __init__(self, path, log):
+        self.log = log
         self.issues = []
         self.files_with_notes = {}
         self.dirs_with_notes = {}
@@ -120,8 +121,17 @@ class AscentLintLog(object):
                 continue
 
             # Map from the base path name to the bazel-relative path name to be able to find waivers
-            relative_filename = self.file_map[filename]
-            with open(relative_filename, errors='replace') as filep:
+            # Recent Ascent reports can omit the optional file-definition
+            # table and may already contain a usable path.  Falling back to
+            # the rendered filename keeps waiver parsing alive instead of
+            # turning a valid lint report into a KeyError.
+            relative_filename = self.file_map.get(filename, filename)
+            try:
+                filep = open(relative_filename, errors='replace')
+            except OSError as exc:
+                log.warning("Skipping waiver scan for missing source %s: %s", relative_filename, exc)
+                continue
+            with filep:
                 for i, line in enumerate(filep.readlines()):
                     match = LINE_WAIVER_REGEXP.search(line)
                     if match:
@@ -207,6 +217,7 @@ class AscentLintLog(object):
     def prep_file_stats(self):
 
         self.files_with_notes = {}
+        self.dirs_with_notes = {}
 
         for issue in self.issues:
             if not issue.waived:
@@ -220,10 +231,10 @@ class AscentLintLog(object):
             while os.path.basename(file_path) not in ['rtl', 'analog'] and loop_count <= 10:
                 base_dir = os.path.basename(file_path)
                 file_path = os.path.split(file_path)[0]
-                loop_count += 10
+                loop_count += 1
 
-            if loop_count == 10:
-                log.info("Couldn't resolve base directory for {}".format(orig_path))
+            if loop_count > 10 or base_dir is None:
+                self.log.info("Couldn't resolve base directory for {}".format(orig_path))
                 return orig_path
 
             return os.path.join(file_path, base_dir)

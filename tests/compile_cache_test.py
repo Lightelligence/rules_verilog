@@ -276,6 +276,16 @@ class CompileCacheTest(unittest.TestCase):
         for path in (nested, source, header):
             self.assertEqual(1, read_paths.count(str(path)))
 
+    def test_filelist_input_discovery_unquotes_paths_with_spaces(self):
+        root_dir = Path(tempfile.mkdtemp())
+        source = root_dir / "source files" / "dut.sv"
+        source.parent.mkdir()
+        source.write_text("module dut; endmodule\n", encoding="utf-8")
+        root = root_dir / "compile.f"
+        root.write_text('"{}"\n'.format(source), encoding="utf-8")
+
+        self.assertEqual(sorted(map(str, (root, source))), discover_filelist_inputs(root, root_dir))
+
     def test_filelist_input_discovery_uses_nested_file_directory_for_dash_capital_f(self):
         working_dir = Path(tempfile.mkdtemp())
         filelist_dir = Path(tempfile.mkdtemp())

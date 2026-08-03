@@ -245,6 +245,15 @@ class JobManagerLaunchTest(unittest.TestCase):
 
         self.assertTrue(result_dir.startswith(os.path.join(state_dir, "simmer")))
 
+    def test_add_dependency_ignores_null_dependency(self):
+        rcfg = SimpleNamespace(options=SimpleNamespace(timeout=1), log=_Logger())
+        job = Job(rcfg, "child")
+
+        job.add_dependency(None)
+
+        self.assertEqual([], job._dependencies)
+        self.assertEqual([], job._children)
+
     def test_bazel_tb_job_builds_runfiles_without_running_dummy_executable(self):
         log = _Logger()
         rcfg = SimpleNamespace(options=SimpleNamespace(timeout=1, no_compile=False, no_bazel=False), log=log)
@@ -740,6 +749,27 @@ class JobManagerLaunchTest(unittest.TestCase):
             self.assertEqual(JobStatus.FAILED, job.jobstatus)
             self.assertIn(job, manager._done)
             self.assertEqual("failed to launch", result_run["launch_failures"][0]["error_message"])
+        finally:
+            manager.stop()
+
+    def test_quit_count_marks_queued_jobs_skipped(self):
+        log = _Logger()
+        rcfg = SimpleNamespace(options=SimpleNamespace(timeout=1), log=log)
+        first = Job(rcfg, "first")
+        second = Job(rcfg, "second")
+        first.job_dir = str(Path(tempfile.mkdtemp()) / "first")
+        second.job_dir = str(Path(tempfile.mkdtemp()) / "second")
+        manager = JobManager({"idle_print_seconds": 60, "quit_count": 1}, log)
+        manager.job_lib_type = _FailingRunner
+
+        try:
+            manager.add_job(first)
+            manager.add_job(second)
+            manager.wait()
+
+            self.assertEqual(JobStatus.FAILED, first.jobstatus)
+            self.assertEqual(JobStatus.SKIPPED, second.jobstatus)
+            self.assertIn(second, manager._skipped)
         finally:
             manager.stop()
 

@@ -222,8 +222,8 @@ class Job():
     def add_dependency(self, dep):
         if not dep:
             self.log.error("%s added null dep", self)
-        else:
-            self._dependencies.append(dep)
+            return
+        self._dependencies.append(dep)
         dep._children.append(self)
         dep.increase_priority(self.priority)
 
@@ -1005,6 +1005,9 @@ class JobManager():
         self.exited_prematurely = True
         self._done_grace_exit = True
         self.log.warn("Exceeded quit count. Graceful exit.")
+        for job in self._todo + self._ready:
+            if not job.jobstatus.completed:
+                job.jobstatus = JobStatus.SKIPPED
         self._skipped.extend(self._todo)
         self._todo = []
         self._skipped.extend(self._ready)

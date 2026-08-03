@@ -144,8 +144,14 @@ def discover_filelist_inputs(filelist_path, working_directory):
     parsed_filelists = set()
     pending = [(root_filelist, working_directory)]
 
+    def unquote(value):
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in ('"', "'"):
+            return value[1:-1]
+        return value
+
     def resolve(path, base_directory):
-        expanded = os.path.expanduser(os.path.expandvars(path))
+        expanded = os.path.expanduser(os.path.expandvars(unquote(path)))
         return os.path.abspath(expanded if os.path.isabs(expanded) else os.path.join(base_directory, expanded))
 
     def add_path(path, base_directory, include_directory=False):
@@ -166,7 +172,14 @@ def discover_filelist_inputs(filelist_path, working_directory):
         discovered.add(current_filelist)
         try:
             with open(current_filelist, "r", encoding="utf-8", errors="surrogateescape") as filep:
-                tokens = shlex.split(filep.read(), comments=True, posix=True)
+                # Simulator filelists are usually POSIX shell syntax, but the
+                # library is also exercised on Windows where drive-letter
+                # paths contain backslashes.  ``posix=True`` treats those
+                # backslashes as escapes and silently turns e.g.
+                # ``C:\\work\\dut.sv`` into ``C:workdut.sv``.  Preserve
+                # native Windows paths while retaining the existing POSIX
+                # parsing rules on licensed Linux hosts.
+                tokens = [unquote(token) for token in shlex.split(filep.read(), comments=True, posix=os.name != "nt")]
         except ValueError:
             continue
 
