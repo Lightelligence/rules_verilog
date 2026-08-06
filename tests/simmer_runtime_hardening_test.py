@@ -104,14 +104,19 @@ class SimmerRuntimeHardeningTest(unittest.TestCase):
     def test_history_persistence_failure_is_fatal(self):
         rcfg = SimpleNamespace(
             proj_dir="/repo",
-            simmer_results_run={"run_id": "test"},
+            simmer_results_run={
+                "run_id": "test",
+                "tests": [{
+                    "status": "PASSED"
+                }]
+            },
             log=_FatalLog(),
         )
         with mock.patch("simmer.simmer_results.save_run", side_effect=OSError("disk full")), \
              self.assertRaisesRegex(SystemExit, "Failed to write simmer results"):
             simmer.persist_simmer_results(rcfg)
 
-    def test_interrupted_run_cleans_backend_and_persists_failed_history(self):
+    def test_interrupted_run_without_started_test_does_not_persist_history(self):
         with tempfile.TemporaryDirectory() as project_dir:
             run = {
                 "planned_tests": 1,
@@ -132,12 +137,14 @@ class SimmerRuntimeHardeningTest(unittest.TestCase):
             simulator.cleanup_shared_runtime_artifacts.assert_called_once()
             self.assertEqual("FAILED", run["status"])
             self.assertIsNotNone(run["finished_at"])
-            save_run.assert_called_once_with(project_dir, run)
+            save_run.assert_not_called()
 
     def test_interrupted_history_persistence_failure_is_nonfatal(self):
         run = {
             "planned_tests": 1,
-            "tests": [],
+            "tests": [{
+                "status": "INTERRUPTED"
+            }],
             "compile": [],
             "launch_failures": [],
         }
@@ -190,8 +197,8 @@ class SimmerRuntimeHardeningTest(unittest.TestCase):
         test_job.seed = 7
         test_job.job_dir = "/sim"
         test_job._log_path = "/sim/stdout.log"
-        test_job.job_start_time = None
-        test_job.job_stop_time = None
+        test_job.job_start_time = datetime.datetime.now() - datetime.timedelta(seconds=2)
+        test_job.job_stop_time = datetime.datetime.now()
         test_job.error_message = None
         test_job._jobstatus = simmer.JobStatus.NOT_STARTED
         manager = SimpleNamespace(interrupted_jobs=(test_job, ))
@@ -203,7 +210,7 @@ class SimmerRuntimeHardeningTest(unittest.TestCase):
         self.assertEqual(1, run["summary"]["interrupted"])
         self.assertEqual(1, run["summary"]["skipped"])
 
-    def test_interrupted_compile_is_recorded_in_history(self):
+    def test_interrupted_compile_without_started_test_is_not_persisted(self):
         run = {
             "planned_tests": 1,
             "tests": [],
@@ -225,10 +232,11 @@ class SimmerRuntimeHardeningTest(unittest.TestCase):
         vcomp._jobstatus = simmer.JobStatus.NOT_STARTED
         manager = SimpleNamespace(interrupted_jobs=(vcomp, ))
 
-        with mock.patch("simmer.simmer_results.save_run"):
+        with mock.patch("simmer.simmer_results.save_run") as save_run:
             simmer.finalize_interrupted_run(rcfg, mock.Mock(), {"//tb:tb": vcomp}, jm=manager)
 
         self.assertEqual("INTERRUPTED", run["compile"][0]["status"])
+        save_run.assert_not_called()
 
     def test_interrupt_cleanup_temporarily_ignores_additional_sigint(self):
         previous_handler = object()
@@ -248,8 +256,10 @@ class SimmerRuntimeHardeningTest(unittest.TestCase):
         for interrupted_phase in ("backend", "coverage", "report", "cleanup"):
             with self.subTest(interrupted_phase=interrupted_phase), tempfile.TemporaryDirectory() as project_dir:
                 run = {
-                    "planned_tests": 0,
-                    "tests": [],
+                    "planned_tests": 1,
+                    "tests": [{
+                        "status": "PASSED"
+                    }],
                     "compile": [],
                     "launch_failures": [],
                 }
@@ -429,8 +439,8 @@ class SimmerRuntimeHardeningTest(unittest.TestCase):
         test_job.iteration = 1
         test_job.job_dir = None
         test_job._log_path = None
-        test_job.job_start_time = None
-        test_job.job_stop_time = None
+        test_job.job_start_time = datetime.datetime.now() - datetime.timedelta(seconds=2)
+        test_job.job_stop_time = datetime.datetime.now()
         test_job.error_message = None
         test_job._jobstatus = simmer.JobStatus.NOT_STARTED
         manager = SimpleNamespace(interrupted_jobs=(test_job, ))

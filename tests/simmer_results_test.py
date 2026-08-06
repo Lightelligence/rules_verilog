@@ -1,3 +1,4 @@
+import datetime
 import json
 import tempfile
 import threading
@@ -13,7 +14,11 @@ class SimmerResultsTest(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.project_dir = self.temp_dir.name
-        self.rcfg = SimpleNamespace(proj_dir=self.project_dir, regression_dir=self.project_dir)
+        self.rcfg = SimpleNamespace(
+            proj_dir=self.project_dir,
+            regression_dir=self.project_dir,
+            options=SimpleNamespace(no_compile=False),
+        )
 
     def tearDown(self):
         self.temp_dir.cleanup()
@@ -31,12 +36,29 @@ class SimmerResultsTest(unittest.TestCase):
         simmer_results.finalize_run(run)
         return run
 
+    def _save_history_run(self, bench, test, status):
+        run = simmer_results.create_run(["simmer", "-t", "{}:{}".format(bench, test)], self.rcfg, 1)
+        run["tests"] = [{
+            "bench": bench,
+            "test": test,
+            "status": status,
+            "simulation_started": True,
+            "cmp_log": "{}/cmp.log".format(bench),
+            "stdout_log": "{}/{}.log".format(bench, test),
+            "waves": {
+                "enabled": False
+            },
+        }]
+        simmer_results.finalize_run(run)
+        simmer_results.save_run(self.project_dir, run)
+        return run
+
     def test_run_ids_are_unique(self):
         self.assertNotEqual(self._completed_run()["run_id"], self._completed_run()["run_id"])
 
     def test_current_store_schema_records_interrupted_results(self):
-        self.assertEqual(3, simmer_results.SCHEMA_VERSION)
-        self.assertEqual(3, simmer_results.load_store(self.project_dir)["schema_version"])
+        self.assertEqual(4, simmer_results.SCHEMA_VERSION)
+        self.assertEqual(4, simmer_results.load_store(self.project_dir)["schema_version"])
 
         run = simmer_results.create_run(["simmer", "-t", "tb:test"], self.rcfg, 1)
         run["tests"] = [{"status": "INTERRUPTED"}]
@@ -45,7 +67,7 @@ class SimmerResultsTest(unittest.TestCase):
 
         self.assertEqual("INTERRUPTED", run["status"])
         store = simmer_results.load_store(self.project_dir)
-        self.assertEqual(3, store["schema_version"])
+        self.assertEqual(4, store["schema_version"])
         self.assertEqual(1, store["last_run"]["summary"]["interrupted"])
 
     def test_concurrent_saves_preserve_both_runs(self):
@@ -119,7 +141,7 @@ class SimmerResultsTest(unittest.TestCase):
         simmer_results.record_test_job(run, test_job)
 
         self.assertEqual(7, run["tests"][0]["duration_s"])
-        self.assertEqual(19, run["tests"][0]["wall_duration_s"])
+        self.assertEqual(19.8, run["tests"][0]["wall_duration_s"])
 
     def test_missing_simulator_duration_does_not_report_setup_time_as_simulation(self):
         run = simmer_results.create_run(["simmer", "-t", "tb:test"], self.rcfg, 1)
@@ -146,9 +168,12 @@ class SimmerResultsTest(unittest.TestCase):
         simmer_results.record_test_job(run, test_job)
 
         self.assertIsNone(run["tests"][0]["duration_s"])
-        self.assertEqual(19, run["tests"][0]["wall_duration_s"])
+        self.assertEqual(19.8, run["tests"][0]["wall_duration_s"])
+        self.assertFalse(run["tests"][0]["simulation_started"])
+        simmer_results.finalize_run(run)
+        self.assertFalse(simmer_results.save_run(self.project_dir, run))
 
-    def test_compile_failure_without_started_test_is_saved_and_shown(self):
+    def test_compile_failure_without_started_test_is_not_saved(self):
         run = simmer_results.create_run(["simmer", "-t", "tb:test"], self.rcfg, 1)
         run["compile"] = [{
             "bench": "tb",
@@ -159,12 +184,12 @@ class SimmerResultsTest(unittest.TestCase):
         }]
         simmer_results.finalize_run(run)
 
-        simmer_results.save_run(self.project_dir, run)
+        saved = simmer_results.save_run(self.project_dir, run)
 
         self.assertEqual("COMPILE_FAILED", run["status"])
-        history = simmer_results.format_history(self.project_dir, 10, use_color=False)
-        self.assertIn("COMPILE_FAILED", history)
-        self.assertIn("compile: cmp.log", history)
+        self.assertFalse(saved)
+        self.assertEqual([], simmer_results.load_store(self.project_dir)["runs"])
+        self.assertEqual("No simmer history found.", simmer_results.format_history(self.project_dir, 10))
 
     def test_compile_record_preserves_optional_performance_metrics(self):
         run = simmer_results.create_run(["simmer", "-t", "tb:test"], self.rcfg, 1)
@@ -184,11 +209,239 @@ class SimmerResultsTest(unittest.TestCase):
 
         simmer_results.record_compile_job(run, vcomp)
 
-        self.assertEqual(12, run["compile"][0]["duration_s"])
+        self.assertEqual(12.8, run["compile"][0]["duration_s"])
         self.assertEqual(4, run["compile"][0]["metrics"]["partcomp_jobs"])
 
         simmer_results.record_compile_job(run, vcomp, status="INTERRUPTED")
         self.assertEqual("INTERRUPTED", run["compile"][0]["status"])
+
+    def test_history_formats_single_run_elapsed_times(self):
+        started_at = datetime.datetime(2026, 8, 6, 10, 30, 0)
+        run = simmer_results.create_run(["simmer", "-t", "tb:test"], self.rcfg, 1)
+        vcomp = SimpleNamespace(
+            name="tb",
+            bazel_vcomp_target="//tb:tb",
+            jobstatus=SimpleNamespace(name="PASSED"),
+            job_dir="compile",
+            log_path="cmp.log",
+            duration_s=82.8,
+            compile_metrics={"compile_cache_hit": False},
+            error_message=None,
+            job_start_time=started_at,
+            job_stop_time=started_at + datetime.timedelta(seconds=82.8),
+        )
+        test_started_at = started_at + datetime.timedelta(seconds=90)
+        test_job = SimpleNamespace(
+            rcfg=SimpleNamespace(options=SimpleNamespace(waves=None)),
+            vcomper=vcomp,
+            name="test",
+            target="//tb:test",
+            iteration=1,
+            seed=7,
+            jobstatus=SimpleNamespace(name="PASSED"),
+            duration_s=140.9,
+            simulation_duration_s=138.4,
+            job_dir="sim",
+            _log_path="stdout.log",
+            error_message=None,
+            job_start_time=test_started_at,
+            job_stop_time=test_started_at + datetime.timedelta(seconds=140.9),
+        )
+
+        simmer_results.record_compile_job(run, vcomp)
+        simmer_results.record_test_job(run, test_job)
+        simmer_results.finalize_run(run)
+        simmer_results.save_run(self.project_dir, run)
+
+        self.assertEqual(82.8, run["timing"]["compile_elapsed_s"])
+        self.assertEqual(140.9, run["timing"]["simulate_elapsed_s"])
+        history = simmer_results.format_history(self.project_dir, 10, use_color=False)
+        heading = history.splitlines()[0]
+        self.assertNotIn("1/1", heading)
+        self.assertNotIn("[tests:", heading)
+        self.assertIn("[compile 00:01:22 | simulate 00:02:20]", history)
+
+    def test_regression_elapsed_time_unions_parallel_job_intervals(self):
+        started_at = datetime.datetime(2026, 8, 6, 10, 30, 0)
+        run = simmer_results.create_run(["simmer", "-t", "tb:*@2"], self.rcfg, 2)
+
+        def make_vcomp(name, start_s, stop_s):
+            return SimpleNamespace(
+                name=name,
+                bazel_vcomp_target="//{}:{}".format(name, name),
+                jobstatus=SimpleNamespace(name="PASSED"),
+                job_dir="compile/{}".format(name),
+                log_path="compile/{}/cmp.log".format(name),
+                duration_s=stop_s - start_s,
+                compile_metrics={"compile_cache_hit": False},
+                error_message=None,
+                job_start_time=started_at + datetime.timedelta(seconds=start_s),
+                job_stop_time=started_at + datetime.timedelta(seconds=stop_s),
+            )
+
+        def make_test(vcomp, name, iteration, start_s, stop_s):
+            return SimpleNamespace(
+                rcfg=SimpleNamespace(options=SimpleNamespace(waves=None)),
+                vcomper=vcomp,
+                name=name,
+                target="//tests:{}".format(name),
+                iteration=iteration,
+                seed=iteration,
+                jobstatus=SimpleNamespace(name="PASSED"),
+                duration_s=stop_s - start_s,
+                simulation_duration_s=stop_s - start_s,
+                job_dir="sim/{}".format(name),
+                _log_path="sim/{}/stdout.log".format(name),
+                error_message=None,
+                job_start_time=started_at + datetime.timedelta(seconds=start_s),
+                job_stop_time=started_at + datetime.timedelta(seconds=stop_s),
+            )
+
+        first_vcomp = make_vcomp("tb_a", 0, 10)
+        second_vcomp = make_vcomp("tb_b", 5, 15)
+        simmer_results.record_compile_job(run, first_vcomp)
+        simmer_results.record_compile_job(run, second_vcomp)
+        simmer_results.record_test_job(run, make_test(first_vcomp, "first", 1, 20, 50))
+        simmer_results.record_test_job(run, make_test(second_vcomp, "second", 2, 30, 70))
+
+        simmer_results.finalize_run(run)
+
+        self.assertEqual(15.0, run["timing"]["compile_elapsed_s"])
+        self.assertEqual(50.0, run["timing"]["simulate_elapsed_s"])
+
+    def test_history_labels_multi_test_result_counts(self):
+        run = simmer_results.create_run(["simmer", "-t", "tb:*@4"], self.rcfg, 4)
+        run["tests"] = [
+            {
+                "status": "PASSED",
+                "simulation_started": True,
+                "stdout_log": "pass.log",
+            },
+            {
+                "status": "FAILED",
+                "simulation_started": True,
+                "stdout_log": "fail.log",
+            },
+            {
+                "status": "INTERRUPTED",
+                "simulation_started": True,
+                "stdout_log": "interrupted.log",
+            },
+        ]
+
+        simmer_results.finalize_run(run, regression_log_path="regression.log")
+        simmer_results.save_run(self.project_dir, run)
+
+        history = simmer_results.format_history(self.project_dir, 10, use_color=False)
+        self.assertIn(
+            "FAILED  [tests: 1 passed | 1 failed | 1 interrupted | 1 skipped]  "
+            "[compile - | simulate -]",
+            history,
+        )
+
+    def test_history_marks_explicit_and_automatic_compile_reuse(self):
+        for explicit_reuse in (False, True):
+            with self.subTest(explicit_reuse=explicit_reuse), tempfile.TemporaryDirectory() as project_dir:
+                rcfg = SimpleNamespace(
+                    proj_dir=project_dir,
+                    regression_dir=project_dir,
+                    options=SimpleNamespace(no_compile=explicit_reuse),
+                )
+                run = simmer_results.create_run(["simmer", "-t", "tb:test"], rcfg, 1)
+                if not explicit_reuse:
+                    run["compile"] = [{
+                        "status": "PASSED",
+                        "metrics": {
+                            "compile_cache_hit": True
+                        },
+                        "cmp_log": "cmp.log",
+                    }]
+                run["tests"] = [{
+                    "status": "PASSED",
+                    "cmp_log": "cmp.log",
+                    "stdout_log": "stdout.log",
+                    "waves": {
+                        "enabled": False
+                    },
+                    "_elapsed_interval_s": [0.0, 43.9],
+                }]
+
+                simmer_results.finalize_run(run)
+                simmer_results.save_run(project_dir, run)
+
+                history = simmer_results.format_history(project_dir, 10, use_color=False)
+                self.assertIn("[compile reused | simulate 00:00:43]", history)
+
+    def test_history_without_timing_fields_remains_readable(self):
+        run = self._completed_run()
+        run.pop("timing")
+
+        simmer_results.save_run(self.project_dir, run)
+
+        history = simmer_results.format_history(self.project_dir, 10, use_color=False)
+        self.assertIn("[compile - | simulate -]", history)
+
+    def test_history_filters_by_bench_and_failure_before_limiting(self):
+        failed_a = self._save_history_run("tb_a", "failed_a", "FAILED")
+        self._save_history_run("tb_b", "failed_b", "FAILED")
+        self._save_history_run("tb_a", "passed_a", "PASSED")
+
+        self.assertEqual(["tb_a"], failed_a["benches"])
+
+        failed_history = simmer_results.format_history(
+            self.project_dir,
+            1,
+            use_color=False,
+            failed_only=True,
+        )
+        self.assertIn("tb_b:failed_b", failed_history)
+        self.assertNotIn("tb_a:passed_a", failed_history)
+        self.assertNotIn("tb_a:failed_a", failed_history)
+
+        bench_history = simmer_results.format_history(
+            self.project_dir,
+            10,
+            use_color=False,
+            bench="tb_a",
+        )
+        self.assertIn("tb_a:failed_a", bench_history)
+        self.assertIn("tb_a:passed_a", bench_history)
+        self.assertNotIn("tb_b:failed_b", bench_history)
+
+        combined_history = simmer_results.format_history(
+            self.project_dir,
+            10,
+            use_color=False,
+            bench="tb_a",
+            failed_only=True,
+        )
+        self.assertIn("tb_a:failed_a", combined_history)
+        self.assertNotIn("tb_a:passed_a", combined_history)
+        self.assertNotIn("tb_b:failed_b", combined_history)
+
+    def test_history_bench_filter_falls_back_for_old_records(self):
+        run = self._save_history_run("legacy_tb", "smoke", "PASSED")
+        store_path = Path(simmer_results.results_path(self.project_dir))
+        store = json.loads(store_path.read_text(encoding="utf-8"))
+        store["last_run"].pop("benches")
+        store["runs"][0].pop("benches")
+        store_path.write_text(json.dumps(store), encoding="utf-8")
+
+        history = simmer_results.format_history(self.project_dir, 10, use_color=False, bench="legacy_tb")
+
+        self.assertIn(run["command"], history)
+
+    def test_history_filters_report_no_matches(self):
+        self._save_history_run("tb", "passed", "PASSED")
+
+        self.assertEqual(
+            "No matching simmer history found.",
+            simmer_results.format_history(self.project_dir, 10, bench="missing"),
+        )
+        self.assertEqual(
+            "No matching simmer history found.",
+            simmer_results.format_history(self.project_dir, 10, failed_only=True),
+        )
 
     def test_multi_test_history_keeps_summary_and_one_representative_test(self):
         run = self._completed_run()

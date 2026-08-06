@@ -3,6 +3,7 @@
 
 import datetime
 import json
+import math
 import os
 import shlex
 import sys
@@ -10,7 +11,7 @@ import uuid
 from contextlib import contextmanager
 
 RESULTS_FILENAME = ".simmer_results.json"
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 MAX_RUNS = 100
 COLOR_GREEN = "\033[0;32m"
 COLOR_RED = "\033[0;31m"
@@ -38,6 +39,93 @@ def _run_id():
     return uuid.uuid4().hex
 
 
+def _duration_seconds(value):
+    if value is None:
+        return None
+    try:
+        duration = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(duration) or duration < 0:
+        return None
+    return round(duration, 3)
+
+
+def _record_job_interval(record, job, stopped_at=None):
+    started_at = getattr(job, "job_start_time", None)
+    finished_at = getattr(job, "job_stop_time", None) or stopped_at
+    if started_at is None or finished_at is None:
+        return
+    try:
+        started_at_s = started_at.timestamp()
+        finished_at_s = finished_at.timestamp()
+    except (AttributeError, OSError, OverflowError, ValueError):
+        return
+    if finished_at_s < started_at_s:
+        return
+    record["_elapsed_interval_s"] = [started_at_s, finished_at_s]
+
+
+def _consume_elapsed_time(records):
+    intervals = []
+    for record in records:
+        interval = record.pop("_elapsed_interval_s", None)
+        if not isinstance(interval, list) or len(interval) != 2:
+            continue
+        start, stop = interval
+        if not all(isinstance(value, (int, float)) and math.isfinite(value) for value in interval):
+            continue
+        if stop >= start:
+            intervals.append((start, stop))
+    if not intervals:
+        return None
+
+    intervals.sort()
+    elapsed_s = 0.0
+    current_start, current_stop = intervals[0]
+    for start, stop in intervals[1:]:
+        if start <= current_stop:
+            current_stop = max(current_stop, stop)
+            continue
+        elapsed_s += current_stop - current_start
+        current_start, current_stop = start, stop
+    elapsed_s += current_stop - current_start
+    return round(elapsed_s, 3)
+
+
+def _finalize_timing(run):
+    timing = run.setdefault("timing", {})
+    compile_elapsed_s = _consume_elapsed_time(run.get("compile", []))
+    tests = run.get("tests", [])
+    started_tests = [test for test in tests if test.get("simulation_started", True)]
+    for test in tests:
+        if not test.get("simulation_started", True):
+            test.pop("_elapsed_interval_s", None)
+    simulate_elapsed_s = _consume_elapsed_time(started_tests)
+    if compile_elapsed_s is not None:
+        timing["compile_elapsed_s"] = compile_elapsed_s
+    else:
+        timing.setdefault("compile_elapsed_s", None)
+    if simulate_elapsed_s is not None:
+        timing["simulate_elapsed_s"] = simulate_elapsed_s
+    else:
+        timing.setdefault("simulate_elapsed_s", None)
+
+    compile_records = run.get("compile", [])
+    cache_reused = bool(compile_records) and all(
+        bool(record.get("metrics", {}).get("compile_cache_hit")) for record in compile_records)
+    timing["compile_reused"] = bool(timing.get("compile_reused") or cache_reused)
+
+
+def _collect_benches(run):
+    benches = set(run.get("benches", []))
+    for record in run.get("compile", []) + run.get("tests", []):
+        bench = record.get("bench")
+        if bench:
+            benches.add(bench)
+    return sorted(benches)
+
+
 @contextmanager
 def _store_lock(path):
     with open(path + ".lock", "a+b") as lock:
@@ -63,6 +151,7 @@ def _store_lock(path):
 
 
 def create_run(argv, rcfg, planned_tests):
+    options = getattr(rcfg, "options", None)
     return {
         "run_id": _run_id(),
         "started_at": _timestamp(),
@@ -83,7 +172,13 @@ def create_run(argv, rcfg, planned_tests):
         },
         "compile": [],
         "tests": [],
+        "benches": [],
         "launch_failures": [],
+        "timing": {
+            "compile_elapsed_s": None,
+            "simulate_elapsed_s": None,
+            "compile_reused": bool(getattr(options, "no_compile", False)),
+        },
     }
 
 
@@ -104,14 +199,19 @@ def record_compile_job(run, vcomp_job, status=None):
         "status": status or vcomp_job.jobstatus.name,
         "compile_dir": vcomp_job.job_dir,
         "cmp_log": vcomp_job.log_path,
-        "duration_s": int(getattr(vcomp_job, "duration_s", 0) or 0),
+        "duration_s": _duration_seconds(getattr(vcomp_job, "duration_s", 0) or 0),
         "metrics": getattr(vcomp_job, "compile_metrics", {}),
         "error_message": getattr(vcomp_job, "error_message", None),
     }
+    _record_job_interval(
+        compile_record,
+        vcomp_job,
+        stopped_at=datetime.datetime.now() if status == "INTERRUPTED" else None,
+    )
     _upsert_by_key(run["compile"], "vcomp_target", compile_record)
 
 
-def record_test_job(run, test_job, waves_script=None, waves_path=None, status=None):
+def record_test_job(run, test_job, waves_script=None, waves_path=None, status=None, simulation_started=None):
     if run is None:
         return
     waves_enabled = test_job.rcfg.options.waves is not None
@@ -123,8 +223,10 @@ def record_test_job(run, test_job, waves_script=None, waves_path=None, status=No
             "exists": bool(waves_path and os.path.exists(waves_path)),
         })
 
-    wall_duration_s = int(getattr(test_job, "duration_s", 0) or 0)
+    wall_duration_s = _duration_seconds(getattr(test_job, "duration_s", 0) or 0)
     simulation_duration_s = getattr(test_job, "simulation_duration_s", None)
+    if simulation_started is None:
+        simulation_started = simulation_duration_s is not None
     test_record = {
         "bench": test_job.vcomper.name,
         "test": test_job.name,
@@ -133,7 +235,8 @@ def record_test_job(run, test_job, waves_script=None, waves_path=None, status=No
         "iteration": test_job.iteration,
         "seed": getattr(test_job, "seed", None),
         "status": status or test_job.jobstatus.name,
-        "duration_s": int(simulation_duration_s) if simulation_duration_s is not None else None,
+        "simulation_started": bool(simulation_started),
+        "duration_s": _duration_seconds(simulation_duration_s),
         "wall_duration_s": wall_duration_s,
         "compile_dir": test_job.vcomper.job_dir,
         "sim_dir": test_job.job_dir,
@@ -142,6 +245,11 @@ def record_test_job(run, test_job, waves_script=None, waves_path=None, status=No
         "waves": waves,
         "error_message": getattr(test_job, "error_message", None),
     }
+    _record_job_interval(
+        test_record,
+        test_job,
+        stopped_at=datetime.datetime.now() if status == "INTERRUPTED" else None,
+    )
     for index, existing in enumerate(run["tests"]):
         if all(existing.get(key) == test_record.get(key) for key in ("target", "iteration", "seed")):
             run["tests"][index] = test_record
@@ -169,6 +277,8 @@ def finalize_run(run, regression_log_path=None, backend_finalize_failed=False):
         "skipped": skipped,
         "total": planned_tests,
     }
+    _finalize_timing(run)
+    run["benches"] = _collect_benches(run)
 
     if backend_finalize_failed:
         run["status"] = "FAILED"
@@ -216,7 +326,14 @@ def load_store(project_dir):
     return store
 
 
+def should_save_run(run):
+    """Return whether at least one simulation produced a result record."""
+    return bool(run and any(test.get("simulation_started", True) for test in run.get("tests", [])))
+
+
 def save_run(project_dir, run, max_runs=MAX_RUNS):
+    if not should_save_run(run):
+        return False
     stored_run = dict(run)
     if int(run.get("planned_tests") or len(run["tests"])) > 1 and len(run["tests"]) > 1:
         representative = next(
@@ -249,6 +366,7 @@ def save_run(project_dir, run, max_runs=MAX_RUNS):
         finally:
             if os.path.exists(temp_path):
                 os.remove(temp_path)
+    return True
 
 
 def _select_compile_log(run):
@@ -287,20 +405,27 @@ def _color_word(word, color, use_color):
     return "{}{}{}".format(color, word, COLOR_NC)
 
 
-def _format_pass_summary(run, use_color=False):
+def _format_test_summary(run, use_color=False):
     summary = run.get("summary", {})
     passed = summary.get("passed", 0)
     failed = summary.get("failed", 0)
     interrupted = summary.get("interrupted", 0)
-    total = summary.get("total", 0)
-    pass_text = _color_word("pass", COLOR_GREEN, use_color)
-    details = []
+    skipped = summary.get("skipped", 0)
+    total = summary.get("total", run.get("planned_tests", 0))
+    if total <= 1:
+        return None
+
+    passed_text = _color_word("passed", COLOR_GREEN, use_color)
+    details = ["{} {}".format(passed, passed_text)]
     if failed:
-        fail_text = _color_word("fail", COLOR_RED, use_color)
-        details.append("{} {}".format(failed, fail_text))
+        failed_text = _color_word("failed", COLOR_RED, use_color)
+        details.append("{} {}".format(failed, failed_text))
     if interrupted:
-        details.append("{} interrupted".format(interrupted))
-    return ", ".join(["{}/{} {}".format(passed, total, pass_text)] + details)
+        interrupted_text = _color_word("interrupted", COLOR_YELLOW, use_color)
+        details.append("{} {}".format(interrupted, interrupted_text))
+    if skipped:
+        details.append("{} skipped".format(skipped))
+    return "[tests: {}]".format(" | ".join(details))
 
 
 def _resolve_use_color(use_color):
@@ -321,7 +446,43 @@ def _color_status(status, use_color):
     return status
 
 
-def format_history(project_dir, count, use_color=None):
+def _format_duration(duration_s):
+    duration_s = _duration_seconds(duration_s)
+    if duration_s is None:
+        return "-"
+    total_seconds = int(duration_s)
+    hours = total_seconds // 3600
+    minutes = (total_seconds % 3600) // 60
+    seconds = total_seconds % 60
+    return "{:02d}:{:02d}:{:02d}".format(hours, minutes, seconds)
+
+
+def _format_timing(run):
+    timing = run.get("timing", {})
+    if timing.get("compile_reused"):
+        compile_duration = "reused"
+    else:
+        compile_duration = _format_duration(timing.get("compile_elapsed_s"))
+    simulate_duration = _format_duration(timing.get("simulate_elapsed_s"))
+    return "[compile {} | simulate {}]".format(compile_duration, simulate_duration)
+
+
+def _is_failed_history_run(run):
+    return (run.get("status") in ("FAILED", "COMPILE_FAILED") or int(run.get("summary", {}).get("failed", 0) or 0) > 0)
+
+
+def _filter_history_runs(runs, bench=None, failed_only=False):
+    filtered = []
+    for run in runs:
+        if bench is not None and bench not in _collect_benches(run):
+            continue
+        if failed_only and not _is_failed_history_run(run):
+            continue
+        filtered.append(run)
+    return filtered
+
+
+def format_history(project_dir, count, use_color=None, bench=None, failed_only=False):
     use_color = _resolve_use_color(use_color)
     try:
         store = load_store(project_dir)
@@ -330,18 +491,25 @@ def format_history(project_dir, count, use_color=None):
     runs = store.get("runs", [])
     if not runs:
         return "No simmer history found."
+    runs = _filter_history_runs(runs, bench=bench, failed_only=failed_only)
+    if not runs:
+        return "No matching simmer history found."
 
     lines = []
     recent_runs = list(reversed(runs))[:count]
     for index, run in enumerate(recent_runs, start=1):
         if lines:
             lines.append("")
-        lines.append("[{}] {}  {}  {}".format(
-            index,
-            run.get("finished_at") or run.get("started_at") or "-",
+        heading = [
+            "[{}] {}".format(index,
+                             run.get("finished_at") or run.get("started_at") or "-"),
             _color_status(run.get("status", "-"), use_color),
-            _format_pass_summary(run, use_color=use_color),
-        ))
+        ]
+        test_summary = _format_test_summary(run, use_color=use_color)
+        if test_summary is not None:
+            heading.append(test_summary)
+        heading.append(_format_timing(run))
+        lines.append("  ".join(heading))
         lines.append("cmd:     {}".format(run.get("command") or "-"))
         lines.append("compile: {}".format(_select_compile_log(run)))
         lines.append("result:  {}".format(_select_result_log(run)))
@@ -351,5 +519,5 @@ def format_history(project_dir, count, use_color=None):
     return "\n".join(lines)
 
 
-def print_history(project_dir, count, use_color=None):
-    print(format_history(project_dir, count, use_color=use_color))
+def print_history(project_dir, count, use_color=None, bench=None, failed_only=False):
+    print(format_history(project_dir, count, use_color=use_color, bench=bench, failed_only=failed_only))
