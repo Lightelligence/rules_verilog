@@ -211,12 +211,7 @@ def record_compile_job(run, vcomp_job, status=None):
     _upsert_by_key(run["compile"], "vcomp_target", compile_record)
 
 
-def record_test_job(run,
-                    test_job,
-                    waves_script=None,
-                    waves_path=None,
-                    status=None,
-                    simulation_started=None):
+def record_test_job(run, test_job, waves_script=None, waves_path=None, status=None, simulation_started=None):
     if run is None:
         return
     waves_enabled = test_job.rcfg.options.waves is not None
@@ -473,8 +468,7 @@ def _format_timing(run):
 
 
 def _is_failed_history_run(run):
-    return (run.get("status") in ("FAILED", "COMPILE_FAILED")
-            or int(run.get("summary", {}).get("failed", 0) or 0) > 0)
+    return (run.get("status") in ("FAILED", "COMPILE_FAILED") or int(run.get("summary", {}).get("failed", 0) or 0) > 0)
 
 
 def _filter_history_runs(runs, bench=None, failed_only=False):
@@ -507,7 +501,8 @@ def format_history(project_dir, count, use_color=None, bench=None, failed_only=F
         if lines:
             lines.append("")
         heading = [
-            "[{}] {}".format(index, run.get("finished_at") or run.get("started_at") or "-"),
+            "[{}] {}".format(index,
+                             run.get("finished_at") or run.get("started_at") or "-"),
             _color_status(run.get("status", "-"), use_color),
         ]
         test_summary = _format_test_summary(run, use_color=use_color)

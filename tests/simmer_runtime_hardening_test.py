@@ -104,7 +104,12 @@ class SimmerRuntimeHardeningTest(unittest.TestCase):
     def test_history_persistence_failure_is_fatal(self):
         rcfg = SimpleNamespace(
             proj_dir="/repo",
-            simmer_results_run={"run_id": "test", "tests": [{"status": "PASSED"}]},
+            simmer_results_run={
+                "run_id": "test",
+                "tests": [{
+                    "status": "PASSED"
+                }]
+            },
             log=_FatalLog(),
         )
         with mock.patch("simmer.simmer_results.save_run", side_effect=OSError("disk full")), \
@@ -137,7 +142,9 @@ class SimmerRuntimeHardeningTest(unittest.TestCase):
     def test_interrupted_history_persistence_failure_is_nonfatal(self):
         run = {
             "planned_tests": 1,
-            "tests": [{"status": "INTERRUPTED"}],
+            "tests": [{
+                "status": "INTERRUPTED"
+            }],
             "compile": [],
             "launch_failures": [],
         }
@@ -250,7 +257,9 @@ class SimmerRuntimeHardeningTest(unittest.TestCase):
             with self.subTest(interrupted_phase=interrupted_phase), tempfile.TemporaryDirectory() as project_dir:
                 run = {
                     "planned_tests": 1,
-                    "tests": [{"status": "PASSED"}],
+                    "tests": [{
+                        "status": "PASSED"
+                    }],
                     "compile": [],
                     "launch_failures": [],
                 }
