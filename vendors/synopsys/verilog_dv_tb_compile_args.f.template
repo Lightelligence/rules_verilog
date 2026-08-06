@@ -4,6 +4,7 @@
 -sverilog
 -DVCS
 -ntb_opts uvm-1.2
++plusarg_save
 -lca
 -lrt
 +libext+.sv+.svh+.v+.vh+.vams+.vp+.svp

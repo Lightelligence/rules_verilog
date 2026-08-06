@@ -2,6 +2,7 @@
 -V
 -notice
 -ntb_opts uvm-1.2
++plusarg_save
 -lca
 -lrt
 -timescale=1ns/1ps

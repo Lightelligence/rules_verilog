@@ -251,6 +251,7 @@ class VcsFilelistValidationTest(unittest.TestCase):
         self.assertTrue(options["vcs_three_step"])
         self.assertIn("+define+THREE_STEP_ANALYSIS", vlogan_args)
         self.assertIn("+define+TBV", vlogan_args)
+        self.assertIn("+plusarg_save", elab_args)
         self.assertNotIn("-top", vlogan_args)
         self.assertIn(
             "precompile\texternal/filelist_external_fixture/external_rtl.f",
@@ -315,6 +316,7 @@ class VcsFilelistValidationTest(unittest.TestCase):
         rtl_script = read_runfile("tests/vcs_filelist_validation/rtl_unit_vcs")
         self.assertLess(rtl_script.index("-full64"), rtl_script.index("-file"))
         self.assertIn("-file tests/vcs_filelist_validation/unit_test_top_vcs.f", dv_compile_args)
+        self.assertIn("+plusarg_save", dv_compile_args)
         self.assertIn("+define+DV_UNIT_VCS", dv_compile_args)
         self.assertIn("+define+DV_LEGACY_VCS", dv_compile_args)
         self.assertNotIn("-define", dv_compile_args)
@@ -323,6 +325,7 @@ class VcsFilelistValidationTest(unittest.TestCase):
         self.assertNotIn("-sv\n", dv_compile_args)
         self.assertNotIn("ignored_dv_waves.tcl", dv_compile_args)
         self.assertIn("-file tests/vcs_filelist_validation/unit_test_top_vcs.f", rtl_compile_args)
+        self.assertIn("+plusarg_save", rtl_compile_args)
         self.assertIn("+define+PWR_AWARE", rtl_compile_args)
         self.assertIn("+define+VCS_NATIVE", rtl_compile_args)
         self.assertIn("+warn=noTEST", rtl_compile_args)
