@@ -240,6 +240,19 @@ def add_regression_arguments(parser):
         type=int,
         help='Print retained simulation records and exit. With no value show 10; otherwise require a positive count.')
     regression_group.add_argument(
+        '--history-bench',
+        '--his-bench',
+        dest='history_bench',
+        default=None,
+        help='Show history for this exact bench name. Used alone, query the most recent 10 matching records.')
+    regression_group.add_argument(
+        '--history-fail',
+        '--his-fail',
+        dest='history_fail',
+        default=False,
+        action='store_true',
+        help='Show failed history only. Used alone, query the most recent 10 matching records.')
+    regression_group.add_argument(
         '--no-stdout',
         default=False,
         action='store_true',

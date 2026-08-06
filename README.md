@@ -393,7 +393,8 @@ reporting, MSIE, Palladium, ICO, VSO.ai and CCEX.
 
 `--no-compile` reuse is rejected when source/runfile content, an external
 compile configuration, or the selected simulator tool environment changes.
-Recent normal-run compile/start failures remain visible through `simmer --history`.
+Completed and interrupted simulations remain visible through `simmer --history`;
+failures that prevent every test from starting are not recorded.
 
 ### Python Dependencies
 rules_verilog uses the Python libraries listed in `requirements.txt`, but it

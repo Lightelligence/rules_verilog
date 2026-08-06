@@ -123,8 +123,17 @@ def parse_args(argv):
         parser.error("--uvm-max-quit-count must be non-negative (0 disables the limit).")
     if options.idle_print_seconds < 1:
         parser.error("--idle-print-seconds must be a positive integer.")
+    if options.history_bench is not None:
+        options.history_bench = options.history_bench.strip()
+        if not options.history_bench:
+            parser.error("--history-bench requires a non-empty bench name.")
+    if options.history_bench is not None or options.history_fail:
+        if options.history is None:
+            options.history = 10
     if options.history is not None and options.history < 1:
         parser.error("--history must be a positive integer.")
+    if options.history is not None and options.tests:
+        parser.error("History query options cannot be combined with -t/--tests.")
     if options.timeout < 0:
         parser.error("--timeout must be non-negative (0 disables the timeout).")
     options.simulator_was_explicit = simulator_explicitly_requested(argv)

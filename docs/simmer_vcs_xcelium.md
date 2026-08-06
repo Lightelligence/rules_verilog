@@ -788,9 +788,9 @@ seed and original simulator options. Run it directly from any directory. Set
 ## Simulation history
 
 Normal simulation invocations are recorded in `.simmer_results.json` at the
-project root, including compile and launch failures that prevent a test from
-starting. The file is local run state and is intended for quick lookup of recent
-outputs.
+project root after at least one simulation starts. Compile or launch failures
+that prevent every test from starting are not recorded. The file is local run
+state and is intended for quick lookup of recent outputs.
 
 Print the most recent 10 runs:
 
@@ -806,19 +806,47 @@ simmer --history 20
 simmer --his 20
 ```
 
-Each entry includes the original `simmer` command, compile log, and result log.
-For a single test with wave dumping enabled, the history also shows the
-generated `run_waves.sh` path. For multi-test regressions, the result path is
-the regression log rather than every individual case log.
+Filter by exact bench name or failure status. A filter used without
+`--history`/`--his` automatically queries the most recent 10 matching records:
+
+```bash
+simmer --history-bench sys_tb
+simmer --his-bench sys_tb
+simmer --history-fail
+simmer --his-fail
+```
+
+Combine filters with a custom count:
+
+```bash
+simmer --his 20 --his-bench sys_tb --his-fail
+```
+
+Filters are applied before the count, so this example returns the most recent
+20 failed `sys_tb` records. Bench and failure filters use AND semantics. History
+query options cannot be combined with `-t`/`--tests`; a query with no matches
+prints `No matching simmer history found.`.
+
+Each entry includes the original `simmer` command, compile log, result log, and
+compile/simulation elapsed time on the first line. Parallel jobs are measured as
+the union of their active intervals rather than by summing every case. Compile
+reuse is shown as `compile reused`. For a single test with wave dumping enabled,
+the history also shows the generated `run_waves.sh` path. For multi-test
+regressions, the result path is the regression log rather than every individual
+case log.
 
 Example:
 
 ```text
-[1] 2026-07-09 15:03:04  FAILED  87/100 pass, 13 fail
+[1] 2026-07-09 15:03:04  FAILED  [tests: 87 passed | 13 failed]  [compile 00:03:12 | simulate 00:38:41]
 cmd:     simmer -t sys_tb:*@10
 compile: /sim/sys_tb/cmp.log
 result:  /sim/regression.log
 ```
+
+Single-test entries omit the redundant pass/fail count and show only the final
+run status. Multi-test regressions use the explicit `[tests: ...]` summary so
+case results are not confused with compile and simulation phases.
 
 Status words and pass/fail labels are colorized when output goes to a terminal.
 Use `--use-color` to force color output:
@@ -830,4 +858,7 @@ simmer --use-color --history
 Discovery-only and explicit compile-only invocations are not recorded. For a
 started test, `duration_s` is the main simulator command time and
 `wall_duration_s` is the complete test job time; a failure before the simulator
-starts leaves `duration_s` unset.
+starts leaves `duration_s` unset. Run-level `timing.compile_elapsed_s` and
+`timing.simulate_elapsed_s` retain millisecond precision in the JSON file while
+the history display uses `HH:MM:SS`. Older records without run-level timing
+remain readable and display `-` for the missing values.

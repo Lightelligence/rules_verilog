@@ -1596,6 +1596,8 @@ def main(rcfg, options):
 
 def persist_simmer_results(rcfg, fatal=True):
     """Persist local history; inability to do so is a command failure."""
+    if not simmer_results.should_save_run(rcfg.simmer_results_run):
+        return True
     try:
         simmer_results.save_run(rcfg.proj_dir, rcfg.simmer_results_run)
     except Exception as exc:
@@ -1630,8 +1632,8 @@ def finalize_interrupted_run(rcfg,
         return
     if jm is not None:
         for job in jm.interrupted_jobs:
-            if isinstance(job, TestJob):
-                simmer_results.record_test_job(run, job, status="INTERRUPTED")
+            if isinstance(job, TestJob) and job.job_start_time is not None:
+                simmer_results.record_test_job(run, job, status="INTERRUPTED", simulation_started=True)
             elif isinstance(job, VCompJob):
                 simmer_results.record_compile_job(run, job, status="INTERRUPTED")
     simmer_results.finalize_run(run, backend_finalize_failed=True)
@@ -1642,7 +1644,13 @@ if __name__ == '__main__':
     options = parse_args(sys.argv[1:])
     if options.history is not None:
         history_use_color = True if options.use_color else None
-        simmer_results.print_history(options.proj_dir, options.history, use_color=history_use_color)
+        simmer_results.print_history(
+            options.proj_dir,
+            options.history,
+            use_color=history_use_color,
+            bench=options.history_bench,
+            failed_only=options.history_fail,
+        )
         sys.exit(0)
     options.simmer_argv = sys.argv[:]
     verbosity = cmn_logging.DEBUG if options.tool_debug else cmn_logging.INFO
