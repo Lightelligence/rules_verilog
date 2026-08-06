@@ -2159,6 +2159,7 @@ run_bounded_process([
         self.assertIn("-sverilog", compile_args)
         self.assertNotIn("+systemverilogext", compile_args)
         self.assertIn("-Mupdate", compile_args)
+        self.assertIn("+plusarg_save", compile_args)
 
     def test_vcs_compile_template_preserves_defines_and_coverage_paths_with_spaces(self):
         root = Path(tempfile.mkdtemp(prefix="vcs compile argv "))
