@@ -23,6 +23,10 @@ class ArgsParserValidationTest(unittest.TestCase):
         self.assertEqual(99999999, options.wave_end)
         self.assertFalse(options.wave_end_was_explicit)
 
+    def test_default_wave_depth_is_bounded(self):
+        self.assertEqual(10, parse_args(["--waves"]).wave_depth)
+        self.assertEqual(999, parse_args(["--waves", "--wave-depth", "999"]).wave_depth)
+
     def test_explicit_wave_end_must_follow_wave_start(self):
         self.assert_parse_error(["--waves", "--wave-start", "20", "--wave-end", "10"])
         self.assert_parse_error(["--waves", "--wave-start", "100000000", "--wave-end", "99999999"])

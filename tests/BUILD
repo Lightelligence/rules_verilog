@@ -99,6 +99,16 @@ py_test(
 )
 
 py_test(
+    name = "lint_parser_test",
+    timeout = "short",
+    srcs = ["lint_parser_test.py"],
+    deps = [
+        "//bin:lint_parser_ascent",
+        "//bin:lint_parser_hal",
+    ],
+)
+
+py_test(
     name = "normalize_runfiles_flist_test",
     timeout = "short",
     srcs = ["normalize_runfiles_flist_test.py"],

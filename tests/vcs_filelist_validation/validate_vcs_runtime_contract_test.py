@@ -879,7 +879,8 @@ run_bounded_process([
             )
 
         waves = render("waves", waves=[])
-        self.assertIn("-debug_access", waves)
+        self.assertIn("-debug_access+r", waves)
+        self.assertNotIn("-debug_access \\", waves)
         self.assertNotIn("-debug_access+pp", waves)
         self.assertNotIn("+vpi", waves)
         self.assertNotIn("-debug_access+all+designer+simctrl", waves)
@@ -1392,6 +1393,13 @@ run_bounded_process([
         with self.assertRaises(ValueError):
             self._validated(["--simulator", "XRUN", "--waves", "--wave-type", "unknown"])
 
+    def test_wave_type_validation_is_case_insensitive(self):
+        vcs_options, _ = self._validated(["--simulator", "VCS", "--waves", "--wave-type", "FSDB"])
+        xcelium_options, _ = self._validated(["--simulator", "XRUN", "--waves", "--wave-type", "VWDB"])
+
+        self.assertEqual("fsdb", vcs_options.wave_type)
+        self.assertEqual("vwdb", xcelium_options.wave_type)
+
     def test_xcelium_msie_incremental_requires_primary_snapshot_name(self):
         with self.assertRaises(SystemExit):
             parse_args(["--simulator", "XRUN", "--msie-incr"])
@@ -1544,7 +1552,7 @@ run_bounded_process([
         self.assertIn("run 80ns", rendered)
         self.assertIn("database -close shm_db", rendered)
 
-    def test_vcs_wave_template_uses_returned_fsdb_id_and_unlimited_default_depth(self):
+    def test_vcs_wave_template_uses_returned_fsdb_id_and_explicit_unlimited_depth(self):
         wave_template = self._read_repo_file("bin/templates/vcs_wave_cmd_template.tcl.j2")
         environment = jinja2.Environment(undefined=jinja2.StrictUndefined)
         environment.filters["tcl_quote"] = _vcs_tcl_quote
@@ -2282,7 +2290,7 @@ run_bounded_process([
             additional_defines=["PROJECT_DEFINE"],
             bazel_runfiles_main=shell_path(runfiles),
             cov_opts="",
-            debug_mode="default",
+            debug_mode="waves",
             options=SimpleNamespace(
                 dtl=False,
                 fgp=None,
@@ -2338,6 +2346,8 @@ run_bounded_process([
         self.assertIn("+define+PROJECT_DEFINE", first_analysis)
         self.assertNotIn(shell_path(vlogan_args), first_analysis)
         self.assertEqual("vcs", elaboration[0])
+        self.assertIn("-debug_access+r", elaboration)
+        self.assertNotIn("-debug_access", elaboration)
         self.assertIn("-partcomp", elaboration)
         self.assertIn("-fastpartcomp=j2", elaboration)
         self.assertIn(shell_path(elab_args), elaboration)
@@ -2418,6 +2428,9 @@ run_bounded_process([
         capture = simulator.get_wave_capture_options(test_job, "/tmp/waves.tcl")
         self.assertEqual("hdl_top", capture["default_capture"])
         self.assertIn("-debug_opts verisium_pp", capture["sim_opts"])
+        self.assertEqual(os.path.join(test_job.job_dir, "waves"), capture["waves_db"])
+        self.assertEqual(os.path.join(test_job.job_dir, "waves"),
+                         simulator.get_wave_artifact_path(test_job.job_dir, options.wave_type))
 
         vcomp = DummyVcompJob()
         Path(vcomp.bench_dir, "fox_xprop.txt").touch()

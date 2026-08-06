@@ -490,7 +490,7 @@ Batch VCS defaults are kept light:
 - no default `+vpi`
 - no default xprop
 - no default smartlog
-- `-fastpartcomp=j8`
+- allocation-aware `-fastpartcomp=jN` (the detected LSF/Slurm or affinity allocation)
 
 Enable debug features explicitly:
 
@@ -502,7 +502,8 @@ simmer -t <bench>:<test> --simulator VCS --vcs-xprop F
 ```
 
 VCS `--waves` is the lightweight signal-dump mode. It compiles with `-kdb`
-and the base `-debug_access`, but does not enable VPI, SmartLog, or UVM
+and `-debug_access+r`, which gives FSDB read access to RTL signals and selected
+SystemVerilog interface signals, but does not enable VPI, SmartLog, or UVM
 transaction-recording defines. VCS cannot combine SmartLog's `-sml` with
 `-fastpartcomp=jN`; use `--smartlog --no-vcs-partcomp` when Verdi log/source
 correlation is needed. `--gui` remains the full interactive-debug mode: it
@@ -511,7 +512,9 @@ enables full reverse-debug access and explicitly adds
 SmartLog.
 
 The signal-only mode avoids the callback, driver, class, and VPI capabilities
-used for transaction-aware debug. GUI mode keeps VPI and UVM recording.
+used for transaction-aware debug. GUI mode keeps VPI and UVM recording. Add
+interface instances such as `hdl_top.spi_apb_if` and `hdl_top.mcp_axi_if` to
+`--waves` when they are outside a narrower RTL probe scope.
 
 `--xprop` remains a compatibility spelling for VCS. Use `--vcs-xprop` in new
 VCS commands so simulator-specific controls stay grouped in `simmer -h`.
@@ -520,11 +523,14 @@ VCS wave dumping supports FSDB only.
 
 ### FSDB probe and viewer flow
 
-The default FSDB command probes `hdl_top`. Limit scope and time when possible:
+The default FSDB command probes `hdl_top` to depth 10. VCS wave builds retain
+`-kdb` and `-debug_access+r` for source-code visibility and read access to RTL
+and SystemVerilog interface signals, while FSDB contains signals rather than
+the UVM VIP class hierarchy. Limit scope and time further when possible:
 
 ```bash
 simmer -t <bench>:<test> --simulator VCS \
-  --waves hdl_top.dut hdl_top.env \
+  --waves hdl_top.dut hdl_top.spi_apb_if hdl_top.mcp_axi_if \
   --wave-depth 8 --wave-start 1000 --wave-end 50000
 ```
 
@@ -539,8 +545,9 @@ SIMMER_WAVE_LAUNCHER="bsub -I -q syn" ./run_waves.sh
 
 The generated UCLI script uses the file ID returned by `dump -file`, so it does
 not assume `FSDB0` when another dump file is already open. The default
-`--wave-depth 999` maps to UCLI `-depth 0`, which is the documented unlimited
-hierarchy depth; explicit smaller depths are preserved.
+`--wave-depth` is 10. An explicit `--wave-depth 999` maps to UCLI `-depth 0`,
+which is the documented unlimited hierarchy depth; other explicit depths are
+preserved.
 
 VCS FSDB waves enable glitch and force information by default. Simmer passes
 `+fsdb+glitch=0` and `+fsdb+force` to `simv`; generated UCLI also runs
@@ -648,11 +655,15 @@ Use `--simmer-profile` to print phase and job timings after the summary:
 simmer -t <bench>:<test> --simulator VCS --simmer-profile
 ```
 
-The profile includes discovery, each Bazel command, Bazel external-repository
-events, TB setup, VCS compile, test config builds, simulation jobs, job
-directories, and commands. Repository rows are shown as `external_repo: NAME`
-at the finest granularity Bazel records. A cached repository has no fetch or
-repository-rule event, so it does not appear in that invocation.
+The profile includes discovery, each Bazel command, Bazel build-phase markers,
+Bazel external-repository events, TB setup, VCS compile, test config builds,
+simulation jobs, job directories, and commands. The scheduled testbench build
+also leaves `bazel_tb_profile.json` in its VCOMP directory for deeper analysis.
+Repository rows are shown as `external_repo: NAME` at the finest granularity
+Bazel records. Overlapping events for one repository are merged so these rows
+approximate wall-clock time instead of double-counting nested work. A cached
+repository has no fetch or repository-rule event, so it does not appear in that
+invocation.
 
 Generated unit-test scripts print the failed command, line and exit code before
 they close. For a script launched in a temporary terminal, keep the window open
@@ -754,8 +765,16 @@ seed and original simulator options. Run it directly from any directory. Set
 ## Saving disk space
 
 - Discovery metadata is cached under `.simmer/cache/` and can be deleted at any
-  time. `--no-bazel` accepts it only while BUILD, `.bzl`, MODULE/WORKSPACE and
-  Bazel configuration files (including `.bazelignore`) remain unchanged.
+  time. The cache tracks BUILD-prefixed files, `.bzl`, MODULE/WORKSPACE and
+  Bazel configuration files (including `.bazelignore`) inside the main
+  workspace. External IP/VIP repositories are intentionally excluded; run
+  `bazel clean` after changing them.
+- Cached discovery reuses existing test-config outputs, but normal compile
+  runs still issue an incremental `bazel build` for each selected testbench.
+  This refreshes runfiles and compile-input digests after Verilog source
+  changes while letting Bazel reuse unchanged outputs. Targets built during
+  the current discovery pass are not built twice. A changed workspace metadata
+  file invalidates discovery, and `bazel clean` removes all cached outputs.
 - Passing tests are removed by default. `--nt` intentionally retains them.
 - Do not enable waves, coverage, SmartLog, ICO artifacts or `--nt` in routine
   throughput regressions.

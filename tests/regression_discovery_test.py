@@ -182,6 +182,10 @@ class RegressionDiscoveryTest(unittest.TestCase):
         ):
             self.assertIn(str(expected), dependencies)
         self.assertEqual(3, run.call_count)
+        indexed_command = run.call_args_list[1].args[0]
+        self.assertIn("--", indexed_command)
+        self.assertIn(":(glob)**/BUILD*", indexed_command)
+        self.assertIn(":(glob)**/*.bzl", indexed_command)
 
     def test_cache_manifest_tracks_imported_bazelrc(self):
         proj_dir = Path(tempfile.mkdtemp())
@@ -220,7 +224,7 @@ class RegressionDiscoveryTest(unittest.TestCase):
 
         self.assertFalse(config._discovery_cache_is_fresh())
 
-    def test_cache_manifest_tracks_local_repository_bazel_metadata_only(self):
+    def test_cache_manifest_ignores_local_repository_changes(self):
         project_dir = Path(tempfile.mkdtemp())
         repository_dir = Path(tempfile.mkdtemp())
         subprocess.run(["git", "init", "-q"], cwd=project_dir, check=True)
@@ -246,15 +250,15 @@ class RegressionDiscoveryTest(unittest.TestCase):
         build_relative_path = os.path.relpath(os.path.realpath(build_file), canonical_project_dir).replace(os.sep, "/")
         source_relative_path = os.path.relpath(os.path.realpath(source_file),
                                                canonical_project_dir).replace(os.sep, "/")
-        self.assertIn(build_relative_path, manifest_paths)
+        self.assertNotIn(build_relative_path, manifest_paths)
         self.assertNotIn(source_relative_path, manifest_paths)
         self.assertTrue(config._discovery_cache_is_fresh())
 
         build_file.write_text("filegroup(name = 'second')\n", encoding="utf-8")
 
-        self.assertFalse(config._discovery_cache_is_fresh())
+        self.assertTrue(config._discovery_cache_is_fresh())
 
-    def test_cache_manifest_tracks_wrapped_new_local_repository_declared_in_bzl(self):
+    def test_cache_manifest_tracks_injected_new_local_repository_build_file(self):
         project_dir = Path(tempfile.mkdtemp())
         repository_dir = Path(tempfile.mkdtemp())
         subprocess.run(["git", "init", "-q"], cwd=project_dir, check=True)
@@ -263,10 +267,13 @@ class RegressionDiscoveryTest(unittest.TestCase):
         repos_bzl.parent.mkdir()
         repos_bzl.write_text(
             "def declare_repositories():\n"
-            "    maybe(native.new_local_repository, name = 'mutable_ip', path = {!r}, build_file = '//:BUILD')\n".
-            format(str(repository_dir)),
+            "    maybe(repo_rule = native.new_local_repository, name = 'mutable_ip', "
+            "path = ROOT.format('ip'), build_file = '//vendor:BUILD.mutable_ip')\n",
             encoding="utf-8",
         )
+        injected_build = project_dir / "vendor" / "BUILD.mutable_ip"
+        injected_build.parent.mkdir()
+        injected_build.write_text("filegroup(name = 'first')\n", encoding="utf-8")
         repository_bzl = repository_dir / "defs.bzl"
         repository_bzl.write_text("VALUE = 'first'\n", encoding="utf-8")
         config = self._config(project_dir)
@@ -278,10 +285,65 @@ class RegressionDiscoveryTest(unittest.TestCase):
         config._write_discovery_manifest()
         self.assertTrue(config._discovery_cache_is_fresh())
         repository_bzl.write_text("VALUE = 'second'\n", encoding="utf-8")
+        self.assertTrue(config._discovery_cache_is_fresh())
+        injected_build.write_text("filegroup(name = 'second')\n", encoding="utf-8")
 
         self.assertFalse(config._discovery_cache_is_fresh())
 
-    def test_local_repository_scan_follows_safe_metadata_symlink(self):
+    def test_new_local_repository_build_file_content_does_not_require_literal_source_path(self):
+        project_dir = Path(tempfile.mkdtemp())
+        subprocess.run(["git", "init", "-q"], cwd=project_dir, check=True)
+        (project_dir / "WORKSPACE").write_text(
+            "PDK_ROOT = '/large/vendor/tree'\n"
+            "new_local_repository(\n"
+            "    name = 'pdk',\n"
+            "    path = PDK_ROOT,\n"
+            "    build_file_content = \"filegroup(name = 'all')\",\n"
+            ")\n",
+            encoding="utf-8",
+        )
+        config = self._config(project_dir)
+
+        manifest = config._discovery_dependency_manifest()
+
+        self.assertTrue(manifest["cacheable"])
+        self.assertNotIn("uncacheable_reason", manifest)
+
+    def test_cache_manifest_ignores_keyword_wrapped_local_repository_changes(self):
+        project_dir = Path(tempfile.mkdtemp())
+        repository_dir = Path(tempfile.mkdtemp())
+        subprocess.run(["git", "init", "-q"], cwd=project_dir, check=True)
+        subprocess.run(["git", "init", "-q"], cwd=repository_dir, check=True)
+        (project_dir / "WORKSPACE").write_text(
+            "maybe(name = 'mutable_ip', repo_rule = native.local_repository, path = {!r})\n".format(
+                str(repository_dir)),
+            encoding="utf-8",
+        )
+        repository_bzl = repository_dir / "defs.bzl"
+        repository_bzl.write_text("VALUE = 'first'\n", encoding="utf-8")
+        source_file = repository_dir / "large_source.sv"
+        source_file.write_text("module first; endmodule\n", encoding="utf-8")
+        config = self._config(project_dir)
+        cache_dir = project_dir / ".simmer" / "cache"
+        cache_dir.mkdir(parents=True)
+        for filename in ("all_vcomp.json", "tests_to_tags.json", "tests_to_simulator.json"):
+            (cache_dir / filename).write_text("{}", encoding="utf-8")
+
+        config._write_discovery_manifest()
+        manifest = json.loads((cache_dir / "discovery_manifest.json").read_text(encoding="utf-8"))
+        manifest_paths = {entry["path"] for entry in manifest["files"]}
+        repository_bzl_path = os.path.relpath(os.path.realpath(repository_bzl),
+                                              os.path.realpath(project_dir)).replace(os.sep, "/")
+        source_path = os.path.relpath(os.path.realpath(source_file), os.path.realpath(project_dir)).replace(os.sep, "/")
+        self.assertNotIn(repository_bzl_path, manifest_paths)
+        self.assertNotIn(source_path, manifest_paths)
+        self.assertTrue(manifest["cacheable"])
+
+        repository_bzl.write_text("VALUE = 'second'\n", encoding="utf-8")
+
+        self.assertTrue(config._discovery_cache_is_fresh())
+
+    def test_external_local_repository_symlink_does_not_invalidate_workspace_cache(self):
         project_dir = Path(tempfile.mkdtemp())
         repository_dir = Path(tempfile.mkdtemp())
         subprocess.run(["git", "init", "-q"], cwd=project_dir, check=True)
@@ -302,14 +364,12 @@ class RegressionDiscoveryTest(unittest.TestCase):
         for filename in ("all_vcomp.json", "tests_to_tags.json", "tests_to_simulator.json"):
             (cache_dir / filename).write_text("{}", encoding="utf-8")
 
-        metadata_paths = config._iter_local_repository_metadata(repository_dir)
         config._write_discovery_manifest()
         real_build.write_text("filegroup(name = 'second')\n", encoding="utf-8")
 
-        self.assertIn(os.path.realpath(linked_build), [os.path.realpath(path) for path in metadata_paths])
-        self.assertFalse(config._discovery_cache_is_fresh())
+        self.assertTrue(config._discovery_cache_is_fresh())
 
-    def test_local_repository_scan_limit_disables_cache_reuse_without_warning(self):
+    def test_large_local_repository_does_not_disable_workspace_cache(self):
         project_dir = Path(tempfile.mkdtemp())
         repository_dir = Path(tempfile.mkdtemp())
         subprocess.run(["git", "init", "-q"], cwd=project_dir, check=True)
@@ -326,15 +386,15 @@ class RegressionDiscoveryTest(unittest.TestCase):
         for filename in ("all_vcomp.json", "tests_to_tags.json", "tests_to_simulator.json"):
             (cache_dir / filename).write_text("{}", encoding="utf-8")
 
-        with mock.patch("lib.regression.DISCOVERY_LOCAL_REPOSITORY_MAX_ENTRIES", 1):
-            config._write_discovery_manifest()
-            manifest = json.loads((cache_dir / "discovery_manifest.json").read_text(encoding="utf-8"))
-            self.assertFalse(manifest["cacheable"])
-            self.assertFalse(config._discovery_cache_is_fresh())
+        config._write_discovery_manifest()
+        manifest = json.loads((cache_dir / "discovery_manifest.json").read_text(encoding="utf-8"))
+        self.assertTrue(manifest["cacheable"])
+        self.assertNotIn("uncacheable_reason", manifest)
+        self.assertTrue(config._discovery_cache_is_fresh())
 
         config.log.warning.assert_not_called()
 
-    def test_oversized_local_repository_declaration_disables_cache_reuse(self):
+    def test_oversized_local_repository_declaration_does_not_disable_cache_reuse(self):
         project_dir = Path(tempfile.mkdtemp())
         subprocess.run(["git", "init", "-q"], cwd=project_dir, check=True)
         (project_dir / "WORKSPACE").write_text(
@@ -343,12 +403,12 @@ class RegressionDiscoveryTest(unittest.TestCase):
         )
         config = self._config(project_dir)
 
-        with mock.patch("lib.regression.DISCOVERY_LOCAL_REPOSITORY_MAX_DECLARATION_BYTES", 8):
-            manifest = config._discovery_dependency_manifest()
+        manifest = config._discovery_dependency_manifest()
 
-        self.assertFalse(manifest["cacheable"])
+        self.assertTrue(manifest["cacheable"])
+        self.assertNotIn("uncacheable_reason", manifest)
 
-    def test_nonliteral_direct_local_repository_path_disables_cache_reuse(self):
+    def test_nonliteral_direct_local_repository_path_does_not_disable_cache_reuse(self):
         project_dir = Path(tempfile.mkdtemp())
         subprocess.run(["git", "init", "-q"], cwd=project_dir, check=True)
         (project_dir / "WORKSPACE").write_text(
@@ -360,7 +420,8 @@ class RegressionDiscoveryTest(unittest.TestCase):
 
         manifest = config._discovery_dependency_manifest()
 
-        self.assertFalse(manifest["cacheable"])
+        self.assertTrue(manifest["cacheable"])
+        self.assertNotIn("uncacheable_reason", manifest)
 
     def test_no_bazel_rejects_stale_cache(self):
         config = self._config(Path(tempfile.mkdtemp()))
@@ -392,14 +453,13 @@ class RegressionDiscoveryTest(unittest.TestCase):
 
         self.assertNotEqual(initial, config._discovery_dependency_manifest())
 
-    def test_test_cfg_query_uses_the_public_macro_identity(self):
+    def test_test_cfg_query_uses_rule_marker_for_wrapped_macros(self):
         config = self._config(Path(tempfile.mkdtemp()))
 
         query = config._build_test_cfg_query("//benches/soc_tb:soc_tb")
 
-        self.assertIn("attr(generator_function, verilog_dv_test_cfg,", query)
-        self.assertNotIn("dv_test_cfg_rule", query)
-        self.assertNotIn("base_cfg", query)
+        self.assertIn("attr(verilog_dv_test_cfg_marker, 1,", query)
+        self.assertNotIn("generator_function", query)
 
     def test_discovery_batches_cquery_and_build(self):
         proj_dir = Path(tempfile.mkdtemp())

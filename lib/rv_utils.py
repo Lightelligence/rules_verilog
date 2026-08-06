@@ -254,11 +254,19 @@ def calc_simresults_location(checkout_path):
     sim_results_home = os.path.join(sim_results_root, username)
     os.makedirs(sim_results_home, exist_ok=True)
 
+    # Keep result directories below the configured state root on both POSIX
+    # and Windows.  The old expression only recognized ``username/`` with a
+    # forward slash; on Windows an unmatched absolute checkout path was then
+    # passed to ``os.path.join`` and discarded ``sim_results_home`` entirely.
+    path_parts = re.split(r'[\\/]', os.path.normpath(os.fspath(checkout_path)))
     try:
-        checkout_path = re.search(r'{}/(.*)'.format(username), checkout_path).group(1)
-    except AttributeError:
-        pass
-    checkout_path = checkout_path.replace('/', '_')
+        username_index = path_parts.index(username)
+    except ValueError:
+        relative_checkout = os.path.normpath(os.fspath(checkout_path))
+    else:
+        relative_checkout = os.sep.join(path_parts[username_index + 1:])
+    checkout_path = relative_checkout.replace('/', '_').replace('\\', '_').replace(':', '_')
+    checkout_path = checkout_path.lstrip('/\\') or 'checkout'
     regression_directory = checkout_path
     regression_directory = os.path.join(sim_results_home, regression_directory)
     return regression_directory

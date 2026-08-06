@@ -63,9 +63,9 @@ def add_debug_arguments(parser):
                        '--wave-depth',
                        parent='--waves',
                        type=int,
-                       default=999,
-                       help=('Set generated probe hierarchy depth (default: 999, effectively all hierarchy). '
-                             'Reduce it to limit waveform size. Requires --waves.'))
+                       default=10,
+                       help=('Set generated probe hierarchy depth (default: 10). '
+                             'Use 999 for effectively all hierarchy. Requires --waves.'))
     debug_group.add_argument('--verbosity',
                              type=str,
                              default=None,
