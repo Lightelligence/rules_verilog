@@ -77,3 +77,10 @@ bazel run //:buildifier_lint
 ```
 
 Licensed XRUN/VCS tests run separately on a configured Red Hat EDA host. CI does not run them.
+
+## DELIVERY
+
+- Use the `dv-etx-workflow` skill for ETX access, licensed XRUN/VCS validation, runner automation, and DV delivery.
+- Keep changes scoped to the active feature and preserve existing worktree changes.
+- After a complete feature is validated, create a focused commit, push the feature branch, and create or update its PR.
+- Do not merge rules_verilog source PRs; the user decides when to merge.
