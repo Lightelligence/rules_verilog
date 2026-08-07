@@ -1322,8 +1322,8 @@ def _active_run_snapshot(rcfg, vcomp_jobs, jm, total_tests, regression_log_path)
         status = "COMPILING"
     result_log = None
     if total_tests == 1:
-        result_log = next((getattr(job, "_log_path", None) for job in test_jobs
-                           if getattr(job, "_log_path", None)), None)
+        result_log = next((getattr(job, "_log_path", None) for job in test_jobs if getattr(job, "_log_path", None)),
+                          None)
     return {
         "status": status,
         "finished_tests": finished_tests,
