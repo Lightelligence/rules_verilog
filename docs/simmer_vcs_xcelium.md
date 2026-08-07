@@ -158,6 +158,12 @@ compile configuration files and the resolved VCS/VSO tool identity and
 locations. It fails before simulation when the existing compile output does not
 match the current inputs.
 
+`--no-compile` reuses the matching bench-scoped discovery cache without Bazel
+by default. If that cache is missing or stale, simmer refreshes discovery once
+before validating the existing compile output. Add explicit `--no-bazel` when
+the invocation must not run Bazel at all; a missing or stale scoped cache is
+then an error.
+
 VCS compile logs can contain a GNU make future-mtime warning when an NFS
 timestamp is less than 100 ms ahead of the execution host. Simmer treats that
 specific small skew and its paired clock-skew summary as benign, including when
@@ -387,7 +393,7 @@ minimize cross-partition XMRs. Inspect `cmp.log` for `PC_SHARED`, `PC_RECOMPILE`
 and the `-pcmakeprof` timing table. Coverage and Verdi require the referenced
 partition database to remain available. With `--vcs-profile`, simmer also
 stores marker counts, selected partition mode/jobs, compile wall time and cache
-reuse state in the compile entry of `.simmer_results.json`.
+reuse state in the compile entry of `.simmer/results.json`.
 
 Start with automatic partitioning. If profiling shows that stable third-party
 code shares a partition with frequently changing project code, add a VCS
@@ -679,7 +685,8 @@ For quiet normal runs, avoid `--tool-debug`; it prints scheduler polling noise.
 
 - Keep the VCS VCOMP directory between runs; Partition Compile and `-Mupdate`
   reuse unchanged third-party partitions and incremental compile outputs.
-- Use `--no-compile --no-bazel` only after the existing `simv` has been validated.
+- Use explicit `--no-compile --no-bazel` only when both the scoped discovery
+  cache and existing `simv` have already been validated.
 - Keep stable third-party IP/VIP in separate Bazel libraries/filelists so a TB
   edit does not rewrite their generated inputs.
 - Use `--fgp N` for runtime threading only after profiling; simmer reduces the
@@ -764,11 +771,13 @@ seed and original simulator options. Run it directly from any directory. Set
 
 ## Saving disk space
 
-- Discovery metadata is cached under `.simmer/cache/` and can be deleted at any
-  time. The cache tracks BUILD-prefixed files, `.bzl`, MODULE/WORKSPACE and
-  Bazel configuration files (including `.bazelignore`) inside the main
-  workspace. External IP/VIP repositories are intentionally excluded; run
-  `bazel clean` after changing them.
+- Discovery metadata is cached as one JSON file per normalized bench query
+  under `.simmer/cache/discovery/` and can be deleted at any time. Running one
+  TB does not replace another TB's discovery data. Each cache file tracks
+  BUILD-prefixed files, `.bzl`, MODULE/WORKSPACE and Bazel configuration files
+  (including `.bazelignore`) inside the main workspace. External IP/VIP
+  repositories are intentionally excluded; run `bazel clean` after changing
+  them.
 - Cached discovery reuses existing test-config outputs, but normal compile
   runs still issue an incremental `bazel build` for each selected testbench.
   This refreshes runfiles and compile-input digests after Verilog source
@@ -780,17 +789,57 @@ seed and original simulator options. Run it directly from any directory. Set
   throughput regressions.
 - Reuse the VCS VCOMP directory instead of creating a new `--dir-suffix` for
   every run.
-- Keep `.simmer_results.json` and compact regression logs; archive only failed
+- Keep `.simmer/results.json` and compact regression logs; archive only failed
   logs and selected FSDB/coverage artifacts.
 - Use `bazel clean` for stale Bazel outputs. Reserve `bazel clean --expunge` for
   deliberate cache removal because the next build will be fully cold.
 
+## Active run status
+
+Query every active simmer run for the current project without running discovery or Bazel:
+
+```bash
+simmer --status
+simmer --st
+```
+
+The query prints oldest first so the newest run is closest to the prompt. Each entry includes a reproducible `bsub`
+command, LSF job ID/queue/execution host/submission host, the matching `bkill` command, and available log paths. A
+single test shows its `stdout.log`; a multi-test run shows only aggregate progress and its regression log, not every
+case. Normal simulation commands do not print or query other active runs.
+
+Shell aliases are expanded before simmer starts, so their original text is not available to Python. Simmer reconstructs
+an equivalent `bsub -I -q <queue> ...` command from LSF state and its own argument vector. A site wrapper that needs to
+preserve additional submission flags exactly can export the complete command through `SIMMER_SUBMIT_CMD`; the same
+value is retained by `--his`.
+
+```text
+[2] 2026-08-07 09:18:24  RUNNING  7/20 finished, 4 active, 9 queued | elapsed 01:24:17
+cmd:        bsub -I -q syn simmer.py -t 'usb_tb:*@20' --jobs 4
+lsf:        job 851247 | queue syn | host sh-cloud17 | submit login02 | bkill 851247
+compile:    /sim/usb_tb/cmp.log
+regression: /sim/regression_results/usb_tb_regression_20260807_091824.log
+
+----------------------------------------------------------------
+
+[1] 2026-08-07 10:42:11  RUNNING  1 active | elapsed 00:03:26
+cmd:        bsub -I -q syn simmer.py -t sys_tb:sys_spi_apb_test --waves
+lsf:        job 852106 | queue syn | host sh-cloud21 | submit login02 | bkill 852106
+compile:    /sim/sys_tb/cmp.log
+result:     /sim/sys_tb/sys_spi_apb_test/stdout.log
+```
+
+The implementation stores one small atomic JSON file per invocation under `.simmer/runs/`. It writes only when the
+aggregate scheduler state changes and removes the file at exit. `--status` verifies remote records against LSF and
+removes records for jobs that have completed. No additional Python package is required.
+
 ## Simulation history
 
-Normal simulation invocations are recorded in `.simmer_results.json` at the
-project root after at least one simulation starts. Compile or launch failures
-that prevent every test from starting are not recorded. The file is local run
-state and is intended for quick lookup of recent outputs.
+Normal simulation invocations are recorded in `.simmer/results.json` after at
+least one simulation starts. Compile or launch failures that prevent every test
+from starting are not recorded. The file is local run state and is intended for
+quick lookup of recent outputs. Existing project-root `.simmer_results.json`
+files are merged and migrated automatically on the first history query or save.
 
 Print the most recent 10 runs:
 
@@ -827,8 +876,14 @@ Filters are applied before the count, so this example returns the most recent
 query options cannot be combined with `-t`/`--tests`; a query with no matches
 prints `No matching simmer history found.`.
 
-Each entry includes the original `simmer` command, compile log, result log, and
-compile/simulation elapsed time on the first line. Parallel jobs are measured as
+The selected records are printed from oldest to newest so the latest result is
+closest to the terminal prompt. Recency numbers count down toward `[1]`, which
+always identifies the latest matching record. A horizontal line separates
+adjacent records; a single-record result has no separator.
+
+Each new LSF-backed entry includes a reproducible `bsub` plus `simmer` command,
+LSF location metadata, compile log, result log, and compile/simulation elapsed
+time on the first line. Parallel jobs are measured as
 the union of their active intervals rather than by summing every case. Compile
 reuse is shown as `compile reused`. For a single test with wave dumping enabled,
 the history also shows the generated `run_waves.sh` path. For multi-test
@@ -838,8 +893,17 @@ case log.
 Example:
 
 ```text
+[2] 2026-07-08 11:42:17  PASSED  [compile 00:02:48 | simulate 00:04:06]
+cmd:     bsub -I -q syn simmer -t sys_tb:sys_iod_sanity_test
+lsf:     job 851247 | queue syn | host sh-cloud17 | submit login02
+compile: /sim/sys_tb/cmp.log
+result:  /sim/sys_tb/sys_iod_sanity_test/stdout.log
+
+----------------------------------------------------------------
+
 [1] 2026-07-09 15:03:04  FAILED  [tests: 87 passed | 13 failed]  [compile 00:03:12 | simulate 00:38:41]
-cmd:     simmer -t sys_tb:*@10
+cmd:     bsub -I -q syn simmer -t 'sys_tb:*@10'
+lsf:     job 852106 | queue syn | host sh-cloud21 | submit login02
 compile: /sim/sys_tb/cmp.log
 result:  /sim/regression.log
 ```

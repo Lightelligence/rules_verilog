@@ -80,6 +80,16 @@ def create_regression_log_file(rcfg):
     return log_file_path
 
 
+def prepare_regression_log(rcfg):
+    """Create one stable regression log path before multi-test execution starts."""
+    regression_log_path = getattr(rcfg, "regression_log_path", None)
+    if regression_log_path:
+        return regression_log_path
+    regression_log_path = create_regression_log_file(rcfg)
+    rcfg.regression_log_path = regression_log_path
+    return regression_log_path
+
+
 def print_summary(rcfg, vcomp_jobs, jm, trd):
     """
     Print a summary of regression results
@@ -93,7 +103,7 @@ def print_summary(rcfg, vcomp_jobs, jm, trd):
     total_tests = sum([icfg.target for _, (icfgs, _) in rcfg.all_vcomp.items() for icfg in icfgs])
     if total_tests > 1:
         if not rcfg.options.no_run:
-            regression_log_path = create_regression_log_file(rcfg)
+            regression_log_path = prepare_regression_log(rcfg)
     else:
         if rcfg.options.report:
             current_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")

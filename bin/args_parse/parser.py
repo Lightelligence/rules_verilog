@@ -115,6 +115,9 @@ def parse_args(argv):
     parser = create_parser()
 
     options = parser.parse_args(argv)
+    options.no_bazel_was_explicit = argument_explicitly_requested(argv, '--no-bazel')
+    if options.no_compile:
+        options.no_bazel = True
     if options.jobs is not None and options.jobs < 1:
         parser.error("--jobs must be a positive integer.")
     if options.quit_count < 1:
@@ -134,6 +137,10 @@ def parse_args(argv):
         parser.error("--history must be a positive integer.")
     if options.history is not None and options.tests:
         parser.error("History query options cannot be combined with -t/--tests.")
+    if options.status and options.history is not None:
+        parser.error("--status/--st cannot be combined with history query options.")
+    if options.status and options.tests:
+        parser.error("--status/--st cannot be combined with -t/--tests.")
     if options.timeout < 0:
         parser.error("--timeout must be non-negative (0 disables the timeout).")
     options.simulator_was_explicit = simulator_explicitly_requested(argv)

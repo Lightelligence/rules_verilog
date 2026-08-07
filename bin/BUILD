@@ -53,6 +53,7 @@ py_binary(
         "//lib:seed_plan",
         "//lib:sim_artifacts",
         "//lib:simmer_results",
+        "//lib:simmer_state",
         "//lib/simulators",
     ],
 )

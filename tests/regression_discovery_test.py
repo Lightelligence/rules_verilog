@@ -48,18 +48,26 @@ def _cache_config_for_process(project_dir):
     config = RegressionConfig.__new__(RegressionConfig)
     config.proj_dir = project_dir
     config.log = _Log()
+    config.options = SimpleNamespace(
+        tests=[SimpleNamespace(btiglob="soc_tb:*", tag=set(), ntag=set())],
+        allow_no_run=False,
+    )
+    config.all_vcomp = {}
+    config.tests_to_tags = {}
+    config.tests_to_simulator = {}
     return config
 
 
 def _write_partial_cache_generation(project_dir, ready, release):
     config = _cache_config_for_process(project_dir)
     payload = {"generation": "new"}
+    config.all_vcomp = payload
+    config.tests_to_tags = payload
+    config.tests_to_simulator = payload
     with config._discovery_cache_lock(exclusive=True):
-        config.dict_to_json(payload, "all_vcomp.json")
+        config.dict_to_json(config._discovery_cache_payload(payload), config._discovery_cache_relative_path())
         ready.set()
         release.wait(5.0)
-        for filename in ("tests_to_tags.json", "tests_to_simulator.json", "discovery_manifest.json"):
-            config.dict_to_json(payload, filename)
 
 
 def _read_cache_generation(project_dir, result_queue):
@@ -93,7 +101,14 @@ class RegressionDiscoveryTest(unittest.TestCase):
         config.proj_dir = str(proj_dir)
         config.max_bench_name_length = 20
         config.max_test_name_length = 20
+        config.all_vcomp = {}
+        config.tests_to_tags = {}
+        config.tests_to_simulator = {}
         return config
+
+    @staticmethod
+    def _cache_payload(config):
+        return json.loads(Path(config._discovery_cache_path()).read_text(encoding="utf-8"))
 
     def test_cache_manifest_tracks_content_changes_and_deleted_files(self):
         proj_dir = Path(tempfile.mkdtemp())
@@ -135,8 +150,10 @@ class RegressionDiscoveryTest(unittest.TestCase):
         project_dir = tempfile.mkdtemp()
         config = self._config(Path(project_dir))
         old_payload = {"generation": "old"}
-        for filename in ("all_vcomp.json", "tests_to_tags.json", "tests_to_simulator.json", "discovery_manifest.json"):
-            config.dict_to_json(old_payload, filename)
+        config.all_vcomp = old_payload
+        config.tests_to_tags = old_payload
+        config.tests_to_simulator = old_payload
+        config.dict_to_json(config._discovery_cache_payload(old_payload), config._discovery_cache_relative_path())
 
         context = multiprocessing.get_context("fork")
         ready = context.Event()
@@ -244,7 +261,7 @@ class RegressionDiscoveryTest(unittest.TestCase):
             (cache_dir / filename).write_text("{}", encoding="utf-8")
 
         config._write_discovery_manifest()
-        manifest = json.loads((cache_dir / "discovery_manifest.json").read_text(encoding="utf-8"))
+        manifest = self._cache_payload(config)["manifest"]
         manifest_paths = {entry["path"] for entry in manifest["files"]}
         canonical_project_dir = os.path.realpath(project_dir)
         build_relative_path = os.path.relpath(os.path.realpath(build_file), canonical_project_dir).replace(os.sep, "/")
@@ -330,7 +347,7 @@ class RegressionDiscoveryTest(unittest.TestCase):
             (cache_dir / filename).write_text("{}", encoding="utf-8")
 
         config._write_discovery_manifest()
-        manifest = json.loads((cache_dir / "discovery_manifest.json").read_text(encoding="utf-8"))
+        manifest = self._cache_payload(config)["manifest"]
         manifest_paths = {entry["path"] for entry in manifest["files"]}
         repository_bzl_path = os.path.relpath(os.path.realpath(repository_bzl),
                                               os.path.realpath(project_dir)).replace(os.sep, "/")
@@ -387,7 +404,7 @@ class RegressionDiscoveryTest(unittest.TestCase):
             (cache_dir / filename).write_text("{}", encoding="utf-8")
 
         config._write_discovery_manifest()
-        manifest = json.loads((cache_dir / "discovery_manifest.json").read_text(encoding="utf-8"))
+        manifest = self._cache_payload(config)["manifest"]
         self.assertTrue(manifest["cacheable"])
         self.assertNotIn("uncacheable_reason", manifest)
         self.assertTrue(config._discovery_cache_is_fresh())
@@ -426,9 +443,45 @@ class RegressionDiscoveryTest(unittest.TestCase):
     def test_no_bazel_rejects_stale_cache(self):
         config = self._config(Path(tempfile.mkdtemp()))
         config.options.no_bazel = True
-        config._discovery_cache_is_fresh = lambda: False
 
         self.assertFalse(config._should_use_cached_discovery())
+
+    def test_implicit_no_bazel_refreshes_missing_discovery_for_no_compile(self):
+        project_dir = Path(tempfile.mkdtemp())
+        options = self._options(project_dir)
+        options.no_compile = True
+        options.no_bazel = True
+        options.no_bazel_was_explicit = False
+        results_dir = project_dir / "results"
+        test_target = "//benches/soc_tb/tests:dma_single_transfer"
+
+        def discover(config):
+            config.all_vcomp = {"//benches/soc_tb:soc_tb": {test_target: 0}}
+            config.tests_to_tags = {test_target: []}
+            config.tests_to_simulator = {test_target: "VCS"}
+
+        with mock.patch("lib.regression.rv_utils.calc_simresults_location", return_value=str(results_dir)), \
+             mock.patch.object(RegressionConfig, "_should_use_cached_discovery", return_value=False), \
+             mock.patch.object(RegressionConfig, "test_discovery_all", autospec=True, side_effect=discover) as refresh:
+            config = RegressionConfig(options, _Log())
+
+        refresh.assert_called_once()
+        self.assertEqual({"//benches/soc_tb:soc_tb": {test_target: 1}}, config.all_vcomp)
+
+    def test_explicit_no_bazel_rejects_missing_scoped_cache(self):
+        project_dir = Path(tempfile.mkdtemp())
+        options = self._options(project_dir)
+        options.no_compile = True
+        options.no_bazel = True
+        options.no_bazel_was_explicit = True
+
+        with mock.patch("lib.regression.rv_utils.calc_simresults_location", return_value=str(project_dir / "results")), \
+             mock.patch.object(RegressionConfig, "_should_use_cached_discovery", return_value=False), \
+             mock.patch.object(RegressionConfig, "test_discovery_all") as refresh:
+            with self.assertRaisesRegex(AssertionError, "requested bench scope"):
+                RegressionConfig(options, _Log())
+
+        refresh.assert_not_called()
 
     def test_requested_bench_query_is_scoped(self):
         config = self._config(Path(tempfile.mkdtemp()))
@@ -452,6 +505,99 @@ class RegressionDiscoveryTest(unittest.TestCase):
         config.options.allow_no_run = True
 
         self.assertNotEqual(initial, config._discovery_dependency_manifest())
+
+    def test_discovery_cache_isolated_by_requested_bench_scope(self):
+        project_dir = Path(tempfile.mkdtemp())
+        soc_config = self._config(project_dir)
+        soc_config.all_vcomp = {"//benches/soc_tb:soc_tb": {}}
+        soc_config.tests_to_tags = {"//benches/soc_tb/tests:smoke": ["smoke"]}
+        soc_config.tests_to_simulator = {"//benches/soc_tb/tests:smoke": "VCS"}
+        soc_config._publish_discovery_cache()
+        soc_path = Path(soc_config._discovery_cache_path())
+
+        other_config = self._config(project_dir)
+        other_config.options.tests[0].btiglob = "other_tb:*"
+        other_config.all_vcomp = {"//benches/other_tb:other_tb": {}}
+        other_config.tests_to_tags = {"//benches/other_tb/tests:smoke": []}
+        other_config.tests_to_simulator = {"//benches/other_tb/tests:smoke": "XRUN"}
+        other_config._publish_discovery_cache()
+        other_path = Path(other_config._discovery_cache_path())
+
+        self.assertNotEqual(soc_path, other_path)
+        self.assertTrue(soc_path.exists())
+        self.assertTrue(other_path.exists())
+        self.assertTrue(soc_config._should_use_cached_discovery())
+        self.assertEqual(soc_config.all_vcomp, soc_config._cached_discovery[0])
+
+    def test_same_bench_test_globs_share_discovery_scope(self):
+        project_dir = Path(tempfile.mkdtemp())
+        first = self._config(project_dir)
+        second = self._config(project_dir)
+        second.options.tests[0].btiglob = "soc_tb:other_test@10"
+
+        self.assertEqual(first._discovery_scope(), second._discovery_scope())
+        self.assertEqual(first._discovery_cache_path(), second._discovery_cache_path())
+
+    def test_multi_bench_selector_order_does_not_change_scope(self):
+        project_dir = Path(tempfile.mkdtemp())
+        first = self._config(project_dir)
+        first.options.tests.append(SimpleNamespace(btiglob="other_tb:*", tag=set(), ntag=set()))
+        second = self._config(project_dir)
+        second.options.tests.insert(0, SimpleNamespace(btiglob="other_tb:*", tag=set(), ntag=set()))
+
+        self.assertEqual(first._discovery_scope(), second._discovery_scope())
+
+    def test_other_scope_publish_preserves_unmigrated_legacy_cache(self):
+        project_dir = Path(tempfile.mkdtemp())
+        legacy_config = self._config(project_dir)
+        legacy_manifest = {
+            "discovery_query": legacy_config._build_vcomp_discovery_query(),
+            "allow_no_run": False,
+        }
+        for filename, payload in {
+                "all_vcomp.json": {
+                    "//benches/soc_tb:soc_tb": {}
+                },
+                "tests_to_tags.json": {},
+                "tests_to_simulator.json": {},
+                "discovery_manifest.json": legacy_manifest,
+        }.items():
+            legacy_config.dict_to_json(payload, filename)
+
+        other_config = self._config(project_dir)
+        other_config.options.tests[0].btiglob = "other_tb:*"
+        other_manifest = {
+            "discovery_query": other_config._build_vcomp_discovery_query(),
+            "allow_no_run": False,
+        }
+        other_config._publish_discovery_cache(other_manifest)
+
+        for filename in ("all_vcomp.json", "tests_to_tags.json", "tests_to_simulator.json", "discovery_manifest.json"):
+            self.assertTrue(Path(other_config._cache_path(filename)).exists())
+
+    def test_legacy_discovery_generation_migrates_to_scoped_file(self):
+        project_dir = Path(tempfile.mkdtemp())
+        config = self._config(project_dir)
+        manifest = config._discovery_dependency_manifest()
+        legacy_payloads = {
+            "all_vcomp.json": {
+                "//benches/soc_tb:soc_tb": {}
+            },
+            "tests_to_tags.json": {
+                "//benches/soc_tb/tests:smoke": []
+            },
+            "tests_to_simulator.json": {
+                "//benches/soc_tb/tests:smoke": "VCS"
+            },
+            "discovery_manifest.json": manifest,
+        }
+        for filename, payload in legacy_payloads.items():
+            config.dict_to_json(payload, filename)
+
+        self.assertTrue(config._should_use_cached_discovery())
+        self.assertTrue(Path(config._discovery_cache_path()).exists())
+        for filename in legacy_payloads:
+            self.assertFalse(Path(config._cache_path(filename)).exists())
 
     def test_test_cfg_query_uses_rule_marker_for_wrapped_macros(self):
         config = self._config(Path(tempfile.mkdtemp()))
@@ -585,23 +731,11 @@ class RegressionDiscoveryTest(unittest.TestCase):
     def test_init_creates_deferred_messages_with_cached_discovery(self):
         proj_dir = Path(tempfile.mkdtemp())
         results_dir = proj_dir / "results"
-        cache_dir = proj_dir / ".simmer" / "cache"
-        cache_dir.mkdir(parents=True)
-        for filename, payload in {
-                "all_vcomp.json": {
-                    "//benches/soc_tb:soc_tb": {
-                        "//benches/soc_tb/tests:dma_single_transfer": 1
-                    }
-                },
-                "tests_to_tags.json": {
-                    "//benches/soc_tb/tests:dma_single_transfer": []
-                },
-                "tests_to_simulator.json": {
-                    "//benches/soc_tb/tests:dma_single_transfer": "VCS"
-                },
-        }.items():
-            (cache_dir / filename).write_text(json.dumps(payload), encoding="utf-8")
-        self._config(proj_dir)._write_discovery_manifest()
+        cached_config = self._config(proj_dir)
+        cached_config.all_vcomp = {"//benches/soc_tb:soc_tb": {"//benches/soc_tb/tests:dma_single_transfer": 1}}
+        cached_config.tests_to_tags = {"//benches/soc_tb/tests:dma_single_transfer": []}
+        cached_config.tests_to_simulator = {"//benches/soc_tb/tests:dma_single_transfer": "VCS"}
+        cached_config._publish_discovery_cache()
 
         options = self._options(proj_dir)
         options.no_bazel = True

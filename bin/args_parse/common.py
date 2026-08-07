@@ -253,6 +253,12 @@ def add_regression_arguments(parser):
         action='store_true',
         help='Show failed history only. Used alone, query the most recent 10 matching records.')
     regression_group.add_argument(
+        '--status',
+        '--st',
+        default=False,
+        action='store_true',
+        help='Print all active simmer runs in this project and exit without discovery, compilation, or simulation.')
+    regression_group.add_argument(
         '--no-stdout',
         default=False,
         action='store_true',
@@ -284,8 +290,9 @@ def add_flow_control_arguments(parser):
         '--no-compile',
         default=False,
         action="store_true",
-        help=('Skip simulator compilation and reuse the existing VCOMP executable/database. Simmer validates the '
-              'compile fingerprint and required artifacts before launching simulations.'))
+        help=('Skip simulator compilation and reuse the existing VCOMP executable/database. Matching scoped '
+              'discovery data is reused without Bazel when available; otherwise simmer refreshes discovery once. '
+              'Simmer validates the compile fingerprint and required artifacts before launching simulations.'))
     flow_control_group.add_argument(
         '--recompile',
         default=False,
@@ -302,8 +309,9 @@ def add_flow_control_arguments(parser):
         '--no-bazel',
         default=False,
         action='store_true',
-        help=('Skip Bazel build and reuse existing bazel-bin/runfiles outputs. Use only when BUILD files, generated '
-              'filelists, source dependencies, and rule inputs are unchanged; commonly paired with --no-compile.'))
+        help=('Require a matching scoped discovery cache and reuse existing bazel-bin/runfiles outputs without '
+              'running Bazel. Use only when BUILD files, generated filelists, source dependencies, and rule inputs '
+              'are unchanged. Explicit use makes a missing or stale cache an error.'))
     report_toggle_group = flow_control_group.add_mutually_exclusive_group()
     report_toggle_group.add_argument(
         '--report',

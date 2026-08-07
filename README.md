@@ -103,6 +103,14 @@ interrupted-history persistence, `pause` to stop active process groups and preve
 to keep running, or `status/logs` to print active job directories and log paths. A paused regression can then be resumed
 or stopped. Non-interactive runs stop immediately so batch jobs and CI never wait for input.
 
+### Inspecting active runs
+
+Use `simmer --status` or its short alias `simmer --st` to print every active simmer run for the current project. The
+query exits before discovery and shows the reconstructed `bsub` command, LSF job/queue/host metadata, compile log, and
+the single-test result log or multi-test regression log. Multi-test runs show aggregate finished/active/queued counts
+without expanding individual cases. Active records are isolated under `.simmer/runs/` and removed when their owning
+process exits.
+
 Large VCS regressions continue to use the reusable two-step
 `verilog_dv_tb` + `simmer` flow. Bazel one-step DV and RTL unit tests support
 both Xcelium and VCS.
@@ -394,7 +402,9 @@ reporting, MSIE, Palladium, ICO, VSO.ai and CCEX.
 `--no-compile` reuse is rejected when source/runfile content, an external
 compile configuration, or the selected simulator tool environment changes.
 Completed and interrupted simulations remain visible through `simmer --history`;
-failures that prevent every test from starting are not recorded.
+failures that prevent every test from starting are not recorded. Local history
+is stored in `.simmer/results.json`; older project-root `.simmer_results.json`
+files migrate automatically.
 
 ### Python Dependencies
 rules_verilog uses the Python libraries listed in `requirements.txt`, but it

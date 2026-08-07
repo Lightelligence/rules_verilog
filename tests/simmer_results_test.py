@@ -53,12 +53,24 @@ class SimmerResultsTest(unittest.TestCase):
         simmer_results.save_run(self.project_dir, run)
         return run
 
+    def _write_legacy_store(self, runs):
+        path = Path(simmer_results.legacy_results_path(self.project_dir))
+        path.write_text(
+            json.dumps({
+                "schema_version": simmer_results.SCHEMA_VERSION,
+                "last_run": runs[-1] if runs else None,
+                "runs": runs,
+            }),
+            encoding="utf-8",
+        )
+        return path
+
     def test_run_ids_are_unique(self):
         self.assertNotEqual(self._completed_run()["run_id"], self._completed_run()["run_id"])
 
     def test_current_store_schema_records_interrupted_results(self):
-        self.assertEqual(4, simmer_results.SCHEMA_VERSION)
-        self.assertEqual(4, simmer_results.load_store(self.project_dir)["schema_version"])
+        self.assertEqual(5, simmer_results.SCHEMA_VERSION)
+        self.assertEqual(5, simmer_results.load_store(self.project_dir)["schema_version"])
 
         run = simmer_results.create_run(["simmer", "-t", "tb:test"], self.rcfg, 1)
         run["tests"] = [{"status": "INTERRUPTED"}]
@@ -67,7 +79,7 @@ class SimmerResultsTest(unittest.TestCase):
 
         self.assertEqual("INTERRUPTED", run["status"])
         store = simmer_results.load_store(self.project_dir)
-        self.assertEqual(4, store["schema_version"])
+        self.assertEqual(5, store["schema_version"])
         self.assertEqual(1, store["last_run"]["summary"]["interrupted"])
 
     def test_concurrent_saves_preserve_both_runs(self):
@@ -91,6 +103,7 @@ class SimmerResultsTest(unittest.TestCase):
 
     def test_corrupt_history_is_reported_and_preserved(self):
         path = Path(simmer_results.results_path(self.project_dir))
+        path.parent.mkdir(parents=True)
         path.write_text("{broken", encoding="utf-8")
 
         self.assertIn("Unable to read simmer history", simmer_results.format_history(self.project_dir, 10))
@@ -100,6 +113,50 @@ class SimmerResultsTest(unittest.TestCase):
         self.assertEqual(1, len(backups))
         self.assertEqual("{broken", backups[0].read_text(encoding="utf-8"))
         self.assertEqual(1, len(json.loads(path.read_text(encoding="utf-8"))["runs"]))
+
+    def test_history_is_stored_under_simmer_directory(self):
+        simmer_results.save_run(self.project_dir, self._completed_run())
+
+        path = Path(simmer_results.results_path(self.project_dir))
+        self.assertEqual(Path(self.project_dir) / ".simmer" / "results.json", path)
+        self.assertTrue(path.exists())
+
+    def test_legacy_history_migrates_when_read(self):
+        run = self._completed_run()
+        legacy_path = self._write_legacy_store([run])
+
+        store = simmer_results.load_store(self.project_dir)
+
+        self.assertEqual([run["run_id"]], [item["run_id"] for item in store["runs"]])
+        self.assertTrue(Path(simmer_results.results_path(self.project_dir)).exists())
+        self.assertFalse(legacy_path.exists())
+
+    def test_legacy_and_current_history_merge_without_duplicate_runs(self):
+        older = self._completed_run()
+        older["started_at"] = "2026-08-01 10:00:00"
+        older["finished_at"] = "2026-08-01 10:01:00"
+        current = self._completed_run()
+        current["started_at"] = "2026-08-02 10:00:00"
+        current["finished_at"] = "2026-08-02 10:01:00"
+        simmer_results.save_run(self.project_dir, current)
+        duplicate = dict(current)
+        duplicate["command"] = "legacy duplicate"
+        self._write_legacy_store([older, duplicate])
+
+        store = simmer_results.load_store(self.project_dir)
+
+        self.assertEqual([older["run_id"], current["run_id"]], [run["run_id"] for run in store["runs"]])
+        self.assertEqual(current["command"], store["last_run"]["command"])
+
+    def test_corrupt_legacy_history_is_preserved_during_migration(self):
+        legacy_path = Path(simmer_results.legacy_results_path(self.project_dir))
+        legacy_path.write_text("{broken", encoding="utf-8")
+
+        self.assertEqual([], simmer_results.load_store(self.project_dir)["runs"])
+
+        backups = list(legacy_path.parent.glob(legacy_path.name + ".corrupt.*"))
+        self.assertEqual(1, len(backups))
+        self.assertEqual("{broken", backups[0].read_text(encoding="utf-8"))
 
     def test_backend_finalize_failure_takes_precedence_over_partial(self):
         run = self._completed_run()
@@ -339,6 +396,40 @@ class SimmerResultsTest(unittest.TestCase):
             history,
         )
 
+    def test_history_preserves_submission_command_and_lsf_location(self):
+        run = simmer_results.create_run(
+            ["simmer", "-t", "tb:test"],
+            self.rcfg,
+            1,
+            run_context={
+                "command": "bsub -I -q syn simmer -t tb:test",
+                "lsf": {
+                    "job_id": "851247",
+                    "display_job_id": "851247",
+                    "queue": "syn",
+                    "host": "sh-cloud17",
+                    "submit_host": "login02",
+                },
+            },
+        )
+        run["tests"] = [{
+            "status": "PASSED",
+            "simulation_started": True,
+            "cmp_log": "cmp.log",
+            "stdout_log": "stdout.log",
+            "waves": {
+                "enabled": False
+            },
+        }]
+        simmer_results.finalize_run(run)
+        simmer_results.save_run(self.project_dir, run)
+
+        history = simmer_results.format_history(self.project_dir, 10, use_color=False)
+
+        self.assertIn("cmd:     bsub -I -q syn simmer -t tb:test", history)
+        self.assertIn("lsf:     job 851247 | queue syn | host sh-cloud17 | submit login02", history)
+        self.assertNotIn("bkill", history)
+
     def test_history_marks_explicit_and_automatic_compile_reuse(self):
         for explicit_reuse in (False, True):
             with self.subTest(explicit_reuse=explicit_reuse), tempfile.TemporaryDirectory() as project_dir:
@@ -380,6 +471,30 @@ class SimmerResultsTest(unittest.TestCase):
 
         history = simmer_results.format_history(self.project_dir, 10, use_color=False)
         self.assertIn("[compile - | simulate -]", history)
+
+    def test_history_displays_latest_last_with_descending_recency_numbers(self):
+        self._save_history_run("tb", "oldest", "PASSED")
+        self._save_history_run("tb", "middle", "FAILED")
+        self._save_history_run("tb", "newest", "PASSED")
+
+        history = simmer_results.format_history(self.project_dir, 2, use_color=False)
+        entries = history.split("\n\n{}\n\n".format(simmer_results.HISTORY_SEPARATOR))
+
+        self.assertEqual(2, len(entries))
+        self.assertTrue(entries[0].startswith("[2] "))
+        self.assertIn("tb:middle", entries[0])
+        self.assertTrue(entries[1].startswith("[1] "))
+        self.assertIn("tb:newest", entries[1])
+        self.assertNotIn("tb:oldest", history)
+        self.assertEqual(1, history.count(simmer_results.HISTORY_SEPARATOR))
+
+    def test_single_history_entry_has_no_separator(self):
+        self._save_history_run("tb", "only", "PASSED")
+
+        history = simmer_results.format_history(self.project_dir, 10, use_color=False)
+
+        self.assertTrue(history.startswith("[1] "))
+        self.assertNotIn(simmer_results.HISTORY_SEPARATOR, history)
 
     def test_history_filters_by_bench_and_failure_before_limiting(self):
         failed_a = self._save_history_run("tb_a", "failed_a", "FAILED")

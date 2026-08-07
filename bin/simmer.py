@@ -37,6 +37,7 @@ from lib import rv_utils
 from lib import seed_plan
 from lib import sim_artifacts
 from lib import simmer_results
+from lib import simmer_state
 from lib.runtime_options import (
     append_uvm_control_options,
     format_log_check_args,
@@ -1303,7 +1304,38 @@ def _wait_for_jobs(jm, rcfg):
                 raise
 
 
-def main(rcfg, options):
+def _active_run_snapshot(rcfg, vcomp_jobs, jm, total_tests, regression_log_path):
+    """Build a compact run-level snapshot without exposing multi-test details."""
+    scheduler = jm.status_snapshot()
+    active_jobs = set(scheduler["launching"] + scheduler["active"] + scheduler["finalizing"])
+    test_jobs = [job for icfgs, _ in rcfg.all_vcomp.values() for icfg in icfgs for job in icfg.jobs]
+    finished_tests = sum(1 for job in test_jobs if job.jobstatus.completed)
+    active_tests = sum(1 for job in test_jobs if job in active_jobs)
+    queued_tests = max(0, total_tests - finished_tests - active_tests)
+    simulation_started = bool(active_tests or finished_tests
+                              or any(getattr(job, "job_start_time", None) is not None for job in test_jobs))
+    if scheduler["paused"]:
+        status = "PAUSED"
+    elif simulation_started and not rcfg.options.no_run:
+        status = "RUNNING"
+    else:
+        status = "COMPILING"
+    result_log = None
+    if total_tests == 1:
+        result_log = next((getattr(job, "_log_path", None) for job in test_jobs if getattr(job, "_log_path", None)),
+                          None)
+    return {
+        "status": status,
+        "finished_tests": finished_tests,
+        "active_tests": active_tests,
+        "queued_tests": queued_tests,
+        "compile_logs": [job.log_path for job in vcomp_jobs.values()],
+        "result_log": result_log,
+        "regression_log": regression_log_path,
+    }
+
+
+def main(rcfg, options, active_run=None):
     """
     Parameters
     ----------
@@ -1401,12 +1433,28 @@ def main(rcfg, options):
         if options.seed is not None:
             rcfg.log.critical("--seed can only be used if a single test is run")
             sys.exit(1)
+    regression_log_path = None
+    if total_tests > 1 and not options.no_run:
+        regression_log_path = rv_utils.prepare_regression_log(rcfg)
+    if active_run is not None:
+        active_run.update(
+            regression_dir=rcfg.regression_dir,
+            status="COMPILING",
+            planned_tests=total_tests,
+            finished_tests=0,
+            active_tests=0,
+            queued_tests=total_tests,
+            compile_logs=[job.log_path for job in vcomp_jobs.values()],
+            regression_log=regression_log_path,
+        )
+
     rcfg.simmer_results_run = None
     if not options.no_run:
         rcfg.simmer_results_run = simmer_results.create_run(
             getattr(options, "simmer_argv", sys.argv),
             rcfg,
             total_tests,
+            run_context=active_run.history_context() if active_run is not None else None,
         )
 
     try:
@@ -1460,7 +1508,15 @@ def main(rcfg, options):
                 elif not dynamic_test_plan:
                     jm.add_job(test)
 
+        if active_run is not None:
+            active_run.start_watching(
+                lambda: _active_run_snapshot(rcfg, vcomp_jobs, jm, total_tests, regression_log_path))
         _wait_for_jobs(jm, rcfg)
+        if active_run is not None:
+            active_run.stop_watching()
+            final_state = _active_run_snapshot(rcfg, vcomp_jobs, jm, total_tests, regression_log_path)
+            final_state["status"] = "FINALIZING"
+            active_run.update(**final_state)
         jm.stop()
         if options.no_run:
             rcfg.log.info("run_test:main(): --no_run option selected, exiting")
@@ -1468,6 +1524,9 @@ def main(rcfg, options):
     except KeyboardInterrupt:
         with _IgnoreAdditionalInterrupts():
             log.info("Saw keyboard interrupt, attempting to shutdown jobs.")
+            if active_run is not None:
+                active_run.stop_watching()
+                active_run.update(status="STOPPING")
             shutdown_complete = True
             if jm is not None:
                 try:
@@ -1487,7 +1546,7 @@ def main(rcfg, options):
         raise SystemExit(130)
 
     workflow_finalize_failed = False
-    regression_log_path = None
+    regression_log_path = getattr(rcfg, "regression_log_path", regression_log_path)
     post_processing_complete = False
     post_processing_interrupted = False
     total_failures = 0
@@ -1636,12 +1695,19 @@ def finalize_interrupted_run(rcfg,
                 simmer_results.record_test_job(run, job, status="INTERRUPTED", simulation_started=True)
             elif isinstance(job, VCompJob):
                 simmer_results.record_compile_job(run, job, status="INTERRUPTED")
-    simmer_results.finalize_run(run, backend_finalize_failed=True)
+    simmer_results.finalize_run(
+        run,
+        regression_log_path=getattr(rcfg, "regression_log_path", None),
+        backend_finalize_failed=True,
+    )
     persist_simmer_results(rcfg, fatal=False)
 
 
 if __name__ == '__main__':
     options = parse_args(sys.argv[1:])
+    if options.status:
+        simmer_state.print_status(options.proj_dir)
+        sys.exit(0)
     if options.history is not None:
         history_use_color = True if options.use_color else None
         simmer_results.print_history(
@@ -1655,5 +1721,12 @@ if __name__ == '__main__':
     options.simmer_argv = sys.argv[:]
     verbosity = cmn_logging.DEBUG if options.tool_debug else cmn_logging.INFO
     log = cmn_logging.build_logger("sim", level=verbosity, use_color=options.use_color, filehandler="simmer.log")
-    rcfg = regression.RegressionConfig(options, log)
-    main(rcfg, options)
+    active_run = None
+    if not options.discovery_only:
+        active_run = simmer_state.ActiveRun(options.proj_dir, options.simmer_argv, logger=log)
+    try:
+        rcfg = regression.RegressionConfig(options, log)
+        main(rcfg, options, active_run=active_run)
+    finally:
+        if active_run is not None:
+            active_run.close()
