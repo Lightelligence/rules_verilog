@@ -21,7 +21,7 @@ if str(REPO_ROOT) not in sys.path:
 from args_parser import parse_args
 import simmer
 from lib import compile_cache
-from lib.job_lib import JobCancelledError
+from lib.job_lib import JobCancelledError, JobStatus
 
 
 def _replace_symlink_in_process(link_path, target_path, start, result_queue):
@@ -43,6 +43,35 @@ class _FatalLog:
 
 
 class SimmerRuntimeHardeningTest(unittest.TestCase):
+
+    def test_active_run_snapshot_aggregates_multi_test_state(self):
+        finished = mock.Mock(jobstatus=JobStatus.PASSED, job_start_time=datetime.datetime.now())
+        active = mock.Mock(jobstatus=JobStatus.NOT_STARTED, job_start_time=datetime.datetime.now())
+        queued = mock.Mock(jobstatus=JobStatus.NOT_STARTED, job_start_time=None)
+        rcfg = SimpleNamespace(
+            all_vcomp={"//tb:tb": ([SimpleNamespace(jobs=[finished, active, queued])], [])},
+            options=SimpleNamespace(no_run=False),
+        )
+        manager = mock.Mock()
+        manager.status_snapshot.return_value = {
+            "paused": False,
+            "queued": (queued, ),
+            "launching": (),
+            "active": (active, ),
+            "finalizing": (),
+            "done": (finished, ),
+            "skipped": (),
+        }
+        vcomp = mock.Mock(log_path="/sim/tb/cmp.log")
+
+        state = simmer._active_run_snapshot(rcfg, {"//tb:tb": vcomp}, manager, 3, "/sim/regression.log")
+
+        self.assertEqual("RUNNING", state["status"])
+        self.assertEqual(1, state["finished_tests"])
+        self.assertEqual(1, state["active_tests"])
+        self.assertEqual(1, state["queued_tests"])
+        self.assertEqual("/sim/regression.log", state["regression_log"])
+        self.assertIsNone(state["result_log"])
 
     def test_vcs_compile_reuse_miss_messages_explain_incremental_behavior(self):
         self.assertEqual(

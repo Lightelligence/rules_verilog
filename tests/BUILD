@@ -159,6 +159,13 @@ py_test(
 )
 
 py_test(
+    name = "simmer_state_test",
+    timeout = "short",
+    srcs = ["simmer_state_test.py"],
+    deps = ["//lib:simmer_state"],
+)
+
+py_test(
     name = "simmer_runtime_hardening_test",
     timeout = "short",
     srcs = ["simmer_runtime_hardening_test.py"],
@@ -177,6 +184,7 @@ py_test(
         "//lib:seed_plan",
         "//lib:sim_artifacts",
         "//lib:simmer_results",
+        "//lib:simmer_state",
         "//lib/simulators",
     ],
 )

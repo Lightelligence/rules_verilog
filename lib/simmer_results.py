@@ -5,14 +5,18 @@ import datetime
 import json
 import math
 import os
-import shlex
 import sys
 import uuid
 from contextlib import contextmanager
 
-RESULTS_FILENAME = ".simmer_results.json"
-SCHEMA_VERSION = 4
+from lib import simmer_state
+
+RESULTS_DIRECTORY = ".simmer"
+RESULTS_FILENAME = "results.json"
+LEGACY_RESULTS_FILENAME = ".simmer_results.json"
+SCHEMA_VERSION = 5
 MAX_RUNS = 100
+HISTORY_SEPARATOR = "-" * 64
 COLOR_GREEN = "\033[0;32m"
 COLOR_RED = "\033[0;31m"
 COLOR_YELLOW = "\033[0;33m"
@@ -20,15 +24,15 @@ COLOR_NC = "\033[0m"
 
 
 def results_path(project_dir):
-    return os.path.join(project_dir, RESULTS_FILENAME)
+    return os.path.join(project_dir, RESULTS_DIRECTORY, RESULTS_FILENAME)
+
+
+def legacy_results_path(project_dir):
+    return os.path.join(project_dir, LEGACY_RESULTS_FILENAME)
 
 
 def format_command(argv):
-    if not argv:
-        return "simmer"
-    display_argv = list(argv)
-    display_argv[0] = os.path.basename(display_argv[0]) or display_argv[0]
-    return " ".join(shlex.quote(str(arg)) for arg in display_argv)
+    return simmer_state.format_command(argv)
 
 
 def _timestamp():
@@ -128,6 +132,7 @@ def _collect_benches(run):
 
 @contextmanager
 def _store_lock(path):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path + ".lock", "a+b") as lock:
         if os.name == "nt":
             import msvcrt
@@ -150,14 +155,17 @@ def _store_lock(path):
                 fcntl.flock(lock, fcntl.LOCK_UN)
 
 
-def create_run(argv, rcfg, planned_tests):
+def create_run(argv, rcfg, planned_tests, run_context=None):
     options = getattr(rcfg, "options", None)
+    run_context = run_context or {}
+    lsf = run_context.get("lsf") or simmer_state.capture_lsf_context()
     return {
-        "run_id": _run_id(),
-        "started_at": _timestamp(),
+        "run_id": run_context.get("run_id") or _run_id(),
+        "started_at": run_context.get("started_at") or _timestamp(),
         "finished_at": None,
-        "command": format_command(argv),
+        "command": run_context.get("command") or simmer_state.format_submission_command(argv, lsf=lsf),
         "argv": list(argv),
+        "lsf": lsf,
         "project_dir": rcfg.proj_dir,
         "regression_dir": rcfg.regression_dir,
         "planned_tests": planned_tests,
@@ -311,8 +319,7 @@ def _empty_store():
     }
 
 
-def load_store(project_dir):
-    path = results_path(project_dir)
+def _read_store(path):
     if not os.path.exists(path):
         return _empty_store()
     with open(path, "r", encoding="utf-8") as filep:
@@ -324,6 +331,90 @@ def load_store(project_dir):
     store.setdefault("last_run", None)
     store.setdefault("runs", [])
     return store
+
+
+def _write_store(path, store):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    temp_path = "{}.{}.{}.tmp".format(path, os.getpid(), uuid.uuid4().hex)
+    try:
+        with open(temp_path, "w", encoding="utf-8") as filep:
+            json.dump(store, filep, indent=2)
+            filep.write("\n")
+        os.replace(temp_path, path)
+    finally:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+
+
+def _quarantine_store(path):
+    corrupt_path = "{}.corrupt.{}".format(path, datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f"))
+    os.replace(path, corrupt_path)
+    print("Warning: moved invalid simmer history to {}".format(corrupt_path), file=sys.stderr)
+    return corrupt_path
+
+
+def _merge_stores(legacy_store, current_store, max_runs=MAX_RUNS):
+    merged_runs = []
+    run_positions = {}
+    for run in legacy_store.get("runs", []) + current_store.get("runs", []):
+        run_id = run.get("run_id")
+        if run_id and run_id in run_positions:
+            merged_runs[run_positions[run_id]] = run
+            continue
+        if run_id:
+            run_positions[run_id] = len(merged_runs)
+        merged_runs.append(run)
+    merged_runs = [
+        run for _, run in sorted(
+            enumerate(merged_runs),
+            key=lambda item: (
+                item[1].get("finished_at") or item[1].get("started_at") or "",
+                item[0],
+            ),
+        )
+    ][-max_runs:]
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "last_run": merged_runs[-1] if merged_runs else None,
+        "runs": merged_runs,
+    }
+
+
+def _migrate_legacy_store_locked(project_dir, path):
+    legacy_path = legacy_results_path(project_dir)
+    if not os.path.exists(legacy_path):
+        return
+    with _store_lock(legacy_path):
+        if not os.path.exists(legacy_path):
+            return
+        try:
+            legacy_store = _read_store(legacy_path)
+        except (json.JSONDecodeError, ValueError):
+            _quarantine_store(legacy_path)
+            return
+        current_store = _read_store(path)
+        _write_store(path, _merge_stores(legacy_store, current_store))
+        try:
+            os.remove(legacy_path)
+        except OSError:
+            return
+    try:
+        os.remove(legacy_path + ".lock")
+    except OSError:
+        pass
+
+
+def _load_store_locked(project_dir, path):
+    _migrate_legacy_store_locked(project_dir, path)
+    return _read_store(path)
+
+
+def load_store(project_dir):
+    path = results_path(project_dir)
+    if not os.path.exists(path) and not os.path.exists(legacy_results_path(project_dir)):
+        return _empty_store()
+    with _store_lock(path):
+        return _load_store_locked(project_dir, path)
 
 
 def should_save_run(run):
@@ -344,12 +435,10 @@ def save_run(project_dir, run, max_runs=MAX_RUNS):
     path = results_path(project_dir)
     with _store_lock(path):
         try:
-            store = load_store(project_dir)
+            store = _load_store_locked(project_dir, path)
         except (json.JSONDecodeError, ValueError):
-            corrupt_path = "{}.corrupt.{}".format(path, datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f"))
-            os.replace(path, corrupt_path)
-            print("Warning: moved invalid simmer history to {}".format(corrupt_path), file=sys.stderr)
-            store = _empty_store()
+            _quarantine_store(path)
+            store = _load_store_locked(project_dir, path)
         runs = [item for item in store.get("runs", []) if item.get("run_id") != stored_run.get("run_id")]
         runs.append(stored_run)
         store = {
@@ -357,15 +446,7 @@ def save_run(project_dir, run, max_runs=MAX_RUNS):
             "last_run": stored_run,
             "runs": runs[-max_runs:],
         }
-        temp_path = "{}.{}.{}.tmp".format(path, os.getpid(), uuid.uuid4().hex)
-        try:
-            with open(temp_path, "w", encoding="utf-8") as filep:
-                json.dump(store, filep, indent=2)
-                filep.write("\n")
-            os.replace(temp_path, path)
-        finally:
-            if os.path.exists(temp_path):
-                os.remove(temp_path)
+        _write_store(path, store)
     return True
 
 
@@ -495,11 +576,10 @@ def format_history(project_dir, count, use_color=None, bench=None, failed_only=F
     if not runs:
         return "No matching simmer history found."
 
-    lines = []
-    recent_runs = list(reversed(runs))[:count]
-    for index, run in enumerate(recent_runs, start=1):
-        if lines:
-            lines.append("")
+    entries = []
+    recent_runs = runs[-count:]
+    for index, run in zip(range(len(recent_runs), 0, -1), recent_runs):
+        lines = []
         heading = [
             "[{}] {}".format(index,
                              run.get("finished_at") or run.get("started_at") or "-"),
@@ -511,12 +591,16 @@ def format_history(project_dir, count, use_color=None, bench=None, failed_only=F
         heading.append(_format_timing(run))
         lines.append("  ".join(heading))
         lines.append("cmd:     {}".format(run.get("command") or "-"))
+        lsf_summary = simmer_state.format_lsf_summary(run.get("lsf"))
+        if lsf_summary:
+            lines.append("lsf:     {}".format(lsf_summary))
         lines.append("compile: {}".format(_select_compile_log(run)))
         lines.append("result:  {}".format(_select_result_log(run)))
         waves_script = _select_waves_script(run)
         if waves_script is not None:
             lines.append("waves:   {}".format(waves_script or "-"))
-    return "\n".join(lines)
+        entries.append("\n".join(lines))
+    return "\n\n{}\n\n".format(HISTORY_SEPARATOR).join(entries)
 
 
 def print_history(project_dir, count, use_color=None, bench=None, failed_only=False):

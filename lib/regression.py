@@ -23,12 +23,14 @@ from lib import bazel_profile, rv_utils
 # that doesn't format, but more work than its worth
 LOGGER_INDENT = 8
 BENCHES_REL_DIR = os.environ.get('BENCHES_REL_DIR', 'benches')
-DISCOVERY_CACHE_FILES = (
+LEGACY_DISCOVERY_CACHE_FILES = (
     "all_vcomp.json",
     "tests_to_tags.json",
     "tests_to_simulator.json",
     "discovery_manifest.json",
 )
+DISCOVERY_CACHE_SCHEMA_VERSION = 1
+DISCOVERY_SCOPE_SCHEMA_VERSION = 1
 DISCOVERY_ROOT_FILES = {
     ".bazelignore",
     ".bazelrc",
@@ -96,8 +98,12 @@ class RegressionConfig():
             self._should_use_cached_discovery,
         )
         if not self.use_cached_discovery:
+            strict_no_bazel = self.options.no_bazel and getattr(self.options, "no_bazel_was_explicit", True)
+            if strict_no_bazel:
+                self.log.critical("Discovery cache for the requested bench scope is missing or stale. "
+                                  "Please rerun without --no-bazel.")
             if self.options.no_bazel:
-                self.log.critical("Discovery cache missing or stale. Please rerun without --no-bazel.")
+                self.log.debug("Matching discovery cache unavailable; refreshing Bazel metadata once")
             self._profile_step(
                 "test_discovery_all",
                 "bazel query/cquery/build test cfg metadata",
@@ -194,7 +200,7 @@ class RegressionConfig():
         """
         path = self._cache_path(j)
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        descriptor, temporary_path = tempfile.mkstemp(prefix=".{}-".format(j),
+        descriptor, temporary_path = tempfile.mkstemp(prefix=".{}-".format(os.path.basename(j)),
                                                       suffix=".tmp",
                                                       dir=os.path.dirname(path),
                                                       text=True)
@@ -228,6 +234,27 @@ class RegressionConfig():
     def _cache_path(self, filename):
         return os.path.join(self.proj_dir, ".simmer", "cache", filename)
 
+    def _discovery_scope(self):
+        return {
+            "schema_version": DISCOVERY_SCOPE_SCHEMA_VERSION,
+            "bench_query": self._build_vcomp_discovery_query(),
+            "allow_no_run": bool(self.options.allow_no_run),
+        }
+
+    def _discovery_scope_id(self):
+        encoded_scope = json.dumps(
+            self._discovery_scope(),
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        return hashlib.sha256(encoded_scope).hexdigest()[:20]
+
+    def _discovery_cache_relative_path(self):
+        return os.path.join("discovery", "{}.json".format(self._discovery_scope_id()))
+
+    def _discovery_cache_path(self):
+        return self._cache_path(self._discovery_cache_relative_path())
+
     @contextmanager
     def _discovery_cache_lock(self, exclusive):
         """Lock complete discovery generations across supported POSIX processes."""
@@ -250,16 +277,90 @@ class RegressionConfig():
             finally:
                 fcntl.flock(lock_file, fcntl.LOCK_UN)
 
+    def _discovery_cache_payload(self, manifest):
+        return {
+            "schema_version": DISCOVERY_CACHE_SCHEMA_VERSION,
+            "scope": self._discovery_scope(),
+            "manifest": manifest,
+            "all_vcomp": self.all_vcomp,
+            "tests_to_tags": self.tests_to_tags,
+            "tests_to_simulator": self.tests_to_simulator,
+        }
+
     def _read_discovery_cache_locked(self):
+        with open(self._discovery_cache_path(), "r", encoding="utf-8") as filep:
+            payload = json.load(filep)
+        if not isinstance(payload, dict) or payload.get("schema_version") != DISCOVERY_CACHE_SCHEMA_VERSION:
+            raise ValueError("Unsupported discovery cache schema")
+        if payload.get("scope") != self._discovery_scope():
+            raise ValueError("Discovery cache scope mismatch")
+        generation = tuple(
+            payload.get(name) for name in ("all_vcomp", "tests_to_tags", "tests_to_simulator", "manifest"))
+        if any(not isinstance(item, dict) for item in generation):
+            raise ValueError("Invalid discovery cache payload")
+        return generation
+
+    def _have_legacy_discovery_cache(self):
+        return all(os.path.exists(self._cache_path(filename)) for filename in LEGACY_DISCOVERY_CACHE_FILES)
+
+    def _read_legacy_discovery_cache_locked(self):
         generation = []
-        for filename in DISCOVERY_CACHE_FILES:
+        for filename in LEGACY_DISCOVERY_CACHE_FILES:
             with open(self._cache_path(filename), "r", encoding="utf-8") as filep:
                 generation.append(json.load(filep))
+        if any(not isinstance(item, dict) for item in generation):
+            raise ValueError("Invalid legacy discovery cache payload")
         return tuple(generation)
 
-    def _load_discovery_cache_generation(self):
+    def _remove_legacy_discovery_cache_locked(self):
+        for filename in LEGACY_DISCOVERY_CACHE_FILES:
+            try:
+                os.remove(self._cache_path(filename))
+            except FileNotFoundError:
+                pass
+
+    @staticmethod
+    def _same_discovery_scope(left_manifest, right_manifest):
+        return all(left_manifest.get(name) == right_manifest.get(name) for name in ("discovery_query", "allow_no_run"))
+
+    def _migrate_legacy_discovery_cache_locked(self, current_manifest):
+        if not self._have_legacy_discovery_cache():
+            return None
+        generation = self._read_legacy_discovery_cache_locked()
+        if generation[3] != current_manifest:
+            return None
+        all_vcomp, tests_to_tags, tests_to_simulator, manifest = generation
+        payload = {
+            "schema_version": DISCOVERY_CACHE_SCHEMA_VERSION,
+            "scope": self._discovery_scope(),
+            "manifest": manifest,
+            "all_vcomp": all_vcomp,
+            "tests_to_tags": tests_to_tags,
+            "tests_to_simulator": tests_to_simulator,
+        }
+        self.dict_to_json(payload, self._discovery_cache_relative_path())
+        self._remove_legacy_discovery_cache_locked()
+        self.log.debug("Migrated discovery cache for scope %s", self._discovery_scope_id())
+        return generation
+
+    def _read_or_migrate_discovery_cache(self, current_manifest):
         with self._discovery_cache_lock(exclusive=False):
-            return self._read_discovery_cache_locked()
+            try:
+                return self._read_discovery_cache_locked()
+            except FileNotFoundError:
+                pass
+        with self._discovery_cache_lock(exclusive=True):
+            try:
+                return self._read_discovery_cache_locked()
+            except FileNotFoundError:
+                generation = self._migrate_legacy_discovery_cache_locked(current_manifest)
+                if generation is None:
+                    raise FileNotFoundError(self._discovery_cache_path())
+                return generation
+
+    def _load_discovery_cache_generation(self):
+        current_manifest = self._discovery_dependency_manifest()
+        return self._read_or_migrate_discovery_cache(current_manifest)
 
     def _publish_discovery_cache(self, manifest=None):
         """Publish all discovery payloads as one advisory-locked generation."""
@@ -267,13 +368,13 @@ class RegressionConfig():
             manifest = self._discovery_dependency_manifest()
         self._warn_if_discovery_uncacheable(manifest)
         with self._discovery_cache_lock(exclusive=True):
-            self.dict_to_json(self.all_vcomp, "all_vcomp.json")
-            self.dict_to_json(self.tests_to_tags, "tests_to_tags.json")
-            self.dict_to_json(self.tests_to_simulator, "tests_to_simulator.json")
-            self.dict_to_json(manifest, "discovery_manifest.json")
-
-    def _have_discovery_cache(self):
-        return all(os.path.exists(self._cache_path(filename)) for filename in DISCOVERY_CACHE_FILES)
+            self.dict_to_json(self._discovery_cache_payload(manifest), self._discovery_cache_relative_path())
+            try:
+                legacy_manifest = self._read_legacy_discovery_cache_locked()[3]
+            except (OSError, ValueError, json.JSONDecodeError):
+                legacy_manifest = None
+            if legacy_manifest is not None and self._same_discovery_scope(legacy_manifest, manifest):
+                self._remove_legacy_discovery_cache_locked()
 
     def _warn_if_discovery_uncacheable(self, manifest):
         reason = manifest.get("uncacheable_reason")
@@ -290,7 +391,11 @@ class RegressionConfig():
 
     @staticmethod
     def _manifest_relative_path(path, project_root):
-        return os.path.relpath(os.path.realpath(path), project_root).replace(os.sep, "/")
+        real_path = os.path.realpath(path)
+        try:
+            return os.path.relpath(real_path, project_root).replace(os.sep, "/")
+        except ValueError:
+            return real_path.replace(os.sep, "/")
 
     def _discovery_dependency_manifest(self):
         submodule_state = self._git_submodule_state()
@@ -365,9 +470,10 @@ class RegressionConfig():
 
     def _write_discovery_manifest(self):
         manifest = self._discovery_dependency_manifest()
-        self._warn_if_discovery_uncacheable(manifest)
-        with self._discovery_cache_lock(exclusive=True):
-            self.dict_to_json(manifest, "discovery_manifest.json")
+        self.all_vcomp = getattr(self, "all_vcomp", {})
+        self.tests_to_tags = getattr(self, "tests_to_tags", {})
+        self.tests_to_simulator = getattr(self, "tests_to_simulator", {})
+        self._publish_discovery_cache(manifest)
 
     def _iter_project_discovery_dependency_paths(self, submodule_state):
         indexed_result = subprocess.run(
@@ -443,16 +549,15 @@ class RegressionConfig():
         yield from project_paths
 
     def _discovery_cache_is_fresh(self):
+        if not os.path.exists(self._discovery_cache_path()) and not self._have_legacy_discovery_cache():
+            return False
+        current_manifest = self._discovery_dependency_manifest()
         try:
-            with self._discovery_cache_lock(exclusive=False):
-                if not self._have_discovery_cache():
-                    return False
-                _, _, _, cached_manifest = self._read_discovery_cache_locked()
-                if not cached_manifest.get("cacheable", True):
-                    self._warn_if_discovery_uncacheable(cached_manifest)
-                    return False
-                current_manifest = self._discovery_dependency_manifest()
+            _, _, _, cached_manifest = self._read_or_migrate_discovery_cache(current_manifest)
         except (OSError, ValueError, json.JSONDecodeError):
+            return False
+        if not cached_manifest.get("cacheable", True):
+            self._warn_if_discovery_uncacheable(cached_manifest)
             return False
         if cached_manifest != current_manifest:
             self.log.debug("Discovery cache dependency manifest changed")
@@ -460,18 +565,19 @@ class RegressionConfig():
         return True
 
     def _should_use_cached_discovery(self):
+        if not os.path.exists(self._discovery_cache_path()) and not self._have_legacy_discovery_cache():
+            return False
+        current_manifest = self._discovery_dependency_manifest()
         try:
-            with self._discovery_cache_lock(exclusive=False):
-                if not self._have_discovery_cache():
-                    return False
-                all_vcomp, tests_to_tags, tests_to_simulator, cached_manifest = self._read_discovery_cache_locked()
-                if not cached_manifest.get("cacheable", True):
-                    self._warn_if_discovery_uncacheable(cached_manifest)
-                    return False
-                if cached_manifest != self._discovery_dependency_manifest():
-                    self.log.debug("Discovery cache dependency manifest changed")
-                    return False
+            all_vcomp, tests_to_tags, tests_to_simulator, cached_manifest = self._read_or_migrate_discovery_cache(
+                current_manifest)
         except (OSError, ValueError, json.JSONDecodeError):
+            return False
+        if not cached_manifest.get("cacheable", True):
+            self._warn_if_discovery_uncacheable(cached_manifest)
+            return False
+        if cached_manifest != current_manifest:
+            self.log.debug("Discovery cache dependency manifest changed")
             return False
 
         self._cached_discovery = (all_vcomp, tests_to_tags, tests_to_simulator)

@@ -74,4 +74,10 @@ py_library(
 py_library(
     name = "simmer_results",
     srcs = ["simmer_results.py"],
+    deps = [":simmer_state"],
+)
+
+py_library(
+    name = "simmer_state",
+    srcs = ["simmer_state.py"],
 )
