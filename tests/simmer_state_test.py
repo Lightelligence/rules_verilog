@@ -1,9 +1,11 @@
 import json
 import os
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 from lib import simmer_state
 
@@ -112,6 +114,52 @@ class SimmerStateTest(unittest.TestCase):
 
         self.assertFalse(path.exists())
         self.assertEqual("No active simmer runs.", simmer_state.format_status(self.project_dir))
+
+    def test_close_prevents_late_update_from_recreating_state(self):
+        active_run = simmer_state.ActiveRun(self.project_dir, ["simmer"])
+        path = Path(active_run.path)
+
+        active_run.close()
+
+        self.assertFalse(active_run.update(status="RUNNING"))
+        self.assertFalse(path.exists())
+
+    def test_posix_permission_error_still_means_process_exists(self):
+        with mock.patch.object(simmer_state.os, "kill", side_effect=PermissionError):
+            self.assertTrue(simmer_state._posix_process_exists(1234))
+
+    def test_windows_process_probe_does_not_use_posix_kill(self):
+        with mock.patch.object(simmer_state, "_windows_process_exists", return_value=True) as probe:
+            self.assertTrue(simmer_state._process_exists(1234, platform_name="nt"))
+
+        probe.assert_called_once_with(1234)
+
+    def test_stopped_watcher_drops_late_snapshot(self):
+        snapshot_started = threading.Event()
+        release_snapshot = threading.Event()
+        active_run = simmer_state.ActiveRun(self.project_dir, ["simmer"])
+
+        def delayed_snapshot():
+            snapshot_started.set()
+            release_snapshot.wait(2)
+            return {"status": "RUNNING"}
+
+        try:
+            active_run.start_watching(delayed_snapshot, interval_seconds=60)
+            self.assertTrue(snapshot_started.wait(1))
+            stop_event = active_run._stop_event
+            stopper = threading.Thread(target=active_run.stop_watching)
+            stopper.start()
+            self.assertTrue(stop_event.wait(1))
+            release_snapshot.set()
+            stopper.join(2)
+            self.assertFalse(stopper.is_alive())
+
+            state = json.loads(Path(active_run.path).read_text(encoding="utf-8"))
+            self.assertEqual("DISCOVERING", state["status"])
+        finally:
+            release_snapshot.set()
+            active_run.close()
 
     def test_dead_local_process_state_is_removed(self):
         active_run = simmer_state.ActiveRun(self.project_dir, ["simmer"], hostname="local-host")

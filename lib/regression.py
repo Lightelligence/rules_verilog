@@ -421,6 +421,8 @@ class RegressionConfig():
         return manifest
 
     def _git_submodule_state(self):
+        if not os.path.isfile(os.path.join(self.proj_dir, ".gitmodules")):
+            return []
         result = subprocess.run(
             ["git", "submodule", "status", "--recursive"],
             cwd=self.proj_dir,

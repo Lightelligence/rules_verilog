@@ -44,6 +44,21 @@ class _FatalLog:
 
 class SimmerRuntimeHardeningTest(unittest.TestCase):
 
+    def test_simulation_directory_name_bounds_overlong_utf8_component(self):
+        suffix = "_report_rerun_20260808_120000_0123456789abcdef"
+        test_name = "long_" + ("测" * 100)
+
+        directory_name = simmer._format_simulation_directory_name("unit_tb", "VCS", test_name, 42, 1, suffix)
+        other_name = simmer._format_simulation_directory_name("unit_tb", "VCS", test_name + "x", 42, 1, suffix)
+
+        self.assertLessEqual(len(directory_name.encode("utf-8")), 255)
+        self.assertTrue(directory_name.endswith(suffix))
+        self.assertNotEqual(directory_name, other_name)
+        self.assertEqual(
+            directory_name,
+            simmer._format_simulation_directory_name("unit_tb", "VCS", test_name, 42, 1, suffix),
+        )
+
     def test_active_run_snapshot_aggregates_multi_test_state(self):
         finished = mock.Mock(jobstatus=JobStatus.PASSED, job_start_time=datetime.datetime.now())
         active = mock.Mock(jobstatus=JobStatus.NOT_STARTED, job_start_time=datetime.datetime.now())
