@@ -78,6 +78,12 @@ report_jinja2_env = regression_report.create_template_environment(os.path.join(d
 #SIM_TEMPLATE = jinja2_env.get_template('sim_template.sh.j2')
 RERUN_TEMPLATE = jinja2_env.get_template('rerun_template.sh.j2')
 RUN_WAVE_TEMPLATE = jinja2_env.get_template('run_waves_template.sh.j2')
+_FILESYSTEM_COMPONENT_MAX_BYTES = 255
+
+
+def _utf8_prefix(value, byte_limit):
+    """Return the longest UTF-8-safe prefix within byte_limit bytes."""
+    return value.encode("utf-8")[:byte_limit].decode("utf-8", errors="ignore")
 
 
 def _format_simulation_directory_name(vcomp_name, simulator_name, test_name, seed, iteration, directory_suffix):
@@ -86,7 +92,15 @@ def _format_simulation_directory_name(vcomp_name, simulator_name, test_name, see
     result_name = "%s__%s__%s__%d" % (vcomp_name, simulator_name, test_name, seed)
     if iteration > 1:
         result_name += "__i%d" % iteration
-    return result_name + suffix_component
+    directory_name = result_name + suffix_component
+    encoded_name = directory_name.encode("utf-8")
+    if len(encoded_name) <= _FILESYSTEM_COMPONENT_MAX_BYTES:
+        return directory_name
+    digest_component = "__{}".format(sha1(encoded_name).hexdigest()[:16])
+    suffix_budget = _FILESYSTEM_COMPONENT_MAX_BYTES - len(digest_component.encode("utf-8"))
+    retained_suffix = _utf8_prefix(suffix_component, suffix_budget)
+    prefix_budget = suffix_budget - len(retained_suffix.encode("utf-8"))
+    return _utf8_prefix(result_name, prefix_budget) + digest_component + retained_suffix
 
 
 def get_bazel_bin(project_dir=None):

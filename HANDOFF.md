@@ -43,13 +43,13 @@ PR:
 Single goal:
 
 Completed:
-- 
+-
 
 Remaining/blocker:
-- 
+-
 
 Relevant workspace changes to preserve:
-- 
+-
 
 ETX/XinAnRiver:
 - Path: /nfs/workspace/XinAnRiver/lwang/XinAnRiver

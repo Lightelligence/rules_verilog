@@ -114,12 +114,54 @@ def _linux_process_start_time(process_id):
         return None
 
 
-def _process_exists(process_id):
+def _posix_process_exists(process_id):
     try:
         os.kill(process_id, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        # EPERM still proves that the process exists. This matters when a
+        # shared checkout contains active runs owned by another user.
+        return True
     except (OSError, ValueError):
         return False
     return True
+
+
+def _windows_process_exists(process_id):
+    """Query a process without using os.kill(pid, 0), which is destructive on Windows."""
+    import ctypes
+    from ctypes import wintypes
+
+    process_query_limited_information = 0x1000
+    error_access_denied = 5
+    still_active = 259
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+    kernel32.GetExitCodeProcess.restype = wintypes.BOOL
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
+
+    handle = kernel32.OpenProcess(process_query_limited_information, False, process_id)
+    if not handle:
+        return ctypes.get_last_error() == error_access_denied
+    try:
+        exit_code = wintypes.DWORD()
+        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
+            # A transient query failure is not evidence that the process is
+            # gone, so preserve its state file for a later status check.
+            return True
+        return exit_code.value == still_active
+    finally:
+        kernel32.CloseHandle(handle)
+
+
+def _process_exists(process_id, platform_name=None):
+    if (os.name if platform_name is None else platform_name) == "nt":
+        return _windows_process_exists(process_id)
+    return _posix_process_exists(process_id)
 
 
 def _write_state(path, state):
@@ -155,7 +197,7 @@ class ActiveRun:
         self.run_id = uuid.uuid4().hex
         self._path = state_path(self.project_dir, self.run_id)
         self._lock = threading.Lock()
-        self._stop_event = threading.Event()
+        self._stop_event = None
         self._watch_thread = None
         self._enabled = True
         now = time.time() if now is None else float(now)
@@ -216,6 +258,8 @@ class ActiveRun:
 
     def update(self, **changes):
         with self._lock:
+            if not self._enabled:
+                return False
             changed = False
             for key, value in changes.items():
                 if self._state.get(key) != value:
@@ -229,34 +273,43 @@ class ActiveRun:
 
     def start_watching(self, snapshot_fn, interval_seconds=5.0):
         self.stop_watching()
-        self._stop_event.clear()
+        stop_event = threading.Event()
+        self._stop_event = stop_event
 
         def watch():
-            while not self._stop_event.is_set():
+            while not stop_event.is_set():
                 try:
-                    self.update(**snapshot_fn())
+                    snapshot = snapshot_fn()
+                    if stop_event.is_set():
+                        break
+                    self.update(**snapshot)
                 except Exception as exc: # Status reporting must never stop a simulation.
                     self._warn("Could not refresh simmer active-run state: %s", exc)
-                self._stop_event.wait(interval_seconds)
+                stop_event.wait(interval_seconds)
 
         self._watch_thread = threading.Thread(name="simmer_active_state", target=watch, daemon=True)
         self._watch_thread.start()
 
     def stop_watching(self):
-        self._stop_event.set()
+        stop_event = self._stop_event
+        if stop_event is not None:
+            stop_event.set()
         watch_thread = self._watch_thread
         if watch_thread is not None and threading.current_thread() is not watch_thread:
             watch_thread.join(timeout=2)
         self._watch_thread = None
+        self._stop_event = None
 
     def close(self):
         self.stop_watching()
-        try:
-            os.remove(self._path)
-        except FileNotFoundError:
-            pass
-        except OSError as exc:
-            self._warn("Could not remove simmer active-run state: %s", exc)
+        with self._lock:
+            self._enabled = False
+            try:
+                os.remove(self._path)
+            except FileNotFoundError:
+                pass
+            except OSError as exc:
+                self._warn("Could not remove simmer active-run state: %s", exc)
 
 
 def _load_state_files(project_dir):
