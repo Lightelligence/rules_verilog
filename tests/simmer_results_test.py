@@ -114,6 +114,46 @@ class SimmerResultsTest(unittest.TestCase):
         self.assertEqual("{broken", backups[0].read_text(encoding="utf-8"))
         self.assertEqual(1, len(json.loads(path.read_text(encoding="utf-8"))["runs"]))
 
+    def test_history_tolerates_semantically_invalid_persisted_fields(self):
+        run = self._completed_run()
+        run.update({
+            "planned_tests": "not-an-int",
+            "summary": {
+                "total": "not-an-int",
+                "passed": "also-bad",
+                "failed": [],
+            },
+            "tests": [{
+                "bench": [],
+                "status": "PASSED",
+                "waves": "not-a-mapping",
+            }],
+            "compile": [{
+                "bench": {},
+            }],
+            "timing": "not-a-mapping",
+            "benches": "not-a-list",
+        })
+        path = Path(simmer_results.results_path(self.project_dir))
+        path.parent.mkdir(parents=True)
+        path.write_text(
+            json.dumps({
+                "schema_version": simmer_results.SCHEMA_VERSION,
+                "last_run": run,
+                "runs": [run],
+            }),
+            encoding="utf-8",
+        )
+
+        history = simmer_results.format_history(self.project_dir, 10, use_color=False)
+
+        self.assertIn(run["command"], history)
+        self.assertIn("[compile - | simulate -]", history)
+        self.assertEqual(
+            "No matching simmer history found.",
+            simmer_results.format_history(self.project_dir, 10, use_color=False, bench="missing"),
+        )
+
     def test_history_is_stored_under_simmer_directory(self):
         simmer_results.save_run(self.project_dir, self._completed_run())
 

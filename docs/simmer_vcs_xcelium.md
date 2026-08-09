@@ -609,7 +609,9 @@ partition-specific flags. The matching `*_extra_runfiles` attributes make
 
 Use one immutable key per Xcelium release, netlist release and gatesim corner.
 All three commands must select the same Bazel target, `SIMRESULTS` root and
-`--dir-suffix`:
+`--dir-suffix`. The suffix accepts portable letters, digits, periods,
+underscores and hyphens, starts with a letter or digit after optional leading
+underscores, and cannot contain path separators or traversal:
 
 ```bash
 export SIMRESULTS=/nfs/regression

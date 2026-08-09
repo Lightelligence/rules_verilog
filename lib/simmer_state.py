@@ -3,6 +3,7 @@
 
 import datetime
 import json
+import math
 import os
 import shlex
 import socket
@@ -24,6 +25,35 @@ ACTIVE_LSF_STATES = {
     "USUSP",
     "WAIT",
 }
+
+
+def _mapping(value):
+    return value if isinstance(value, dict) else {}
+
+
+def _safe_int(value, default=0):
+    if isinstance(value, bool):
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError, OverflowError):
+        return default
+
+
+def _safe_float(value, default=0.0):
+    if isinstance(value, bool):
+        return default
+    try:
+        result = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return default
+    return result if math.isfinite(result) else default
+
+
+def _safe_identifier(value):
+    if isinstance(value, (str, int)) and not isinstance(value, bool):
+        return str(value)
+    return None
 
 
 def state_directory(project_dir):
@@ -334,7 +364,7 @@ def _load_state_files(project_dir):
 
 
 def _local_state_is_active(state, hostname):
-    process = state.get("process", {})
+    process = _mapping(state.get("process"))
     if process.get("host") != hostname:
         return None
     process_id = process.get("pid")
@@ -383,7 +413,8 @@ def load_active_runs(project_dir, hostname=None, lsf_runner=subprocess.run):
             except OSError:
                 pass
         else:
-            job_id = state.get("lsf", {}).get("display_job_id")
+            lsf = _mapping(state.get("lsf"))
+            job_id = _safe_identifier(lsf.get("display_job_id"))
             if job_id:
                 remote_lsf_states.append((path, state, job_id))
             else:
@@ -401,13 +432,16 @@ def load_active_runs(project_dir, hostname=None, lsf_runner=subprocess.run):
     return [
         state for _, state in sorted(
             active,
-            key=lambda item: (item[1].get("started_at_epoch", 0), item[1].get("run_id", "")),
+            key=lambda item: (
+                _safe_float(item[1].get("started_at_epoch")),
+                _safe_identifier(item[1].get("run_id")) or "",
+            ),
         )
     ]
 
 
 def _format_duration(duration_seconds):
-    duration_seconds = max(0, int(duration_seconds))
+    duration_seconds = max(0, _safe_int(duration_seconds))
     hours = duration_seconds // 3600
     minutes = (duration_seconds % 3600) // 60
     seconds = duration_seconds % 60
@@ -415,12 +449,12 @@ def _format_duration(duration_seconds):
 
 
 def _format_heading(index, state, now):
-    status = state.get("status") or "RUNNING"
+    status = str(state.get("status") or "RUNNING")
     parts = ["[{}] {}".format(index, state.get("started_at") or "-"), status]
-    planned = int(state.get("planned_tests") or 0)
-    finished = int(state.get("finished_tests") or 0)
-    active = int(state.get("active_tests") or 0)
-    queued = int(state.get("queued_tests") or 0)
+    planned = max(0, _safe_int(state.get("planned_tests")))
+    finished = max(0, _safe_int(state.get("finished_tests")))
+    active = max(0, _safe_int(state.get("active_tests")))
+    queued = max(0, _safe_int(state.get("queued_tests")))
     if status in ("RUNNING", "PAUSED"):
         if planned > 1:
             parts.append("{}/{} finished, {} active, {} queued".format(finished, planned, active, queued))
@@ -428,7 +462,7 @@ def _format_heading(index, state, now):
             parts.append("{} active".format(active))
         elif planned == 1 and finished:
             parts.append("1/1 finished")
-    elapsed = now - float(state.get("started_at_epoch") or now)
+    elapsed = now - _safe_float(state.get("started_at_epoch"), now)
     return "  ".join(parts) + " | elapsed {}".format(_format_duration(elapsed))
 
 
@@ -444,11 +478,12 @@ def format_status(project_dir, now=None, hostname=None, lsf_runner=subprocess.ru
         lsf_summary = format_lsf_summary(state.get("lsf"), include_bkill=True)
         if lsf_summary:
             lines.append("{:<12}{}".format("lsf:", lsf_summary))
-        compile_logs = [path for path in state.get("compile_logs", []) if path]
+        raw_compile_logs = state.get("compile_logs", [])
+        compile_logs = [path for path in raw_compile_logs if path] if isinstance(raw_compile_logs, list) else []
         for log_index, compile_log in enumerate(compile_logs):
             label = "compile:" if log_index == 0 else ""
             lines.append("{:<12}{}".format(label, compile_log))
-        if int(state.get("planned_tests") or 0) > 1:
+        if _safe_int(state.get("planned_tests")) > 1:
             if state.get("regression_log"):
                 lines.append("{:<12}{}".format("regression:", state["regression_log"]))
         elif state.get("result_log"):

@@ -55,6 +55,29 @@ def _duration_seconds(value):
     return round(duration, 3)
 
 
+def _mapping(value):
+    return value if isinstance(value, dict) else {}
+
+
+def _records(value):
+    if not isinstance(value, list):
+        return []
+    return [record for record in value if isinstance(record, dict)]
+
+
+def _safe_int(value, default=0):
+    if isinstance(value, bool):
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError, OverflowError):
+        return default
+
+
+def _safe_text(value):
+    return value if isinstance(value, str) else ""
+
+
 def _record_job_interval(record, job, stopped_at=None):
     started_at = getattr(job, "job_start_time", None)
     finished_at = getattr(job, "job_stop_time", None) or stopped_at
@@ -122,10 +145,12 @@ def _finalize_timing(run):
 
 
 def _collect_benches(run):
-    benches = set(run.get("benches", []))
-    for record in run.get("compile", []) + run.get("tests", []):
+    stored_benches = run.get("benches", [])
+    benches = set(bench for bench in stored_benches
+                  if isinstance(bench, str)) if isinstance(stored_benches, list) else set()
+    for record in _records(run.get("compile")) + _records(run.get("tests")):
         bench = record.get("bench")
-        if bench:
+        if isinstance(bench, str) and bench:
             benches.add(bench)
     return sorted(benches)
 
@@ -357,7 +382,7 @@ def _merge_stores(legacy_store, current_store, max_runs=MAX_RUNS):
     merged_runs = []
     run_positions = {}
     for run in legacy_store.get("runs", []) + current_store.get("runs", []):
-        run_id = run.get("run_id")
+        run_id = _safe_text(run.get("run_id"))
         if run_id and run_id in run_positions:
             merged_runs[run_positions[run_id]] = run
             continue
@@ -368,7 +393,7 @@ def _merge_stores(legacy_store, current_store, max_runs=MAX_RUNS):
         run for _, run in sorted(
             enumerate(merged_runs),
             key=lambda item: (
-                item[1].get("finished_at") or item[1].get("started_at") or "",
+                _safe_text(item[1].get("finished_at")) or _safe_text(item[1].get("started_at")),
                 item[0],
             ),
         )
@@ -451,32 +476,32 @@ def save_run(project_dir, run, max_runs=MAX_RUNS):
 
 
 def _select_compile_log(run):
-    tests = run.get("tests", [])
+    tests = _records(run.get("tests"))
     failed_tests = [test for test in tests if test.get("status") == "FAILED"]
     if failed_tests and failed_tests[0].get("cmp_log"):
         return failed_tests[0]["cmp_log"]
     if tests and tests[0].get("cmp_log"):
         return tests[0]["cmp_log"]
-    compile_records = run.get("compile", [])
+    compile_records = _records(run.get("compile"))
     if compile_records:
         return compile_records[0].get("cmp_log") or "-"
     return "-"
 
 
 def _select_result_log(run):
-    tests = run.get("tests", [])
+    tests = _records(run.get("tests"))
     if not tests:
         return "-"
-    if int(run.get("planned_tests") or len(tests)) > 1:
+    if _safe_int(run.get("planned_tests"), len(tests)) > 1:
         return run.get("regression_log") or "-"
     return tests[0].get("stdout_log") or "-"
 
 
 def _select_waves_script(run):
-    tests = run.get("tests", [])
-    if int(run.get("planned_tests") or len(tests)) != 1 or not tests:
+    tests = _records(run.get("tests"))
+    if _safe_int(run.get("planned_tests"), len(tests)) != 1 or not tests:
         return None
-    waves = tests[0].get("waves", {})
+    waves = _mapping(tests[0].get("waves"))
     return waves.get("run_script") if waves.get("enabled") else "-"
 
 
@@ -487,12 +512,12 @@ def _color_word(word, color, use_color):
 
 
 def _format_test_summary(run, use_color=False):
-    summary = run.get("summary", {})
-    passed = summary.get("passed", 0)
-    failed = summary.get("failed", 0)
-    interrupted = summary.get("interrupted", 0)
-    skipped = summary.get("skipped", 0)
-    total = summary.get("total", run.get("planned_tests", 0))
+    summary = _mapping(run.get("summary"))
+    passed = max(0, _safe_int(summary.get("passed")))
+    failed = max(0, _safe_int(summary.get("failed")))
+    interrupted = max(0, _safe_int(summary.get("interrupted")))
+    skipped = max(0, _safe_int(summary.get("skipped")))
+    total = max(0, _safe_int(summary.get("total"), _safe_int(run.get("planned_tests"))))
     if total <= 1:
         return None
 
@@ -539,7 +564,7 @@ def _format_duration(duration_s):
 
 
 def _format_timing(run):
-    timing = run.get("timing", {})
+    timing = _mapping(run.get("timing"))
     if timing.get("compile_reused"):
         compile_duration = "reused"
     else:
@@ -549,7 +574,8 @@ def _format_timing(run):
 
 
 def _is_failed_history_run(run):
-    return (run.get("status") in ("FAILED", "COMPILE_FAILED") or int(run.get("summary", {}).get("failed", 0) or 0) > 0)
+    return (run.get("status") in ("FAILED", "COMPILE_FAILED")
+            or _safe_int(_mapping(run.get("summary")).get("failed")) > 0)
 
 
 def _filter_history_runs(runs, bench=None, failed_only=False):

@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -26,14 +27,16 @@ class SimArtifactsTest(unittest.TestCase):
 
         self.assertEqual(str(destination), result)
         self.assertEqual("print('checked')\n", destination.read_text(encoding="utf-8"))
-        self.assertTrue(destination.stat().st_mode & 0o111)
+        if os.name != "nt":
+            self.assertTrue(destination.stat().st_mode & 0o111)
 
     def test_write_executable_script_sets_execute_bits(self):
         path = Path(tempfile.mkdtemp()) / "rerun.sh"
         sim_artifacts.write_executable_script(path, "#!/usr/bin/env bash\n")
 
         self.assertEqual("#!/usr/bin/env bash\n", path.read_text(encoding="utf-8"))
-        self.assertTrue(path.stat().st_mode & 0o111)
+        if os.name != "nt":
+            self.assertTrue(path.stat().st_mode & 0o111)
 
 
 if __name__ == "__main__":

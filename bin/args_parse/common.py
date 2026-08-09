@@ -1,4 +1,6 @@
+import argparse
 import os
+import re
 
 from lib import parser_actions
 
@@ -7,6 +9,18 @@ SIM_PLATFORM = os.environ.get('SIM_PLATFORM', 'XRUN')
 _COVFILE = os.environ.get('COVFILE', "coverage.ccf")
 COVFILE = _COVFILE if os.path.isabs(_COVFILE) else os.path.join(PROJ_DIR, _COVFILE)
 REPORT_DIR = os.environ.get("SIMMER_REPORT_DIR")
+_DIRECTORY_SUFFIX_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+
+def normalize_directory_suffix(value):
+    """Return a portable suffix with one leading separator underscore."""
+    normalized = value.lstrip("_")
+    if not normalized:
+        return ""
+    if not _DIRECTORY_SUFFIX_RE.fullmatch(normalized):
+        raise argparse.ArgumentTypeError(
+            "directory suffix must start with a letter or digit and contain only letters, digits, '.', '_', or '-'")
+    return "_" + normalized
 
 
 def add_child_argument(container, *args, parent, **kwargs):
@@ -107,7 +121,7 @@ def add_debug_arguments(parser):
         'Enable simmer internal debug logging, including discovery and scheduler details; does not enable EDA debug.')
     debug_group.add_argument(
         '--dir-suffix',
-        type=str,
+        type=normalize_directory_suffix,
         default="",
         help=("Append a stable suffix to VCOMP and simulation result directories for side-by-side runs. "
               "Simmer inserts one underscore separator, whether or not the value starts with one. "

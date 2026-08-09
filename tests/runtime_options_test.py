@@ -1,6 +1,7 @@
 import shlex
 import tempfile
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 
 from lib.runtime_options import append_uvm_control_options, format_log_check_args
@@ -26,11 +27,11 @@ def _options(**overrides):
 class RuntimeOptionsTest(unittest.TestCase):
 
     def test_uvm_controls_override_verbosity_and_preserve_file_quoting(self):
-        with tempfile.NamedTemporaryFile(mode="w") as options_file:
-            options_file.write('+LABEL="value with spaces" # ignored\n')
-            options_file.flush()
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            options_file = Path(temporary_dir) / "runtime options.txt"
+            options_file.write_text('+LABEL="value with spaces" # ignored\n', encoding="utf-8")
             options = _options(
-                sim_opts_file=options_file.name,
+                sim_opts_file=str(options_file),
                 uvm_config_db_trace=True,
                 uvm_set_int=["env.limit,5"],
                 verbosity="UVM_HIGH",

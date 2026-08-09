@@ -207,6 +207,31 @@ class SimmerStateTest(unittest.TestCase):
         finally:
             active_run.close()
 
+    def test_status_tolerates_semantically_invalid_persisted_fields(self):
+        path = Path(simmer_state.state_path(self.project_dir, "malformed"))
+        path.parent.mkdir(parents=True)
+        path.write_text(
+            json.dumps({
+                "run_id": "malformed",
+                "status": "RUNNING",
+                "started_at": "invalid record",
+                "started_at_epoch": "not-a-number",
+                "planned_tests": "not-an-int",
+                "finished_tests": [],
+                "active_tests": {},
+                "queued_tests": None,
+                "compile_logs": "not-a-list",
+                "process": "not-a-mapping",
+                "lsf": "not-a-mapping",
+            }),
+            encoding="utf-8",
+        )
+
+        output = simmer_state.format_status(self.project_dir, now=3000, hostname="local-host")
+
+        self.assertIn("RUNNING", output)
+        self.assertIn("cmd:        -", output)
+
 
 if __name__ == "__main__":
     unittest.main()
