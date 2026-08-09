@@ -78,15 +78,65 @@ report_jinja2_env = regression_report.create_template_environment(os.path.join(d
 #SIM_TEMPLATE = jinja2_env.get_template('sim_template.sh.j2')
 RERUN_TEMPLATE = jinja2_env.get_template('rerun_template.sh.j2')
 RUN_WAVE_TEMPLATE = jinja2_env.get_template('run_waves_template.sh.j2')
+_FILESYSTEM_COMPONENT_MAX_BYTES = 255
+_VCOMP_BACKEND_SUFFIX_MAX_BYTES = len("_HREF".encode("utf-8"))
+
+
+def _utf8_prefix(value, byte_limit):
+    """Return the longest UTF-8-safe prefix within byte_limit bytes."""
+    return value.encode("utf-8")[:byte_limit].decode("utf-8", errors="ignore")
+
+
+def _directory_suffix_component(directory_suffix):
+    normalized_suffix = (directory_suffix or "").lstrip('_')
+    return "_{}".format(normalized_suffix) if normalized_suffix else ""
+
+
+def _bounded_filesystem_component(base_name, suffix="", byte_limit=_FILESYSTEM_COMPONENT_MAX_BYTES):
+    """Build one filesystem component while retaining a stable digest and suffix."""
+    component_name = base_name + suffix
+    encoded_name = component_name.encode("utf-8")
+    if len(encoded_name) <= byte_limit:
+        return component_name
+    digest_component = "__{}".format(sha1(encoded_name).hexdigest()[:16])
+    suffix_budget = byte_limit - len(digest_component.encode("utf-8"))
+    retained_suffix = _utf8_prefix(suffix, suffix_budget)
+    prefix_budget = suffix_budget - len(retained_suffix.encode("utf-8"))
+    return _utf8_prefix(base_name, prefix_budget) + digest_component + retained_suffix
+
+
+def _contained_child_path(root, component):
+    """Resolve a direct child and reject traversal or symlink escapes."""
+    if (not component or component in (".", "..") or "/" in component or "\\" in component
+            or os.path.basename(component) != component):
+        raise ValueError("unsafe regression directory component: {!r}".format(component))
+    resolved_root = os.path.realpath(root)
+    resolved_child = os.path.realpath(os.path.join(resolved_root, component))
+    try:
+        contained = os.path.commonpath((resolved_root, resolved_child)) == resolved_root
+    except ValueError:
+        contained = False
+    if not contained:
+        raise ValueError("regression directory escapes its root: {!r}".format(component))
+    return resolved_child
 
 
 def _format_simulation_directory_name(vcomp_name, simulator_name, test_name, seed, iteration, directory_suffix):
-    normalized_suffix = directory_suffix.lstrip('_')
-    suffix_component = "_{}".format(normalized_suffix) if normalized_suffix else ""
+    suffix_component = _directory_suffix_component(directory_suffix)
     result_name = "%s__%s__%s__%d" % (vcomp_name, simulator_name, test_name, seed)
     if iteration > 1:
         result_name += "__i%d" % iteration
-    return result_name + suffix_component
+    return _bounded_filesystem_component(result_name, suffix_component)
+
+
+def _format_time_stats(cps, net_time, sim_time, total_time):
+    stats = []
+    if cps is not None:
+        stats.append("{} cps".format(cps))
+    if net_time is not None:
+        stats.append("{} net_time".format(net_time))
+    stats.extend(("{} sim_time".format(sim_time), "{} total_time".format(total_time)))
+    return "({})".format(" / ".join(stats))
 
 
 def get_bazel_bin(project_dir=None):
@@ -300,11 +350,14 @@ class VCompJob(Job):
 
         self.bench_dir = os.path.join(self.rcfg.proj_dir, self.bazel_vcomp_target.split(':')[0][2:])
 
-        # Use simulator name in dir for clarity if needed, or keep original
-        #job_dir = "{}__VCOMP{}".format(self.name, self.rcfg.options.dir_suffix)
-        job_dir = "{}__{}_VCOMP{}".format(self.name, self.simulator.get_name().upper(), self.rcfg.options.dir_suffix)
+        job_dir = _bounded_filesystem_component(
+            "{}__{}_VCOMP".format(self.name,
+                                  self.simulator.get_name().upper()),
+            _directory_suffix_component(self.rcfg.options.dir_suffix),
+            _FILESYSTEM_COMPONENT_MAX_BYTES - _VCOMP_BACKEND_SUFFIX_MAX_BYTES,
+        )
 
-        self.base_job_dir = os.path.join(self.rcfg.regression_dir, job_dir)
+        self.base_job_dir = _contained_child_path(self.rcfg.regression_dir, job_dir)
         self.job_dir = self.simulator.get_vcomp_job_dir(self.base_job_dir)
         self.log_path = os.path.join(self.job_dir, "cmp.log")
 
@@ -734,14 +787,14 @@ class TestJob(Job):
         collision_index = 0
         while True:
             if collision_index == 0:
-                directory_name = base_directory_name
+                collision_suffix = ""
             else:
                 collision_suffix = "__run_p{}".format(os.getpid())
                 if collision_index > 1:
                     collision_suffix += "_{}".format(collision_index)
-                directory_name = base_directory_name + collision_suffix
 
-            directory_path = os.path.join(self.rcfg.regression_dir, directory_name)
+            directory_name = _bounded_filesystem_component(base_directory_name, collision_suffix)
+            directory_path = _contained_child_path(self.rcfg.regression_dir, directory_name)
             directory_lock = compile_cache.CompileDirectoryLock(directory_path + ".run.lock")
             if directory_lock.acquire(blocking=False):
                 self._run_directory_lock = directory_lock
@@ -1006,8 +1059,7 @@ class TestJob(Job):
         self.job_time = self.simulation_duration_s or 0
         sim_time_str = self._format_duration(self.job_time)
         total_time_str = self._get_total_time_str()
-        time_stats_str = "({} cps / {} net_time / {} sim_time / {} total_time)".format(
-            cps_str, net_time_str, sim_time_str, total_time_str)
+        time_stats_str = _format_time_stats(cps_str, net_time_str, sim_time_str, total_time_str)
 
         if self.job_lib.returncode != 0:
             # Use relative path for symlink for portability
@@ -1151,18 +1203,25 @@ class TestJob(Job):
             return None
 
     def _get_stats_from_log_file(self):
-        if not os.path.exists(self._log_path):
-            return '???', '???'
-        stats_re = re.compile(
-            r'.*Test Duration: (?P<duration>[0-9]+:[0-9]+:[0-9]+).*Average cycles/sec: (?P<cps>[0-9]+\.[0-9]+).*')
-        with open(self._log_path, 'r', encoding="utf8", errors='ignore') as log_file:
-            for line in log_file:
-                match = stats_re.match(line)
-                if match:
-                    h, m, s = map(int, match.group('duration').split(':'))
-                    self.net_time = 3600 * h + 60 * m + s
-                    return match.group('duration'), match.group('cps')
-        return '???', '???'
+        duration_re = re.compile(r'Test Duration:\s*(?P<duration>[0-9]+:[0-9]{2}:[0-9]{2})')
+        cps_re = re.compile(r'Average cycles/sec:\s*(?P<cps>[0-9][0-9,]*(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)')
+        duration = None
+        cps = None
+        try:
+            with open(self._log_path, 'r', encoding="utf8", errors='ignore') as log_file:
+                for line in log_file:
+                    duration_match = duration_re.search(line)
+                    if duration_match:
+                        duration = duration_match.group('duration')
+                    cps_match = cps_re.search(line)
+                    if cps_match:
+                        cps = cps_match.group('cps')
+        except OSError:
+            return None, None
+        if duration is not None:
+            hours, minutes, seconds = map(int, duration.split(':'))
+            self.net_time = 3600 * hours + 60 * minutes + seconds
+        return duration, cps
 
     @property
     def log_path(self):

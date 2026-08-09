@@ -277,7 +277,9 @@ For heavy gate-level simulation, keep the stable gate netlist in
 do not maintain source-tree `msie/*_prim.f` or `*_incr.f` files.
 
 Run the same test target with the same `SIMRESULTS` and `--dir-suffix` through
-the three multi-step stages:
+the three multi-step stages. The suffix accepts portable letters, digits,
+periods, underscores and hyphens; simmer normalizes any leading underscores to
+one separator and rejects path separators or traversal.
 
 ```bash
 MSIE_KEY='XCELIUM-25.03:netlist-r42:sdf_wc'

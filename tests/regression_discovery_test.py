@@ -180,7 +180,6 @@ class RegressionDiscoveryTest(unittest.TestCase):
     def test_cache_uses_git_file_index_when_available(self, run, _walk):
         proj_dir = Path(tempfile.mkdtemp())
         run.side_effect = [
-            SimpleNamespace(returncode=0, stdout=""),
             SimpleNamespace(
                 returncode=0,
                 stdout="pkg/BUILD\npkg/file.py\nrules/tool.bzl\n.bazelversion\nMODULE.bazel.lock\n",
@@ -198,11 +197,17 @@ class RegressionDiscoveryTest(unittest.TestCase):
                 proj_dir / ".bazelrc",
         ):
             self.assertIn(str(expected), dependencies)
-        self.assertEqual(3, run.call_count)
-        indexed_command = run.call_args_list[1].args[0]
+        self.assertEqual(2, run.call_count)
+        indexed_command = run.call_args_list[0].args[0]
         self.assertIn("--", indexed_command)
         self.assertIn(":(glob)**/BUILD*", indexed_command)
         self.assertIn(":(glob)**/*.bzl", indexed_command)
+
+    @mock.patch("lib.regression.subprocess.run", side_effect=AssertionError("git should not run"))
+    def test_submodule_status_skips_git_without_gitmodules(self, _run):
+        config = self._config(Path(tempfile.mkdtemp()))
+
+        self.assertEqual([], config._git_submodule_state())
 
     def test_cache_manifest_tracks_imported_bazelrc(self):
         proj_dir = Path(tempfile.mkdtemp())

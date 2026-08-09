@@ -18,8 +18,12 @@ class _Log:
 class RegressionReportTest(unittest.TestCase):
 
     def _report_environment(self):
-        runfiles_root = Path(os.environ["TEST_SRCDIR"]) / os.environ.get("TEST_WORKSPACE", "__main__")
-        return create_template_environment(runfiles_root / "bin/templates")
+        if os.environ.get("TEST_SRCDIR"):
+            runfiles_root = Path(os.environ["TEST_SRCDIR"]) / os.environ.get("TEST_WORKSPACE", "__main__")
+            template_dir = runfiles_root / "bin/templates"
+        else:
+            template_dir = Path(__file__).resolve().parents[1] / "bin/templates"
+        return create_template_environment(template_dir)
 
     def test_report_environment_escapes_html_only(self):
         with tempfile.TemporaryDirectory() as temporary_dir:
@@ -221,6 +225,8 @@ class RegressionReportTest(unittest.TestCase):
             self.assertFalse(old_logs.exists())
 
     def test_run_launcher_opens_only_this_regression_snapshot(self):
+        if os.name == "nt":
+            self.skipTest("generated launcher execution requires POSIX shell semantics")
         with tempfile.TemporaryDirectory(prefix="report launcher ") as temporary_dir:
             report = RegressionReport(SimpleNamespace(log=_Log()), self._report_environment(), temporary_dir)
             header = {

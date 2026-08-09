@@ -8,7 +8,6 @@ import sys
 
 import cmn_logging
 
-
 LINE_WAIVER_REGEXP = re.compile(r"\S[ \t]+// lint: disable=(.*)")
 BLOCK_WAIVER_START_REGEXP = re.compile(r"\s*// lint: disable=(.*)")
 BLOCK_WAIVER_END_REGEXP = re.compile(r"\s*// lint: enable=(.*)")
@@ -26,12 +25,17 @@ def parse_args(argv):
         formatter_class=argparse.RawTextHelpFormatter,
     )
     parser.add_argument('--tool-debug', default=False, action='store_true', help='Set parser verbosity to debug.')
-    parser.add_argument("--sw", dest="show_waived", default=False, action='store_true', help='Show previously waived messages.')
+    parser.add_argument("--sw",
+                        dest="show_waived",
+                        default=False,
+                        action='store_true',
+                        help='Show previously waived messages.')
     parser.add_argument("--waiver-direct", default="", help="Direct waiver regex for messages without file/line info.")
     return parser.parse_args(argv)
 
 
 class VcsMessage(object):
+
     def __init__(self, errcode, severity, info, filename, lineno, block):
         self.errcode = errcode
         self.severity = severity
@@ -49,6 +53,7 @@ class VcsMessage(object):
 
 
 class VcsLintLog(object):
+
     def __init__(self, path, waiver_direct, log):
         self.issues = []
         self.files_with_notes = {}
@@ -91,8 +96,7 @@ class VcsLintLog(object):
                     filename=filename,
                     lineno=lineno,
                     block=block,
-                )
-            )
+                ))
 
         for line in lines:
             header = HEADER_REGEXP.match(line)
@@ -156,19 +160,22 @@ class VcsLintLog(object):
         for rule in match.split(','):
             rule = rule.strip()
             if rule in block_waivers[filename] and block_waivers[filename][rule][-1][1] is None:
-                log.error("In %s, %s has a disable on line %s and %s without an enable in between", filename, rule, block_waivers[filename][rule][-1][0], lineno)
+                log.error("In %s, %s has a disable on line %s and %s without an enable in between", filename, rule,
+                          block_waivers[filename][rule][-1][0], lineno)
             else:
                 block_waivers[filename].setdefault(rule, [])
                 block_waivers[filename][rule].append([lineno, None])
 
     def _handle_block_end(self, block_waivers, filename, lineno, match, log):
         if filename not in block_waivers:
-            log.error("In %s, enable pragmas on line %s for '%s' appear before any disable pragmas", filename, lineno, match)
+            log.error("In %s, enable pragmas on line %s for '%s' appear before any disable pragmas", filename, lineno,
+                      match)
             return
         for rule in match.split(','):
             rule = rule.strip()
             if rule not in block_waivers[filename] or block_waivers[filename][rule][-1][1] is not None:
-                log.error("In %s, enable pragma for %s on line %s doesn't have a matching disable", filename, rule, lineno)
+                log.error("In %s, enable pragma for %s on line %s doesn't have a matching disable", filename, rule,
+                          lineno)
                 continue
             block_waivers[filename][rule][-1][1] = lineno
 
@@ -176,7 +183,8 @@ class VcsLintLog(object):
         for filename, rule_dict in block_waivers.items():
             for rule, waiver_list in rule_dict.items():
                 if waiver_list and waiver_list[-1][1] is None:
-                    log.error("In %s, couldn't find a matching enable for %s. The disable is on line %s", filename, rule, waiver_list[-1][0])
+                    log.error("In %s, couldn't find a matching enable for %s. The disable is on line %s", filename,
+                              rule, waiver_list[-1][0])
                     del waiver_list[-1]
 
     def prep_file_stats(self, log):

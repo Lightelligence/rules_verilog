@@ -2,6 +2,9 @@ name: YAPF Formatting Check
 
 on:
   pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -25,7 +28,12 @@ jobs:
       - name: Run YAPF python style checks
         shell: bash
         run: |
-          git diff -U0 --no-color \
-            "${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}" -- '*.py' \
-            | yapf-diff --style .style.yapf > yapf.patch
-          test ! -s yapf.patch || { cat yapf.patch; exit 1; }
+          set +e
+          python -m yapf --diff --recursive bin lib tests > yapf.patch
+          yapf_status=$?
+          set -e
+          if [ -s yapf.patch ]; then
+            cat yapf.patch
+            exit 1
+          fi
+          exit "$yapf_status"

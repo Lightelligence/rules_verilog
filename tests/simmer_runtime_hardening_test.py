@@ -44,6 +44,66 @@ class _FatalLog:
 
 class SimmerRuntimeHardeningTest(unittest.TestCase):
 
+    def test_simulation_directory_name_bounds_overlong_utf8_component(self):
+        suffix = "_report_rerun_20260808_120000_0123456789abcdef"
+        test_name = "long_" + ("测" * 100)
+
+        directory_name = simmer._format_simulation_directory_name("unit_tb", "VCS", test_name, 42, 1, suffix)
+        other_name = simmer._format_simulation_directory_name("unit_tb", "VCS", test_name + "x", 42, 1, suffix)
+
+        self.assertLessEqual(len(directory_name.encode("utf-8")), 255)
+        self.assertTrue(directory_name.endswith(suffix))
+        self.assertNotEqual(directory_name, other_name)
+        self.assertEqual(
+            directory_name,
+            simmer._format_simulation_directory_name("unit_tb", "VCS", test_name, 42, 1, suffix),
+        )
+
+    def test_directory_suffix_is_normalized_and_rejects_traversal(self):
+        self.assertEqual("_sdf_wc", parse_args(["--dir-suffix", "sdf_wc"]).dir_suffix)
+        self.assertEqual("_sdf_wc", parse_args(["--dir-suffix", "_sdf_wc"]).dir_suffix)
+        for unsafe_suffix in ("/../../../escape", r"..\..\escape", "../escape", "bad suffix", ".hidden"):
+            with self.subTest(unsafe_suffix=unsafe_suffix), self.assertRaises(SystemExit):
+                parse_args(["--dir-suffix", unsafe_suffix])
+
+    def test_regression_child_path_rejects_traversal(self):
+        with tempfile.TemporaryDirectory() as regression_dir:
+            expected = os.path.realpath(os.path.join(regression_dir, "safe_run"))
+            self.assertEqual(expected, simmer._contained_child_path(regression_dir, "safe_run"))
+            for component in ("../escape", r"..\escape", ".", ".."):
+                with self.subTest(component=component), self.assertRaises(ValueError):
+                    simmer._contained_child_path(regression_dir, component)
+
+    def test_bounded_component_retains_collision_suffix(self):
+        component = simmer._bounded_filesystem_component("测" * 100, "__run_p1234_2")
+
+        self.assertLessEqual(len(component.encode("utf-8")), 255)
+        self.assertTrue(component.endswith("__run_p1234_2"))
+
+    def test_simulator_statistics_are_parsed_independently(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            log_path = Path(temporary_dir) / "stdout.log"
+            log_path.write_text(
+                "Test Duration: 01:02:03\n"
+                "unrelated output\n"
+                "Average cycles/sec: 1.25e+06\n",
+                encoding="utf-8",
+            )
+            test_job = simmer.TestJob.__new__(simmer.TestJob)
+            test_job._log_path = str(log_path)
+
+            self.assertEqual(("01:02:03", "1.25e+06"), test_job._get_stats_from_log_file())
+            self.assertEqual(3723, test_job.net_time)
+
+            log_path.write_text("Average cycles/sec: 1,250\n", encoding="utf-8")
+            self.assertEqual((None, "1,250"), test_job._get_stats_from_log_file())
+
+    def test_missing_simulator_statistics_are_omitted(self):
+        self.assertEqual(
+            "(00:00:31 sim_time / 00:00:30 total_time)",
+            simmer._format_time_stats(None, None, "00:00:31", "00:00:30"),
+        )
+
     def test_active_run_snapshot_aggregates_multi_test_state(self):
         finished = mock.Mock(jobstatus=JobStatus.PASSED, job_start_time=datetime.datetime.now())
         active = mock.Mock(jobstatus=JobStatus.NOT_STARTED, job_start_time=datetime.datetime.now())
