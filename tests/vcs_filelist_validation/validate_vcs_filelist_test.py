@@ -171,6 +171,7 @@ class VcsFilelistValidationTest(unittest.TestCase):
             "tests/vcs_filelist_validation/rtl_svunit_vcs": [
                 "runSVUnit",
                 "-s vcs",
+                "-c '-debug_access+r+w+f'",
                 "-f tests/vcs_filelist_validation/unit_test_top_vcs.f",
                 "--directory tests/vcs_filelist_validation",
                 "-r '+SVUNIT_RUNTIME_ARG'",
@@ -301,9 +302,9 @@ class VcsFilelistValidationTest(unittest.TestCase):
             "tests/vcs_filelist_validation/dv_unit_xrun_run.sh": ["xrun", "-f"],
             "tests/vcs_filelist_validation/rtl_unit_xrun": ["xrun", "-f", "waves.shm"],
             "tests/vcs_filelist_validation/dv_unit_vcs_run.sh":
-            ["vcs", "simv", "-full64", "-file", "-Mdir", "ERROR: line", "SIMMER_KEEP_TERMINAL"],
+            ["vcs", "simv", "-full64", "-file", "-debug_access+r+w+f", "-Mdir", "ERROR: line", "SIMMER_KEEP_TERMINAL"],
             "tests/vcs_filelist_validation/rtl_unit_vcs":
-            ["vcs", "simv", "-full64", "-file", "-Mdir", "ERROR: line", "SIMMER_KEEP_TERMINAL"],
+            ["vcs", "simv", "-full64", "-file", "-debug_access+r+w+f", "-Mdir", "ERROR: line", "SIMMER_KEEP_TERMINAL"],
         }
         for relative_path, needles in scripts.items():
             contents = read_runfile(relative_path)

@@ -28,6 +28,7 @@ done
     -d TIMESCALE_STEP_FS=100 \
     -d TIMESCALE_PREC_FS=100 \
     -c '-full64' \
+    -c '-debug_access+r+w+f' \
     -c '-licqueue' \
     -c '+libext+.sv+.svh+.v+.vh+.vams+.vp+.svp' \
     -c '-timescale=100fs/100fs' \

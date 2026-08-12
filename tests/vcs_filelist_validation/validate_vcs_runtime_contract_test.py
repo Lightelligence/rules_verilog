@@ -889,6 +889,13 @@ run_bounded_process([
         self.assertNotIn("+define+UVM_VCS_RECORD", waves)
         self.assertNotIn(" -sml ", " ".join(waves.split()))
 
+        default = render("default")
+        self.assertIn("-debug_access+r+w+f", default)
+        self.assertNotIn("-kdb", default)
+        self.assertNotIn("+vpi", default)
+        self.assertNotIn("+define+UVM_VERDI_COMPWAVE", default)
+        self.assertNotIn("+define+UVM_VCS_RECORD", default)
+
         waves_with_smartlog = render("waves", smartlog=True, waves=[])
         self.assertIn(" -sml ", " ".join(waves_with_smartlog.split()))
 
@@ -1640,6 +1647,8 @@ run_bounded_process([
         vcs_compile_template = self._read_repo_file("bin/templates/vcs_compile_template.sh.j2")
         simulation_template = self._read_repo_file("bin/templates/sim_template.sh.j2")
         svunit_template = self._read_repo_file("vendors/cadence/verilog_rtl_unit_test_svunit.sh.template")
+        vcs_dv_unit_template = self._read_repo_file("vendors/synopsys/verilog_dv_unit_test.sh.template")
+        vcs_rtl_unit_template = self._read_repo_file("vendors/synopsys/verilog_rtl_unit_test.sh.template")
         vcs_svunit_template = self._read_repo_file("vendors/synopsys/verilog_rtl_unit_test_svunit.sh.template")
         vcs_svunit_waves_template = self._read_repo_file(
             "vendors/synopsys/verilog_rtl_unit_test_svunit_waves.tcl.template")
@@ -1678,6 +1687,9 @@ run_bounded_process([
         self.assertIn('"${remaining_args[@]}"', svunit_template)
         self.assertIn("set -Eeuo pipefail", vcs_svunit_template)
         self.assertIn("-s vcs", vcs_svunit_template)
+        self.assertIn("-c '-debug_access+r+w+f'", vcs_svunit_template)
+        self.assertIn("-debug_access+r+w+f", vcs_dv_unit_template)
+        self.assertIn("-debug_access+r+w+f", vcs_rtl_unit_template)
         self.assertIn("{SVUNIT_COMPILE_ARGS}", vcs_svunit_template)
         self.assertIn("{SVUNIT_FLISTS}", vcs_svunit_template)
         self.assertIn("{SVUNIT_RUN_ARGS}", vcs_svunit_template)
@@ -2286,7 +2298,7 @@ run_bounded_process([
         environment.filters["shell_quote"] = shlex.quote
         template = environment.from_string(
             self._read_repo_file("bin/templates/vcs_three_step_compile_template.sh.j2").replace("\r\n", "\n"))
-        rendered = template.render(
+        render_kwargs = dict(
             VCOMP_DIR=shell_path(vcomp_dir),
             additional_defines=["PROJECT_DEFINE"],
             bazel_runfiles_main=shell_path(runfiles),
@@ -2316,6 +2328,11 @@ run_bounded_process([
             vso_workdir="",
             xprop_cmd=None,
         )
+        rendered = template.render(**render_kwargs)
+        default_render_kwargs = dict(render_kwargs, debug_mode="default")
+        default_rendered = template.render(**default_render_kwargs)
+        self.assertIn("-debug_access+r+w+f", default_rendered)
+        self.assertNotIn("-kdb", default_rendered)
         script = root / "compile.sh"
         script.write_text(rendered, encoding="utf-8", newline="\n")
         subprocess.run(["bash", script.name], cwd=root, check=True)
