@@ -154,7 +154,7 @@ run_vlogan_group \
     {% else -%}
       -kdb \
     {% endif -%}
-    -debug_access+r \
+    -debug_access+r+w+f \
   {% endif -%}
   {% if debug_mode == "gui" -%}
     -kdb \

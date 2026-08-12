@@ -138,8 +138,9 @@ simmer -t 'sys_tb:smoke_test@1' --simulator VCS --waves \
 
 The generated FSDB controls are:
 
-VCS wave builds use `-debug_access+r`, providing signal read access without
-enabling VPI or UVM transaction recording.
+VCS wave builds use `-debug_access+r+w+f`, providing signal read/write/force
+access for DUT deposit and force operations without enabling VPI or UVM
+transaction recording.
 
 | simmer argument | Effect |
 |-----------------|--------|
