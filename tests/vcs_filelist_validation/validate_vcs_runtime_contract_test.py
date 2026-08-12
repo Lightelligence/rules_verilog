@@ -879,7 +879,8 @@ run_bounded_process([
             )
 
         waves = render("waves", waves=[])
-        self.assertIn("-debug_access+r", waves)
+        self.assertIn("-debug_access+r+w+f", waves)
+        self.assertNotIn("-debug_access+r \\", waves)
         self.assertNotIn("-debug_access \\", waves)
         self.assertNotIn("-debug_access+pp", waves)
         self.assertNotIn("+vpi", waves)
@@ -2346,7 +2347,7 @@ run_bounded_process([
         self.assertIn("+define+PROJECT_DEFINE", first_analysis)
         self.assertNotIn(shell_path(vlogan_args), first_analysis)
         self.assertEqual("vcs", elaboration[0])
-        self.assertIn("-debug_access+r", elaboration)
+        self.assertIn("-debug_access+r+w+f", elaboration)
         self.assertNotIn("-debug_access", elaboration)
         self.assertIn("-partcomp", elaboration)
         self.assertIn("-fastpartcomp=j2", elaboration)

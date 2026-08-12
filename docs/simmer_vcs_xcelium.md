@@ -508,9 +508,10 @@ simmer -t <bench>:<test> --simulator VCS --vcs-xprop F
 ```
 
 VCS `--waves` is the lightweight signal-dump mode. It compiles with `-kdb`
-and `-debug_access+r`, which gives FSDB read access to RTL signals and selected
-SystemVerilog interface signals, but does not enable VPI, SmartLog, or UVM
-transaction-recording defines. VCS cannot combine SmartLog's `-sml` with
+and `-debug_access+r+w+f`, which gives FSDB read/write/force access to RTL
+signals and selected SystemVerilog interface signals for DUT deposit and force
+operations, but does not enable VPI, SmartLog, or UVM transaction-recording
+defines. VCS cannot combine SmartLog's `-sml` with
 `-fastpartcomp=jN`; use `--smartlog --no-vcs-partcomp` when Verdi log/source
 correlation is needed. `--gui` remains the full interactive-debug mode: it
 enables full reverse-debug access and explicitly adds
@@ -530,9 +531,10 @@ VCS wave dumping supports FSDB only.
 ### FSDB probe and viewer flow
 
 The default FSDB command probes `hdl_top` to depth 10. VCS wave builds retain
-`-kdb` and `-debug_access+r` for source-code visibility and read access to RTL
-and SystemVerilog interface signals, while FSDB contains signals rather than
-the UVM VIP class hierarchy. Limit scope and time further when possible:
+`-kdb` and `-debug_access+r+w+f` for source-code visibility and DUT
+read/write/force access to RTL and SystemVerilog interface signals, while FSDB
+contains signals rather than the UVM VIP class hierarchy. Limit scope and time
+further when possible:
 
 ```bash
 simmer -t <bench>:<test> --simulator VCS \
