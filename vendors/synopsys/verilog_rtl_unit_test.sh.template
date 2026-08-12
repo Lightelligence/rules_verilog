@@ -49,6 +49,7 @@ simv="$work_dir/simv"
 {SIMULATOR_COMMAND} \
     -full64 \
     -file "{COMPILE_ARGS_FILE}" \
+    -debug_access+r+w+f \
     -Mdir="$work_dir/csrc" \
     -o "$simv"
 

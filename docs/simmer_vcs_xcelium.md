@@ -490,9 +490,10 @@ that need different corners pass `gatesim_modes` explicitly to
 
 VCS compile filelists use `-file`. Runtime `simv` invocations use `-f`.
 
-Batch VCS defaults are kept light:
+Batch VCS defaults keep waveform and transaction-debug features off while
+retaining the access needed by every testbench:
 
-- no default `-debug_access`
+- default `-debug_access+r+w+f` for UVM HDL deposit/force and DUT memory backdoor access
 - no default `+vpi`
 - no default xprop
 - no default smartlog
@@ -507,11 +508,11 @@ simmer -t <bench>:<test> --simulator VCS --smartlog
 simmer -t <bench>:<test> --simulator VCS --vcs-xprop F
 ```
 
-VCS `--waves` is the lightweight signal-dump mode. It compiles with `-kdb`
-and `-debug_access+r+w+f`, which gives FSDB read/write/force access to RTL
-signals and selected SystemVerilog interface signals for DUT deposit and force
-operations, but does not enable VPI, SmartLog, or UVM transaction-recording
-defines. VCS cannot combine SmartLog's `-sml` with
+All VCS compile modes use `-debug_access+r+w+f`, which gives RTL and selected
+SystemVerilog interface signals the read/write/force access required for UVM HDL
+deposit/force operations and DUT memory backdoor loads. VCS `--waves` is the
+lightweight signal-dump mode and additionally compiles with `-kdb`; it does not
+enable VPI, SmartLog, or UVM transaction-recording defines. VCS cannot combine SmartLog's `-sml` with
 `-fastpartcomp=jN`; use `--smartlog --no-vcs-partcomp` when Verdi log/source
 correlation is needed. `--gui` remains the full interactive-debug mode: it
 enables full reverse-debug access and explicitly adds
@@ -530,11 +531,11 @@ VCS wave dumping supports FSDB only.
 
 ### FSDB probe and viewer flow
 
-The default FSDB command probes `hdl_top` to depth 10. VCS wave builds retain
-`-kdb` and `-debug_access+r+w+f` for source-code visibility and DUT
-read/write/force access to RTL and SystemVerilog interface signals, while FSDB
-contains signals rather than the UVM VIP class hierarchy. Limit scope and time
-further when possible:
+The default FSDB command probes `hdl_top` to depth 10. The wave build adds
+`-kdb`; the global VCS `-debug_access+r+w+f` setting supplies source-code
+visibility and DUT read/write/force access to RTL and SystemVerilog interface
+signals, while FSDB contains signals rather than the UVM VIP class hierarchy.
+Limit scope and time further when possible:
 
 ```bash
 simmer -t <bench>:<test> --simulator VCS \
@@ -695,7 +696,10 @@ For quiet normal runs, avoid `--tool-debug`; it prints scheduler polling noise.
   edit does not rewrite their generated inputs.
 - Use `--fgp N` for runtime threading only after profiling; simmer reduces the
   number of concurrent tests to account for those threads.
-- Avoid waves, `-debug_access`, VPI and SmartLog in throughput regressions.
+- Avoid waves, VPI and SmartLog in throughput regressions. The baseline
+  `-debug_access+r+w+f` remains enabled because it is required by UVM HDL and
+  DUT memory backdoor behavior; measure its cost on representative workloads
+  before considering a split mode.
 
 DTL (`--dtl`) and VCS ICO (`--ico`) are opt-in advanced flows. DTL requires the
 default Partition Compile flow. ICO does not change VCS compilation. Simmer
