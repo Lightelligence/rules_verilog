@@ -2,6 +2,11 @@
 {% if options.wave_start -%}
 run {{ options.wave_start }}ns
 {% endif -%}
+{% if options.wave_run_sync|default(false) -%}
+{% if not options.wave_msv_debug_tcl_call|default(false) -%}
+run -sync
+{% endif -%}
+{% endif -%}
 call xmDumpfile {{ waves_db|tcl_quote }}
 {% for probe in options.probes -%}
 call xmDumpvars {{ probe|tcl_quote }} {{ options.wave_depth }} +all +packedmda+struct +struct +parameter +cell_instance=0 +packed_limit={{ options.probe_packed }} +unpacked_limit={{ options.probe_unpacked }}

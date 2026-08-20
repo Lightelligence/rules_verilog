@@ -13,6 +13,23 @@ def add_xcelium_arguments(parser):
         default=False,
         action='store_true',
         help='Include delta-cycle activity in generated XRUN SHM waveform probes. Requires --waves --wave-type shm.')
+    add_child_argument(
+        gxrun,
+        '--wave-msv-debug-tcl-call',
+        parent='--waves',
+        default=False,
+        action='store_true',
+        help=('Set MSV_DEBUG_TCL_CALL=YES for generated VWDB xmDump* calls in an AMS/SIE Xcelium run. Requires '
+              '--waves --wave-type vwdb.'))
+    gxrun.add_argument(
+        '--ams-runfiles-link',
+        dest='ams_runfiles_links',
+        action='append',
+        default=[],
+        metavar='ROOT',
+        help=('For an XRUN AMS simulation, create ROOT in each isolated test result directory as a link to the '
+              'same top-level entry under the selected testbench Bazel runfiles root. Repeat for additional roots; '
+              'for example, --ams-runfiles-link digital. No links are created by default.'))
     gxrun.add_argument(
         '--probe-packed',
         type=int,

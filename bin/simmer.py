@@ -868,6 +868,7 @@ class TestJob(Job):
 
         # --- Super pre_run and Socket Logic ---
         super(TestJob, self).pre_run()
+        self.simulator.prepare_test_directory(self)
 
         sim_opts = self.simulator.generate_sim_options(self, seed)
 
@@ -910,7 +911,7 @@ class TestJob(Job):
 
         pre_run_cmd = shlex.quote(runtime_options['pre_run']) if runtime_options['pre_run'] else ""
 
-        default_capture_scope = 'hdl_top'
+        default_capture_scope = getattr(options, 'wave_top', 'hdl_top')
         wave_database_path = self.job_dir
 
         wave_cmd_template = self.simulator.get_wave_cmd_template()

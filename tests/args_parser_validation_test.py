@@ -27,6 +27,28 @@ class ArgsParserValidationTest(unittest.TestCase):
         self.assertEqual(10, parse_args(["--waves"]).wave_depth)
         self.assertEqual(999, parse_args(["--waves", "--wave-depth", "999"]).wave_depth)
 
+    def test_wave_top_defaults_to_hdl_top_and_accepts_project_override(self):
+        self.assertEqual("hdl_top", parse_args(["--waves"]).wave_top)
+        self.assertEqual("tb_top", parse_args(["--waves", "--wave-top", "tb_top"]).wave_top)
+
+    def test_wave_msv_debug_tcl_call_is_disabled_by_default_and_can_be_enabled(self):
+        self.assertFalse(parse_args(["--waves"]).wave_msv_debug_tcl_call)
+        self.assertTrue(parse_args(["--waves", "--wave-msv-debug-tcl-call"]).wave_msv_debug_tcl_call)
+
+    def test_ams_runfiles_links_are_disabled_by_default_and_repeatable(self):
+        self.assertEqual([], parse_args([]).ams_runfiles_links)
+        options = parse_args([
+            "--ams-runfiles-link",
+            "digital",
+            "--ams-runfiles-link",
+            "hw",
+        ])
+        self.assertEqual(["digital", "hw"], options.ams_runfiles_links)
+        self.assertIn("--ams-runfiles-link", options.xcelium_explicit_switches)
+
+    def test_wave_msv_debug_tcl_call_requires_wave_capture(self):
+        self.assert_parse_error(["--wave-msv-debug-tcl-call"])
+
     def test_explicit_wave_end_must_follow_wave_start(self):
         self.assert_parse_error(["--waves", "--wave-start", "20", "--wave-end", "10"])
         self.assert_parse_error(["--waves", "--wave-start", "100000000", "--wave-end", "99999999"])

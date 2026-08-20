@@ -260,6 +260,10 @@ class SimulatorInterface(abc.ABC):
         """Prepare backend-owned state and optionally return a seed override."""
         return None
 
+    def prepare_test_directory(self, test_job):
+        """Prepare backend-owned files after the isolated test directory exists."""
+        return
+
     def should_spawn_test_job(self, test_job):
         """Return whether a dynamically planned test needs another iteration."""
         return False
@@ -293,3 +297,4 @@ class SimulatorInterface(abc.ABC):
     def collect_coverage_data(self, vcomp_jobs):
         """Return dashboard coverage summaries keyed by testbench name."""
         return {vcomp.split(":")[-1]: {"cc": {}, "cf": {}} for vcomp in vcomp_jobs}
+
