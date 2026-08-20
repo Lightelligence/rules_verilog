@@ -475,10 +475,49 @@ class XceliumSimulator(SimulatorInterface):
 
         return shlex.join(sim_args)
 
+    def prepare_test_directory(self, test_job):
+        """Expose selected Bazel short-path roots inside an isolated AMS test directory."""
+        link_names = getattr(self.options, "ams_runfiles_links", [])
+        if not link_names:
+            return
+
+        runfiles_root = os.path.abspath(test_job.vcomper.bazel_runfiles_main)
+        if not os.path.isdir(runfiles_root):
+            raise FileNotFoundError(
+                "--ams-runfiles-link requires the Bazel runfiles root: {}".format(runfiles_root))
+
+        job_dir = os.path.abspath(test_job.job_dir)
+        for link_name in link_names:
+            source_path = os.path.join(runfiles_root, link_name)
+            link_path = os.path.join(job_dir, link_name)
+            if not os.path.exists(source_path):
+                raise FileNotFoundError(
+                    "--ams-runfiles-link {} does not exist under the Bazel runfiles root: {}".format(
+                        link_name, source_path))
+
+            if os.path.lexists(link_path):
+                if not os.path.islink(link_path):
+                    raise FileExistsError(
+                        "Refusing to replace non-symlink path required by --ams-runfiles-link: {}".format(link_path))
+                if os.path.realpath(link_path) == os.path.realpath(source_path):
+                    continue
+                os.unlink(link_path)
+
+            os.symlink(source_path, link_path, target_is_directory=os.path.isdir(source_path))
+            log.debug("Created AMS runfiles link %s -> %s", link_path, source_path)
+
     def get_wave_capture_options(self, test_job, wave_tcl_path):
         wave_type = self.options.wave_type.lower()
+        wave_msv_debug_tcl_call = getattr(self.options, "wave_msv_debug_tcl_call", False)
+        if wave_msv_debug_tcl_call and wave_type != "vwdb":
+            raise ValueError("--wave-msv-debug-tcl-call requires --waves --wave-type vwdb")
         waves_db = test_job.job_dir
-        default_capture = 'hdl_top'
+        # Keep the existing hdl_top default while allowing projects with a
+        # different testbench root to opt in through --wave-top.  The VCD
+        # default remains hdl_top.dut for compatibility; an explicit
+        # non-default wave top is treated as the complete capture scope.
+        wave_top = getattr(self.options, "wave_top", "hdl_top")
+        default_capture = wave_top
         sim_opts = ""
 
         if self.options.wave_tcl:
@@ -495,7 +534,7 @@ class XceliumSimulator(SimulatorInterface):
             waves_db = os.path.join(waves_db, 'waves')
             sim_opts += ' -debug_opts verisium_pp '
         elif wave_type == 'vcd':
-            default_capture = 'hdl_top.dut'
+            default_capture = 'hdl_top.dut' if wave_top == 'hdl_top' else wave_top
             waves_db = os.path.join(waves_db, "waves.vcd")
         else:
             raise ValueError("{} not allowed".format(self.options.wave_type))
@@ -522,11 +561,9 @@ class XceliumSimulator(SimulatorInterface):
         if wave_type == 'vcd':
             return os.path.join(job_dir, 'waves.vcd')
         if wave_type == 'vwdb':
-            # xmDumpfile creates the Verisium database at the exact path passed
-            # to it.  The capture options pass ``<job_dir>/waves`` (a database
-            # directory), so use that same path when cleaning up and checking
-            # the completed artifact.
-            return os.path.join(job_dir, 'waves')
+            # xmDumpfile treats the supplied path as a basename and appends
+            # .db when it creates the Verisium waveform database.
+            return os.path.join(job_dir, 'waves.db')
         raise ValueError("Not allowed wave: {}".format(wave_type))
 
     def setup_coverage_merge(self, vcomp_job):
@@ -642,6 +679,11 @@ class XceliumSimulator(SimulatorInterface):
             cmd_parts = shlex.split("runmod -t xrun --") + ["-R", "-xmlibdirname", vcomp_job_dir]
             if self.options.gui and " -gui " not in sim_opts:
                 cmd_parts.append("-gui")
+
+        # Cadence's AMS workaround is a process environment variable, so set
+        # it before launching xrun rather than from the Tcl input file.
+        if getattr(self.options, "wave_msv_debug_tcl_call", False):
+            cmd_parts = ["env", "MSV_DEBUG_TCL_CALL=YES"] + cmd_parts
 
         if user_args_list:
             cmd_parts.extend(user_args_list)

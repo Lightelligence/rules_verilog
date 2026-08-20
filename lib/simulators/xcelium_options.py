@@ -11,6 +11,18 @@ def validate_xcelium_runtime_options(options, parser):
             options.wave_type = options.wave_type.lower()
         if options.wave_type not in ['shm', 'vcd', 'vwdb']:
             parser.error("Xcelium supports only --wave-type shm, vcd, or vwdb. Stopping before Bazel starts.")
+    wave_msv_debug_tcl_call = getattr(options, 'wave_msv_debug_tcl_call', False)
+    if wave_msv_debug_tcl_call and (options.waves is None or options.wave_type != 'vwdb'):
+        parser.error("--wave-msv-debug-tcl-call requires '--waves --wave-type vwdb'. Stopping before Bazel starts.")
+    ams_runfiles_links = getattr(options, 'ams_runfiles_links', [])
+    invalid_ams_runfiles_links = [
+        link for link in ams_runfiles_links
+        if not link or link in ('.', '..') or os.path.isabs(link) or '/' in link or '\\' in link
+    ]
+    if invalid_ams_runfiles_links:
+        parser.error("--ams-runfiles-link accepts one top-level Bazel runfiles name per occurrence; invalid value(s): "
+                     "{}. Stopping before Bazel starts.".format(", ".join(invalid_ams_runfiles_links)))
+    options.ams_runfiles_links = list(dict.fromkeys(ams_runfiles_links))
     if options.wave_delta and (options.waves is None or options.wave_type != 'shm'):
         parser.error("--wave-delta requires '--waves --wave-type shm'. Stopping before Bazel starts.")
     if options.covfile_was_explicit and not options.coverage:

@@ -49,7 +49,8 @@ def add_debug_arguments(parser):
                        default=None,
                        metavar='FORMAT',
                        help=('Select the simulator-specific waveform database format. The selected backend '
-                             'applies its default and validates supported formats. Requires --waves.'))
+                             'applies its default (Xcelium defaults to vwdb) and validates supported formats. '
+                             'Requires --waves.'))
     add_child_argument(debug_group,
                        '--wave-tcl',
                        parent='--waves',
@@ -80,6 +81,14 @@ def add_debug_arguments(parser):
                        default=10,
                        help=('Set generated probe hierarchy depth (default: 10). '
                              'Use 999 for effectively all hierarchy. Requires --waves.'))
+    add_child_argument(debug_group,
+                       '--wave-top',
+                       parent='--waves',
+                       type=str,
+                       default='hdl_top',
+                       metavar='TOP',
+                       help=('Set the default HDL scope used when --waves has no explicit scope '
+                             '(default: hdl_top). Use the complete scope for the selected waveform format.'))
     debug_group.add_argument('--verbosity',
                              type=str,
                              default=None,

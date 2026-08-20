@@ -160,6 +160,8 @@ def parse_args(argv):
     options.xcelium_explicit_switches = [
         argument for argument in [
             '--wave-delta',
+            '--wave-msv-debug-tcl-call',
+            '--ams-runfiles-link',
             '--probe-packed',
             '--probe-unpacked',
             '--profile',
@@ -233,6 +235,8 @@ def parse_args(argv):
     wave_detail_switches = [
         '--wave-type',
         '--wave-tcl',
+        '--wave-top',
+        '--wave-msv-debug-tcl-call',
         '--wave-start',
         '--wave-end',
         '--wave-depth',
