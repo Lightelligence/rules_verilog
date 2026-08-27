@@ -19,7 +19,9 @@ A DV Library.
     filelists should prefer the same style and avoid `../` upward traversals.
     
     Recommended DPI usage is to keep SystemVerilog files in `srcs`/`in_flist` and
-    provide shared libraries through the `dpi` attribute, for example:
+    provide shared libraries through the `dpi` attribute. DPI libraries are
+    runtime inputs, so changing a C implementation does not invalidate the
+    SystemVerilog compile-input fingerprint, for example:
 
 ```python
 cc_binary(
@@ -43,7 +45,7 @@ verilog_dv_library(
 | :------------- | :------------- | :------------- | :------------- | :------------- |
 | <a id="verilog_dv_library-name"></a>name |  A unique name for this target.   | <a href="https://bazel.build/docs/build-ref.html#name">Name</a> | required |  |
 | <a id="verilog_dv_library-deps"></a>deps |  verilog_dv_library targets that this target is dependent on.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
-| <a id="verilog_dv_library-dpi"></a>dpi |  Shared libraries to load through the DPI. Build source-based DPI libraries with `cc_binary(linkshared = True)` and pass that target here. Currently, cc_import is not supported for precompiled shared libraries. Prefer placing shared libraries here rather than globbing `.so` files into `srcs`. Example: `cc_binary(name = "dpi", srcs = glob(["*.c"]), linkshared = True)` then `verilog_dv_library(name = "pkg", srcs = glob(["*.sv"]), dpi = [":dpi"])`.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
+| <a id="verilog_dv_library-dpi"></a>dpi |  Shared libraries to load through the DPI at simulation runtime. Build source-based DPI libraries with `cc_binary(linkshared = True)` and pass that target here. Changing only the C implementation does not invalidate the SystemVerilog compile-input fingerprint; changes to SV sources or DPI declarations still do. Currently, cc_import is not supported for precompiled shared libraries. Prefer placing shared libraries here rather than globbing `.so` files into `srcs`. Example: `cc_binary(name = "dpi", srcs = glob(["*.c"]), linkshared = True)` then `verilog_dv_library(name = "pkg", srcs = glob(["*.sv"]), dpi = [":dpi"])`.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
 | <a id="verilog_dv_library-in_flist"></a>in_flist |  Files to be placed directly in the generated flist. Best practice recommends 'pkg' and 'interface' files be declared here. If this attribute is empty (default), all srcs will put into the flist instead.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
 | <a id="verilog_dv_library-incdir"></a>incdir |  Generate a +incdir in generated flist for every file's directory declared in 'srcs' attribute.   | Boolean | optional | True |
 | <a id="verilog_dv_library-makelib"></a>makelib |  Compile this target into the named Xcelium library through `-makelib`/`-endlib`. VCS receives the same ordered sources through a separate `-file` boundary; VCS recompilation isolation is provided by `-Mupdate` and Partition Compile rather than Xcelium library syntax.   | String | optional | `""` |

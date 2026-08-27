@@ -8,7 +8,7 @@ For each Label, a gumi define will be placed on the command line to use this she
 This requires that the original module was instantiated using \\`gumi_<module_name> instead of just <module_name>."""
 
 VerilogInfo = provider("Transitive Verilog build inputs.", fields = {
-    "transitive_sources": "All source files needed by a target. They are retained for compile input tracking and simulator runfiles.",
+    "transitive_sources": "All Verilog/SystemVerilog source files needed by a target. Runtime-only DPI libraries belong in transitive_dpi.",
     "transitive_flists": "All flists which specify ordering of transitive sources.",
     "transitive_vcs_flists": "VCS-compatible flists. Source ordering and per-target filelist boundaries are preserved while Xcelium-only makelib markers are omitted.",
     "transitive_dpi": "Shared libraries (.so/.dll/.dylib) to link in via the DPI for testbenches.",
@@ -352,6 +352,7 @@ def flists_to_arguments(deps, provider, field, prefix, separator = "", tool_name
 
 def _verilog_test_impl(ctx):
     trans_srcs = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_sources")
+    trans_dpi = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_dpi")
     srcs_list = trans_srcs.to_list()
     flists = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_flists")
     flists_list = flists.to_list()
@@ -384,7 +385,7 @@ def _verilog_test_impl(ctx):
     )
 
     runfile_targets = ctx.attr.shells + ctx.attr.deps + ctx.attr.data
-    runfile_files = flists_list + srcs_list + ctx.files.data
+    runfile_files = flists_list + srcs_list + trans_dpi.to_list() + ctx.files.data
     if ctx.attr.tool:
         runfile_targets.append(ctx.attr.tool)
         runfile_files.append(tool_executable)

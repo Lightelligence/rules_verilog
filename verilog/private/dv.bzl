@@ -398,7 +398,16 @@ def _verilog_dv_library_impl(ctx):
     out = xcelium_dv_backend.materialize_library_flist(ctx, source_lines)
     vcs_out = vcs_dv_backend.materialize_library_flist(ctx, source_lines, out)
 
-    trans_srcs = get_transitive_srcs(ctx.files.srcs, ctx.attr.deps + ctx.attr.dpi, VerilogInfo, "transitive_sources", allow_other_outputs = True)
+    # DPI libraries are runtime artifacts. Keep them in transitive_dpi rather
+    # than transitive_sources so changing a C implementation does not
+    # invalidate the SV compile-input fingerprint.
+    trans_srcs = get_transitive_srcs(
+        ctx.files.srcs,
+        ctx.attr.deps,
+        VerilogInfo,
+        "transitive_sources",
+        allow_other_outputs = True,
+    )
     trans_flists = get_transitive_srcs([out], ctx.attr.deps, VerilogInfo, "transitive_flists", allow_other_outputs = False)
     trans_vcs_flists = get_transitive_srcs(
         [vcs_out],
@@ -410,7 +419,9 @@ def _verilog_dv_library_impl(ctx):
     )
     trans_dpi = get_transitive_srcs(all_sos, ctx.attr.deps, VerilogInfo, "transitive_dpi", allow_other_outputs = False)
 
-    all_files = depset(transitive = [trans_srcs, trans_flists, trans_vcs_flists])
+    # Preserve DPI outputs in DefaultInfo/runfiles while keeping them out of
+    # VerilogInfo.transitive_sources, which is used for compile-input tracking.
+    all_files = depset(transitive = [trans_srcs, trans_flists, trans_vcs_flists, trans_dpi])
 
     return [
         VerilogInfo(
@@ -440,7 +451,9 @@ verilog_dv_library = rule(
     filelists should prefer the same style and avoid ../ upward traversals.
 
     Recommended DPI usage is to keep SystemVerilog files in srcs/in_flist and
-    provide shared libraries through the dpi attribute, for example:
+    provide shared libraries through the dpi attribute. DPI libraries are
+    runtime inputs, so changing a C implementation does not invalidate the
+    SystemVerilog compile-input fingerprint, for example:
 
       cc_binary(
           name = "dpi",

@@ -1,6 +1,7 @@
 """Focused fixtures for public Starlark API contract tests."""
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
+load("//verilog/private:verilog.bzl", "VerilogInfo")
 
 def _fake_dpi_impl(ctx):
     shared_library = ctx.actions.declare_file(ctx.label.name + ".so")
@@ -33,6 +34,9 @@ concrete_requires_tb_test = analysistest.make(
 def _has_basename(files, basename):
     return any([file.basename == basename for file in files])
 
+def _has_suffix(files, suffix):
+    return any([file.path.endswith(suffix) for file in files])
+
 def _gumi_override_test_impl(ctx):
     env = analysistest.begin(ctx)
     target = analysistest.target_under_test(env)
@@ -47,8 +51,20 @@ gumi_override_test = analysistest.make(_gumi_override_test_impl)
 def _dpi_runfiles_test_impl(ctx):
     env = analysistest.begin(ctx)
     target = analysistest.target_under_test(env)
+    verilog_info = target[VerilogInfo]
     runfiles = target[DefaultInfo].default_runfiles.files.to_list()
     asserts.true(env, _has_basename(runfiles, "dpi_runtime.data"), "DPI target default runfiles were not merged")
+    asserts.true(env, _has_basename(runfiles, "fake_dpi.so"), "DPI shared library was not retained as a runfile")
+    asserts.false(
+        env,
+        _has_suffix(verilog_info.transitive_sources.to_list(), ".so"),
+        "DPI shared library leaked into transitive Verilog sources",
+    )
+    asserts.true(
+        env,
+        _has_suffix(verilog_info.transitive_dpi.to_list(), ".so"),
+        "DPI shared library was not retained in transitive_dpi",
+    )
     return analysistest.end(env)
 
 dpi_runfiles_test = analysistest.make(_dpi_runfiles_test_impl)
