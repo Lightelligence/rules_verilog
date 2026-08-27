@@ -483,8 +483,7 @@ class XceliumSimulator(SimulatorInterface):
 
         runfiles_root = os.path.abspath(test_job.vcomper.bazel_runfiles_main)
         if not os.path.isdir(runfiles_root):
-            raise FileNotFoundError(
-                "--ams-runfiles-link requires the Bazel runfiles root: {}".format(runfiles_root))
+            raise FileNotFoundError("--ams-runfiles-link requires the Bazel runfiles root: {}".format(runfiles_root))
 
         job_dir = os.path.abspath(test_job.job_dir)
         for link_name in link_names:
