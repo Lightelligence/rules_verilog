@@ -297,4 +297,3 @@ class SimulatorInterface(abc.ABC):
     def collect_coverage_data(self, vcomp_jobs):
         """Return dashboard coverage summaries keyed by testbench name."""
         return {vcomp.split(":")[-1]: {"cc": {}, "cf": {}} for vcomp in vcomp_jobs}
-

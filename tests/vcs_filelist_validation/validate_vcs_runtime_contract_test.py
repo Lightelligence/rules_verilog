@@ -2447,7 +2447,7 @@ run_bounded_process([
         self.assertEqual("hdl_top", capture["default_capture"])
         self.assertIn("-debug_opts verisium_pp", capture["sim_opts"])
         self.assertEqual(os.path.join(test_job.job_dir, "waves"), capture["waves_db"])
-        self.assertEqual(os.path.join(test_job.job_dir, "waves"),
+        self.assertEqual(os.path.join(test_job.job_dir, "waves.db"),
                          simulator.get_wave_artifact_path(test_job.job_dir, options.wave_type))
 
         vcomp = DummyVcompJob()
