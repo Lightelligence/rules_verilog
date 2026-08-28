@@ -564,7 +564,8 @@ def _verilog_dv_tb_impl(ctx):
     extra_compile_outputs = backend.extra_compile_outputs(ctx, defines, selected_compile_args, compile_config)
 
     runtime_config = backend.runtime_config(ctx)
-    runtime_args = [ctx.expand_location(arg, targets = ctx.attr.extra_runfiles) for arg in ctx.attr.extra_runtime_args]
+    runtime_runfile_targets = ctx.attr.extra_runfiles + ctx.attr.extra_runtime_runfiles
+    runtime_args = [ctx.expand_location(arg, targets = runtime_runfile_targets) for arg in ctx.attr.extra_runtime_args]
     _validate_runtime_args(runtime_args, simulator)
 
     ctx.actions.expand_template(
@@ -658,6 +659,7 @@ def _verilog_dv_tb_impl(ctx):
         all_deps +
         ctx.attr.ccf +
         ctx.attr.extra_runfiles +
+        ctx.attr.extra_runtime_runfiles +
         ctx.attr.msie_primary_extra_runfiles +
         ctx.attr.msie_incremental_extra_runfiles
     )
@@ -671,7 +673,7 @@ def _verilog_dv_tb_impl(ctx):
             files = all_files,
             runfiles = merge_default_runfiles(
                 ctx,
-                files = ctx.files.ccf + ctx.files.extra_runfiles + ctx.files.msie_primary_extra_runfiles + ctx.files.msie_incremental_extra_runfiles + ([ctx.file.xcelium_covfile] if ctx.file.xcelium_covfile else []) + ([ctx.file.vcs_cm_hier] if ctx.file.vcs_cm_hier else []) + [runtime_config.template],
+                files = ctx.files.ccf + ctx.files.extra_runfiles + ctx.files.extra_runtime_runfiles + ctx.files.msie_primary_extra_runfiles + ctx.files.msie_incremental_extra_runfiles + ([ctx.file.xcelium_covfile] if ctx.file.xcelium_covfile else []) + ([ctx.file.vcs_cm_hier] if ctx.file.vcs_cm_hier else []) + [runtime_config.template],
                 targets = runfile_targets,
                 transitive_files = all_files,
             ),
@@ -702,6 +704,10 @@ verilog_dv_tb = rule(
     The compile and runtime filelists are generated according to the selected
     simulator. The generated file names are <name>_compile_args.f and
     <name>_runtime_args.f.
+
+    Files referenced only by extra_runtime_args should be listed in
+    extra_runtime_runfiles so they remain runtime inputs without invalidating
+    the compile-input fingerprint.
     """,
     implementation = _verilog_dv_tb_impl,
     attrs = {
@@ -823,8 +829,12 @@ verilog_dv_tb = rule(
         ),
         "extra_runfiles": attr.label_list(
             allow_files = True,
-            doc = "Additional files that need to be passed as runfiles to bazel. Most commonly used for files referred to by extra_compile_args or extra_runtime_args.\n" +
+            doc = "Additional files that need to be passed as runfiles to bazel. Use this for files referenced by compile arguments, or by both compile and runtime arguments. Files referenced only by extra_runtime_args should use extra_runtime_runfiles so they do not invalidate the compile-input fingerprint.\n" +
                   "Prefer passing labels here and referencing their runfiles-root-relative paths from generated filelists.",
+        ),
+        "extra_runtime_runfiles": attr.label_list(
+            allow_files = True,
+            doc = "Additional files referenced only by extra_runtime_args. These files remain available in test runfiles but are excluded from the compile-input fingerprint, so runtime-only changes do not trigger simulator recompilation.",
         ),
         "run_pass_patterns": attr.string_list(
             doc = "Regexes that identify a successful simulation. When set, at least one must match.",

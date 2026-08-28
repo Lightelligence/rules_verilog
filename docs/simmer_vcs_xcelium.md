@@ -447,6 +447,11 @@ verilog_dv_tb(
 )
 ```
 
+When a file is referenced only by `extra_runtime_args`, list it in
+`extra_runtime_runfiles` instead of `extra_runfiles`. It stays in the test
+runfiles while remaining outside the compile-input fingerprint, so changing a
+memory image or runtime configuration does not force VCS to recompile.
+
 For an Xcelium version of the same TB, create a separate target:
 
 ```python
@@ -694,6 +699,10 @@ For quiet normal runs, avoid `--tool-debug`; it prints scheduler polling noise.
   cache and existing `simv` have already been validated.
 - Keep stable third-party IP/VIP in separate Bazel libraries/filelists so a TB
   edit does not rewrite their generated inputs.
+- Put files referenced only by `extra_runtime_args` in
+  `extra_runtime_runfiles`; they remain in the test runfiles but do not enter
+  the compile-input fingerprint, so changing a runtime-only asset does not
+  trigger VCS recompilation. Keep compile-referenced files in `extra_runfiles`.
 - Use `--fgp N` for runtime threading only after profiling; simmer reduces the
   number of concurrent tests to account for those threads.
 - Avoid waves, VPI and SmartLog in throughput regressions. The baseline
