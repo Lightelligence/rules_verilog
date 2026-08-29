@@ -1,6 +1,11 @@
 """Focused fixtures for public Starlark API contract tests."""
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
+
+# This fixture inspects the provider emitted by the public rules; keep the
+# private provider load scoped to the compatibility test instead of exporting
+# an implementation detail as part of the consumer API.
+# buildifier: disable=bzl-visibility
 load("//verilog/private:verilog.bzl", "VerilogInfo")
 
 def _fake_dpi_impl(ctx):
