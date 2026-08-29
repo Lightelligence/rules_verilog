@@ -126,6 +126,16 @@ verilog_dv_tb(
 )
 
 verilog_dv_tb(
+    name = "dv_tb_vcs_runtime_only_runfile",
+    extra_runtime_args = [
+        "-f bazel_runfiles_main/$(location :runtime_only.data)",
+    ],
+    extra_runtime_runfiles = [":runtime_only.data"],
+    simulator = "VCS",
+    deps = [":unit_test_top"],
+)
+
+verilog_dv_tb(
     name = "dv_tb_vcs_three_step",
     extra_runfiles = [":vcs_partitions"],
     simulator = "VCS",
@@ -297,6 +307,10 @@ py_test(
         ":dv_tb_vcs",
         ":dv_tb_vcs_compile_args.f",
         ":dv_tb_vcs_runtime_args.f",
+        ":dv_tb_vcs_runtime_only_runfile",
+        ":dv_tb_vcs_runtime_only_runfile_compile_args.f",
+        ":dv_tb_vcs_runtime_only_runfile_runtime_args.f",
+        ":dv_tb_vcs_runtime_only_runfile_tb_options.py",
         ":dv_tb_vcs_tb_options.py",
         ":dv_tb_vcs_three_step",
         ":dv_tb_xrun_ccf",

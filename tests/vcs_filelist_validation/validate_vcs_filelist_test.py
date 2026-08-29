@@ -241,6 +241,18 @@ class VcsFilelistValidationTest(unittest.TestCase):
             expected_digest.update(b"\0")
         self.assertEqual(expected_digest.hexdigest(), compile_inputs_digest)
 
+    def test_runtime_only_runfiles_are_excluded_from_vcs_compile_inputs(self):
+        options = ast.literal_eval(
+            read_runfile("tests/vcs_filelist_validation/dv_tb_vcs_runtime_only_runfile_tb_options.py"))
+        compile_args = read_runfile("tests/vcs_filelist_validation/dv_tb_vcs_runtime_only_runfile_compile_args.f")
+        runtime_args = read_runfile("tests/vcs_filelist_validation/dv_tb_vcs_runtime_only_runfile_runtime_args.f")
+        compile_inputs = read_runfile(options["compile_inputs"])
+
+        self.assertIn("runtime_only.data", runtime_args)
+        self.assertNotIn("runtime_only.data", compile_args)
+        self.assertNotIn("runtime_only.data", compile_inputs)
+        self.assertTrue(runfile_exists("tests/vcs_filelist_validation/runtime_only.data"))
+
     def test_vcs_three_step_separates_analysis_filelists_from_elaboration(self):
         options_path = "tests/vcs_filelist_validation/dv_tb_vcs_three_step_tb_options.py"
         options = ast.literal_eval(read_runfile(options_path))
