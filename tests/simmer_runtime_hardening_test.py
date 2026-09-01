@@ -183,18 +183,25 @@ class SimmerRuntimeHardeningTest(unittest.TestCase):
 
         self.assertEqual(0, parse_args(["--timeout", "0"]).timeout)
 
-    def test_default_scheduler_limit_uses_process_allocation(self):
+    def test_default_scheduler_limit_uses_host_capacity_not_batch_allocation(self):
         options = SimpleNamespace(gui=False, jobs=None)
         rcfg = SimpleNamespace(
-            all_vcomp={"//tb:tb": ([SimpleNamespace(target=8)], [])},
+            all_vcomp={"//tb:tb": ([SimpleNamespace(target=100)], [])},
             log=mock.Mock(),
         )
         simulator = SimpleNamespace(get_scheduler_threads_per_test=lambda: 2)
 
-        with mock.patch("simmer.job_lib.detect_allocated_cpus", return_value=(4, "unit allocation")):
-            self.assertEqual(2, simmer.get_active_job_limit(options, rcfg, simulator))
+        with mock.patch("simmer.os.cpu_count", return_value=16), \
+             mock.patch("simmer.job_lib.detect_allocated_cpus") as detect_allocated_cpus:
+            self.assertEqual(8, simmer.get_active_job_limit(options, rcfg, simulator))
 
-        rcfg.log.info.assert_called_once_with("Scheduler CPU allocation: %d (%s)", 4, "unit allocation")
+        detect_allocated_cpus.assert_not_called()
+        rcfg.log.info.assert_called_once_with(
+            "Scheduler host CPU capacity: %d; threads per test: %d; parallel job limit: %d",
+            16,
+            2,
+            8,
+        )
 
     def test_history_persistence_failure_is_fatal(self):
         rcfg = SimpleNamespace(

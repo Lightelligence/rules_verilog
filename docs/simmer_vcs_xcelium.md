@@ -139,6 +139,14 @@ Run `simmer -h` for all options. MSIE stages must use the same target,
 `SIMRESULTS`, suffix and primary key. Palladium modes require the project-owned
 `EMU_JINJA2_PATH` template and site runtime libraries.
 
+When `--jobs` is omitted, simmer uses the current execution host's logical CPU
+count as the invocation-wide concurrency budget instead of the LSF/Slurm slot
+count. A `bsub` invocation dispatched to one host stays on that host: simmer
+does not aggregate slots from, or launch tests on, other hosts. It divides the
+single-host budget by the configured VCS FGP or Xcelium MCE threads per test,
+then caps the result at the number of selected tests. Use `--jobs N` to set an
+explicit lower or higher concurrency limit.
+
 ## VCS compile reuse
 
 The default VCS flow automatically reuses unchanged builds:

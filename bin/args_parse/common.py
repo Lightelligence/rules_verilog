@@ -246,8 +246,9 @@ def add_regression_arguments(parser):
                                   type=int,
                                   default=None,
                                   help=('Maximum concurrent compile/simulation jobs. By default simmer uses the '
-                                        'LSF/Slurm or process-affinity CPU allocation, applies a conservative '
-                                        'fallback cap, and adjusts for VCS FGP or Xcelium MCE threads.'))
+                                        'current execution host logical CPU count, does not aggregate resources '
+                                        'across hosts, ignores LSF/Slurm slot allocation, and adjusts for VCS FGP '
+                                        'or Xcelium MCE threads.'))
     regression_group.add_argument(
         '--simmer-profile',
         default=False,
