@@ -930,6 +930,27 @@ run_bounded_process([
         self.assertEqual("disabled", disabled_simulator.get_effective_partcomp_mode())
         self.assertFalse(disabled_simulator.should_auto_reuse_compile())
 
+    def test_xcelium_normal_compile_cache_is_shared_but_special_builds_are_not(self):
+        normal = XceliumSimulator(
+            parse_args(["-t", "unit:test", "--simulator", "XRUN"]),
+            DummyRegressionConfig(),
+            None,
+        )
+        emulator = XceliumSimulator(
+            parse_args(["-t", "unit:test", "--simulator", "XRUN", "--emulator", "sim"]),
+            DummyRegressionConfig(),
+            None,
+        )
+        msie_href = XceliumSimulator(
+            parse_args(["-t", "unit:test", "--simulator", "XRUN", "--msie-href", "dut"]),
+            DummyRegressionConfig(),
+            None,
+        )
+
+        self.assertTrue(normal.should_auto_reuse_compile())
+        self.assertFalse(emulator.should_auto_reuse_compile())
+        self.assertFalse(msie_href.should_auto_reuse_compile())
+
     def test_vcs_partition_compile_opt_in_uses_vcomp_owned_database(self):
         options = parse_args(["-t", "unit:test", "--simulator", "VCS", "--vcs-partcomp"])
         simulator = VcsSimulator(options, DummyRegressionConfig(), None)
@@ -2552,15 +2573,26 @@ run_bounded_process([
         VcsSimulator(vcs_options, vcs_config, None).prepare_regression_runtime(jobs(vcs_trace))
         self.assertEqual(sorted(vcs_trace), vcs_trace)
 
+        vcs_shared_compile_trace = []
+        vcs_options = parse_args(["--simulator", "VCS"])
+        VcsSimulator(vcs_options, vcs_config, None).prepare_regression_runtime(jobs(vcs_shared_compile_trace))
+        self.assertEqual([], vcs_shared_compile_trace)
+
         xrun_trace = []
         xrun_options = parse_args(["--simulator", "XRUN", "--coverage", "A"])
         xrun_config = DummyRegressionConfig()
         xrun_config.regression_dir = str(root / "xrun")
         XceliumSimulator(xrun_options, xrun_config, None).prepare_regression_runtime(jobs(xrun_trace))
         self.assertEqual(sorted(xrun_trace), xrun_trace)
-        self.assertEqual(4, len(xrun_trace))
+        self.assertEqual(2, len(xrun_trace))
+        self.assertTrue(all(Path(path).name.endswith("__COV_WORK") for path, _ in xrun_trace))
 
-    def test_xcelium_shared_cleanup_keeps_top_level_names_matched_only_by_old_globs(self):
+        xrun_shared_compile_trace = []
+        xrun_options = parse_args(["--simulator", "XRUN"])
+        XceliumSimulator(xrun_options, xrun_config, None).prepare_regression_runtime(jobs(xrun_shared_compile_trace))
+        self.assertEqual([], xrun_shared_compile_trace)
+
+    def test_xcelium_shared_cleanup_preserves_unlocked_runfiles_scratch(self):
         runfiles = Path(tempfile.mkdtemp(prefix="xrun shared runfiles "))
         self.addCleanup(shutil.rmtree, runfiles, ignore_errors=True)
         for name in ("environment.sv", "xmsim_source.err", "xp_elab.log.backup"):
@@ -2583,8 +2615,8 @@ run_bounded_process([
 
         for name in ("environment.sv", "xmsim_source.err", "xp_elab.log.backup", "waves.shm"):
             self.assertTrue((runfiles / name).exists(), name)
-        self.assertFalse((runfiles / "xp_elab.log").exists())
-        self.assertFalse((runfiles / "verisium_debug_logs").exists())
+        self.assertTrue((runfiles / "xp_elab.log").exists())
+        self.assertTrue((runfiles / "verisium_debug_logs").exists())
         release_locks.assert_called_once_with()
 
     def test_xcelium_coverage_report_command_preserves_paths_with_spaces(self):

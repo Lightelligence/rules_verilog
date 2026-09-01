@@ -175,6 +175,17 @@ class XceliumSimulator(SimulatorInterface):
         inputs["environment"]["XCELIUM_TOOL_ID"] = self.get_tool_identity()
         return inputs
 
+    def should_auto_reuse_compile(self):
+        # A completed normal XRUN database is read-only during simulation and
+        # can be shared by independent simmer processes.  Special staged and
+        # emulator flows own additional mutable state and keep their existing
+        # explicit compile behavior.
+        return not self.options.emulator and not any(value is not None for value in (
+            self.options.msie_href,
+            self.options.msie_prim,
+            self.options.msie_incr,
+        ))
+
     def get_bazel_compile_args_file(self, bazel_runfiles_main, relpath, bazel_target):
         if self.options.msie_prim:
             return os.path.join(bazel_runfiles_main, relpath, "{}_msie_primary_compile_args.f".format(bazel_target))
@@ -349,13 +360,13 @@ class XceliumSimulator(SimulatorInterface):
         return os.path.join(bazel_runfiles_main, relpath, "{}_compile_args_pldm_ice.f".format(bazel_target))
 
     def prepare_regression_runtime(self, vcomp_jobs):
+        if not self.options.coverage:
+            return
+
         runtime_jobs = []
         for vcomp_job in vcomp_jobs.values():
-            runfiles_dir = vcomp_job.resolve_bazel_runfiles_main()
-            runtime_jobs.append((runfiles_dir, vcomp_job))
-            if self.options.coverage:
-                vcomp_job.cov_work_dir = os.path.join(self.rcfg.regression_dir, vcomp_job.name + "__COV_WORK")
-                runtime_jobs.append((vcomp_job.cov_work_dir, vcomp_job))
+            vcomp_job.cov_work_dir = os.path.join(self.rcfg.regression_dir, vcomp_job.name + "__COV_WORK")
+            runtime_jobs.append((vcomp_job.cov_work_dir, vcomp_job))
         for runtime_path, vcomp_job in sorted(runtime_jobs, key=lambda item: os.path.abspath(item[0])):
             vcomp_job.acquire_shared_runtime_lock(runtime_path)
 
@@ -716,59 +727,3 @@ class XceliumSimulator(SimulatorInterface):
         raise FileNotFoundError(
             "Xcelium --no-compile requires an existing elaboration database with a run.*.d directory under '{}'".format(
                 job_dir))
-
-    def _cleanup_shared_runtime_files(self, vcomp_jobs):
-        # Only remove simulator scratch files created at the top level of the
-        # shared runfiles tree. Never recurse into mirrored source areas such as
-        # hw/, external/, odie/, testbench/, tests/, etc., because those
-        # directories contain real runfiles and generated filelists needed by
-        # the simulation flow.
-        cleanup_files = [
-            "xp_elab.log",
-            "ida_diagnostics.log",
-            "lwdgen.log",
-            "cdns_dump.log",
-        ]
-        cleanup_directories = [
-            "verisium_debug_logs",
-            "verisium_debug_logs_backup",
-        ]
-
-        cleaned_dirs = set()
-        for vcomp_job in vcomp_jobs.values():
-            runfiles_dir = getattr(vcomp_job, "bazel_runfiles_main", None)
-            if not runfiles_dir or runfiles_dir in cleaned_dirs or not os.path.isdir(runfiles_dir):
-                continue
-
-            removed_paths = []
-            cleanup_paths = [(os.path.join(runfiles_dir, name), False) for name in cleanup_files]
-            cleanup_paths.extend((os.path.join(runfiles_dir, name), True) for name in cleanup_directories)
-            for path, expect_directory in cleanup_paths:
-                try:
-                    if expect_directory:
-                        if not os.path.isdir(path) or os.path.islink(path):
-                            continue
-                        shutil.rmtree(path, ignore_errors=False)
-                    else:
-                        if not os.path.isfile(path) or os.path.islink(path):
-                            continue
-                        os.remove(path)
-                    removed_paths.append(os.path.basename(path))
-                except FileNotFoundError:
-                    continue
-                except OSError as exc:
-                    log.warning("Failed to remove XRUN shared runtime artifact %s: %s", path, exc)
-
-            if removed_paths:
-                log.info(
-                    "Cleaned %d XRUN shared runtime artifact(s) from %s",
-                    len(removed_paths),
-                    runfiles_dir,
-                )
-            cleaned_dirs.add(runfiles_dir)
-
-    def cleanup_shared_runtime_artifacts(self, vcomp_jobs):
-        try:
-            self._cleanup_shared_runtime_files(vcomp_jobs)
-        finally:
-            super().cleanup_shared_runtime_artifacts(vcomp_jobs)
