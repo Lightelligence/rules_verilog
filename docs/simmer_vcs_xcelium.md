@@ -12,11 +12,25 @@ simmer -t <bench>:<test>
 simmer -t <bench>:<test> --simulator XRUN
 ```
 
+Normal Xcelium compilation is fingerprinted and protected by a compile-directory
+lock. After one process publishes a matching elaboration database, other
+`simmer` processes reuse it and may run simulations concurrently from their
+separate test directories. Xcelium compile scratch such as `xp_elab.log` may
+remain in the shared Bazel runfiles directory. Coverage runs still serialize on
+their shared coverage work directory. Do not force a rebuild or change compile
+inputs for the same VCOMP directory while simulations are using it.
+
 VCS uses the two-step compile/sim flow:
 
 ```bash
 simmer -t <bench>:<test> --simulator VCS
 ```
+
+VCS follows the same concurrency contract: compilation is serialized, while
+matching normal simulations reuse `simv` concurrently without a regression-wide
+Bazel runfiles lock. VCS coverage retains its separate shared coverage-directory
+lock. Do not use `--recompile` or change compile inputs for the same VCOMP while
+simulations are active.
 
 Do not pass `--vcs-runner` for the normal flow. The runner defaults to:
 

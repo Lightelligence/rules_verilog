@@ -133,22 +133,28 @@ class SimmerRuntimeHardeningTest(unittest.TestCase):
         self.assertEqual("/sim/regression.log", state["regression_log"])
         self.assertIsNone(state["result_log"])
 
-    def test_vcs_compile_reuse_miss_messages_explain_incremental_behavior(self):
+    def test_compile_reuse_miss_messages_name_the_selected_simulator(self):
         self.assertEqual(
             "Compile inputs changed (compile_inputs_sha256, compile_script_sha256)",
-            simmer.describe_vcs_compile_reuse_miss(
+            simmer.describe_compile_reuse_miss(
                 "Compile build fingerprint mismatch in /tmp/vcomp "
-                "(changed: compile_inputs_sha256, compile_script_sha256). Recompile this testbench."),
+                "(changed: compile_inputs_sha256, compile_script_sha256). Recompile this testbench.",
+                "XRUN",
+            ),
         )
         self.assertEqual(
-            "No reusable VCS compile fingerprint exists",
-            simmer.describe_vcs_compile_reuse_miss(
-                "--no-compile requires /tmp/vcomp/.compile_fingerprint.json. Recompile this testbench first."),
+            "No reusable XRUN compile fingerprint exists",
+            simmer.describe_compile_reuse_miss(
+                "--no-compile requires /tmp/vcomp/.compile_fingerprint.json. Recompile this testbench first.",
+                "XRUN",
+            ),
         )
         self.assertEqual(
             "Reusable VCS compile artifacts are missing or incomplete",
-            simmer.describe_vcs_compile_reuse_miss(
-                "VCS --no-compile requires an existing elaborated executable at '/tmp/vcomp/simv'"),
+            simmer.describe_compile_reuse_miss(
+                "VCS --no-compile requires an existing elaborated executable at '/tmp/vcomp/simv'",
+                "VCS",
+            ),
         )
 
     def test_get_bazel_bin_fallback_runs_from_project_directory(self):

@@ -307,15 +307,16 @@ def get_active_job_limit(options, rcfg, simulator):
     return max(1, min(total_tests, requested_jobs))
 
 
-def describe_vcs_compile_reuse_miss(miss_reason):
-    """Return a user-facing explanation for a non-reusable VCS build.
+def describe_compile_reuse_miss(miss_reason, simulator_name):
+    """Return a user-facing explanation for a non-reusable simulator build.
 
     A fingerprint mismatch is the normal, safe response to changed compile
     inputs.  It should not be described as a failed cache or a scratch build:
-    VCS still receives the existing VCOMP directory and can reuse its
+    the simulator still receives the existing VCOMP directory and can reuse its
     incremental artifacts.  Missing metadata or artifacts need a distinct
     message because no prior output is available to reuse.
     """
+    simulator_name = simulator_name.upper()
     reason = miss_reason or ""
     prefix = "Compile build fingerprint mismatch"
     if reason.startswith(prefix):
@@ -323,11 +324,11 @@ def describe_vcs_compile_reuse_miss(miss_reason):
         if changed is not None:
             return "Compile inputs changed ({})".format(changed.group(1))
         return "Compile inputs changed"
-    if "requires an existing elaborated executable" in reason:
-        return "Reusable VCS compile artifacts are missing or incomplete"
+    if "requires an existing elaborated executable" in reason or "requires an existing elaboration database" in reason:
+        return "Reusable {} compile artifacts are missing or incomplete".format(simulator_name)
     if reason.startswith("--no-compile requires "):
-        return "No reusable VCS compile fingerprint exists"
-    return "Reusable VCS compile state is unavailable"
+        return "No reusable {} compile fingerprint exists".format(simulator_name)
+    return "Reusable {} compile state is unavailable".format(simulator_name)
 
 
 # The jobs of the verification compilation and elaboration stages
@@ -544,14 +545,16 @@ class VCompJob(Job):
             )
             if not self.compile_cache_hit:
                 log.info(
-                    "%s; invoking incremental VCS compile for %s",
-                    describe_vcs_compile_reuse_miss(miss_reason),
+                    "%s; invoking %s compile for %s",
+                    describe_compile_reuse_miss(miss_reason, self.simulator.get_name()),
+                    self.simulator.get_name().upper(),
                     self,
                 )
-                log.debug("VCS compile reuse unavailable for %s: %s", self, miss_reason)
+                log.debug("%s compile reuse unavailable for %s: %s",
+                          self.simulator.get_name().upper(), self, miss_reason)
                 self.main_cmdline = shlex.join(["bash", vcomp_sh_path])
             else:
-                self.main_cmdline = "echo \"Bypassing {} due to VCS compile cache hit\"".format(self)
+                self.main_cmdline = "echo \"Bypassing {} due to compile cache hit\"".format(self)
         else:
             self.main_cmdline = shlex.join(["bash", vcomp_sh_path])
 
