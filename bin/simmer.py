@@ -301,9 +301,19 @@ def get_active_job_limit(options, rcfg, simulator):
     if options.jobs is not None:
         requested_jobs = options.jobs
     else:
-        cpu_count, allocation_source = job_lib.detect_allocated_cpus()
-        rcfg.log.info("Scheduler CPU allocation: %d (%s)", cpu_count, allocation_source)
-        requested_jobs = max(1, cpu_count // simulator.get_scheduler_threads_per_test())
+        # JobManager launches only on this process's execution host.  Size the
+        # local queue from that host, never from aggregate multi-host LSF slots.
+        host_cpu_count = max(1, os.cpu_count() or 1)
+        threads_per_test = max(1, simulator.get_scheduler_threads_per_test())
+        requested_jobs = max(1, host_cpu_count // threads_per_test)
+        active_job_limit = max(1, min(total_tests, requested_jobs))
+        rcfg.log.info(
+            "Scheduler host CPU capacity: %d; threads per test: %d; parallel job limit: %d",
+            host_cpu_count,
+            threads_per_test,
+            active_job_limit,
+        )
+        return active_job_limit
     return max(1, min(total_tests, requested_jobs))
 
 
