@@ -169,7 +169,14 @@ py_test(
     name = "simmer_runtime_hardening_test",
     timeout = "short",
     srcs = ["simmer_runtime_hardening_test.py"],
-    data = ["//bin:simmer.py"],
+    data = [
+        "//bin:simmer.py",
+        "//bin:templates/rerun_template.sh.j2",
+        "//bin:templates/run_waves_template.sh.j2",
+        "//bin:templates/sim_template.sh.j2",
+        "//bin:templates/vcs_wave_cmd_template.tcl.j2",
+        "//bin:templates/xrun_wave_cmd_template.tcl.j2",
+    ],
     deps = [
         "//bin:args_parser_lib",
         "//bin:check_test_lib",

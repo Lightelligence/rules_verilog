@@ -169,9 +169,12 @@ and must not be used for FSDB.
 
 With `--wave-tcl`, the Tcl file owns scopes, depths, dump timing, and the
 file-ID-specific `dump -glitch on` command. Simmer still passes both runtime
-FSDB options. Keep the output at `$::env(SIMRESULTS)/waves.fsdb` so simmer can
-find it and generate `run_waves.sh`. Open Verdi locally or through the site LSF
-queue:
+FSDB options. Keep the output at `$::env(SIMRESULTS)/waves.fsdb`, the path opened
+by `run_waves.sh`. For both VCS and Xcelium, `--waves` generates this viewer
+script before simulation starts and retains it after interruption. It attempts
+to open whatever data is available, without guaranteeing an intact or complete
+database; if the wave artifact does not exist yet, it reports its path.
+Open Verdi locally or through the site LSF queue:
 
 ```bash
 ./run_waves.sh

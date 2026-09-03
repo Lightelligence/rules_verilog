@@ -274,6 +274,21 @@ class VcsSimulator(SimulatorInterface):
             raise ValueError("Wave viewer arguments cannot contain newlines")
         return "\n".join(argv)
 
+    def get_wave_view_script_options(self, wave_file_path, job_dir):
+        # stdout.log does not exist when pre_run prepares the viewer. Decide
+        # whether to attach SmartLog when the user actually opens the waves.
+        options = {
+            "wave_view_command": self.get_wave_view_command(wave_file_path),
+            "optional_wave_view_args": [],
+        }
+        if self.use_smartlog():
+            smartlog_path = os.path.join(job_dir, "stdout.log")
+            options["optional_wave_view_args"].append({
+                "path": smartlog_path,
+                "args": ["-smlog", smartlog_path],
+            })
+        return options
+
     def get_bazel_compile_args_file(self, bazel_runfiles_main, relpath, bazel_target):
         return os.path.join(bazel_runfiles_main, relpath, "{}_compile_args.f".format(bazel_target))
 

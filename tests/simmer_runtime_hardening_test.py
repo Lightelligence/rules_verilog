@@ -22,6 +22,7 @@ from args_parser import parse_args
 import simmer
 from lib import compile_cache
 from lib.job_lib import JobCancelledError, JobStatus
+from lib.runtime_options import normalize_test_runtime_options
 
 
 def _replace_symlink_in_process(link_path, target_path, start, result_queue):
@@ -568,11 +569,81 @@ class SimmerRuntimeHardeningTest(unittest.TestCase):
             self.assertFalse(wave_path.exists())
             self.assertFalse(viewer.exists())
 
-    def test_missing_requested_wave_artifact_fails_test_without_viewer(self):
+    def test_wave_viewer_exists_before_simulation_and_survives_interrupt(self):
+        formats = (("VCS", "fsdb"), ("XRUN", "vwdb"), ("XRUN", "shm"), ("XRUN", "vcd"), ("VCS", None), ("XRUN", None))
+        for backend, wave_type, partial in ((b, w, p) for b, w in formats for p in (False, True)):
+            with self.subTest(backend=backend, wave_type=wave_type,
+                              partial=partial), tempfile.TemporaryDirectory() as root:
+                args = ["--simulator", backend]
+                if wave_type:
+                    args.extend(["--waves", "--wave-type", wave_type])
+                options = parse_args(args)
+                run = {"planned_tests": 1, "tests": [], "compile": [], "launch_failures": []}
+                rcfg = SimpleNamespace(options=options,
+                                       proj_dir=root,
+                                       regression_dir=root,
+                                       simmer_results_run=run,
+                                       log=mock.Mock(),
+                                       tidy=False)
+                vcomp = simmer.job_lib.Job(rcfg, "tb")
+                vcomp.bazel_vcomp_target = "//tb:tb"
+                vcomp.job_dir = root
+                vcomp.log_path = str(Path(root) / "cmp.log")
+                vcomp.bazel_runfiles_main = str(Path(root) / "runfiles")
+                Path(vcomp.bazel_runfiles_main).mkdir()
+                vcomp.bazel_runtime_args = str(Path(vcomp.bazel_runfiles_main) / "runtime_args.f")
+                Path(vcomp.bazel_runtime_args).touch()
+                runtime = normalize_test_runtime_options({"simulator": backend, "uvm_testname": "test"})
+                simulator_type = simmer.VcsSimulator if backend == "VCS" else simmer.XceliumSimulator
+                simulator = simulator_type(options, rcfg, simmer.jinja2_env)
+                job = simmer.TestJob(rcfg,
+                                     "//tb:test",
+                                     vcomp,
+                                     SimpleNamespace(jobs=[]),
+                                     SimpleNamespace(dynamic_args=lambda _: runtime),
+                                     simulator,
+                                     iteration=1,
+                                     planned_seed=7)
+                job_dir = str(Path(root) / "test dir")
+                with mock.patch.object(job, "_claim_run_directory", return_value=("test", job_dir)), \
+                     mock.patch("simmer.replace_symlink"), mock.patch("simmer.log", rcfg.log), \
+                     mock.patch("subprocess.Popen") as launch:
+                    job.pre_run()
+                launch.assert_not_called()
+                viewer = Path(job_dir) / "run_waves.sh"
+                if wave_type is None:
+                    self.assertFalse(viewer.exists())
+                    self.assertIsNone(job.run_wave_script_path)
+                    self.assertIsNone(job.wave_artifact_path)
+                    continue
+                self.assertTrue(viewer.is_file(), "viewer must exist before the simulator starts")
+                if os.name == "posix":
+                    self.assertTrue(viewer.stat().st_mode & 0o111)
+                original_script = viewer.read_text(encoding="utf-8")
+                artifact = Path(simulator.get_wave_artifact_path(job_dir, wave_type))
+                self.assertFalse(artifact.exists())
+                if partial:
+                    if wave_type == "shm":
+                        artifact.mkdir()
+                    else:
+                        artifact.write_text("partial waveform", encoding="utf-8")
+                job.cancel()
+                with mock.patch("simmer.simmer_results.save_run"):
+                    simmer.finalize_interrupted_run(rcfg, simulator, {}, jm=SimpleNamespace(interrupted_jobs=(job, )))
+                self.assertEqual(original_script, viewer.read_text(encoding="utf-8"))
+                record = run["tests"][0]
+                self.assertEqual("INTERRUPTED", record["status"])
+                self.assertEqual(str(viewer), record["waves"]["run_script"])
+                self.assertEqual(str(artifact), record["waves"]["path"])
+                self.assertEqual(partial, record["waves"]["exists"])
+
+    def test_missing_requested_wave_artifact_fails_test_and_preserves_prepared_viewer(self):
         with tempfile.TemporaryDirectory() as job_dir:
             log_path = Path(job_dir) / "stdout.log"
             log_path.write_text("simulation completed\n", encoding="utf-8")
             missing_wave = Path(job_dir) / "waves.fsdb"
+            viewer = Path(job_dir) / "run_waves.sh"
+            viewer.write_text("prepared viewer\n", encoding="utf-8")
             options = SimpleNamespace(waves=[], wave_type="fsdb")
             rcfg = SimpleNamespace(
                 log=mock.Mock(),
@@ -590,6 +661,8 @@ class SimmerRuntimeHardeningTest(unittest.TestCase):
             test_job.error_message = None
             test_job.iteration = 1
             test_job.job_dir = job_dir
+            test_job.run_wave_script_path = str(viewer)
+            test_job.wave_artifact_path = str(missing_wave)
             test_job.job_lib = SimpleNamespace(returncode=0, manager=mock.Mock())
             test_job.job_start_time = datetime.datetime.now()
             test_job.job_stop_time = None
@@ -600,7 +673,7 @@ class SimmerRuntimeHardeningTest(unittest.TestCase):
             test_job.vcomper = SimpleNamespace(name="tb")
 
             with mock.patch("simmer.log", rcfg.log), \
-                 mock.patch("simmer.simmer_results.record_test_job"), \
+                 mock.patch("simmer.simmer_results.record_test_job") as record_job, \
                  mock.patch("simmer.sim_artifacts.write_executable_script") as write_viewer:
                 test_job.post_run()
 
@@ -609,6 +682,8 @@ class SimmerRuntimeHardeningTest(unittest.TestCase):
             simulator.cleanup_test_coverage.assert_called_once_with(test_job)
             simulator.get_wave_view_command.assert_not_called()
             write_viewer.assert_not_called()
+            self.assertEqual("prepared viewer\n", viewer.read_text(encoding="utf-8"))
+            self.assertEqual(str(viewer), record_job.call_args.kwargs["waves_script"])
 
     @unittest.skipUnless(os.name == "posix", "POSIX advisory-lock behavior")
     def test_shared_runtime_lock_serializes_identical_regressions(self):

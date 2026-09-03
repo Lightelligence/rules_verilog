@@ -91,6 +91,17 @@ class SimulatorInterface(abc.ABC):
         """Return the command used by run_waves.sh to open a wave artifact."""
         pass
 
+    def get_wave_view_script_options(self, wave_file_path, job_dir):
+        """Plan a viewer before simulation, without requiring runtime artifacts.
+
+        Each optional_wave_view_args entry has a path and an argv list. The
+        generated script appends those args only if that file exists at launch.
+        """
+        return {
+            "wave_view_command": self.get_wave_view_command(wave_file_path, job_dir),
+            "optional_wave_view_args": [],
+        }
+
     @abc.abstractmethod
     def get_bazel_compile_args_file(self, bazel_runfiles_main, relpath, bazel_target):
         """Get the path to the simulator-specific compile args file."""

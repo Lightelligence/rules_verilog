@@ -250,6 +250,10 @@ def record_test_job(run, test_job, waves_script=None, waves_path=None, status=No
     waves_enabled = test_job.rcfg.options.waves is not None
     waves = {"enabled": waves_enabled}
     if waves_enabled:
+        if waves_script is None:
+            waves_script = getattr(test_job, "run_wave_script_path", None)
+        if waves_path is None:
+            waves_path = getattr(test_job, "wave_artifact_path", None)
         waves.update({
             "path": waves_path,
             "run_script": waves_script,

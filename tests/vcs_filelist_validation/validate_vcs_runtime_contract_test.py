@@ -268,6 +268,27 @@ run_bounded_process([
 
         self.assertIn("-smlog", command.splitlines())
 
+    def test_early_wave_viewer_defers_optional_smartlog_until_launch(self):
+        for backend, smartlog in (("VCS", True), ("VCS", False), ("XRUN", False)):
+            with self.subTest(backend=backend, smartlog=smartlog), tempfile.TemporaryDirectory() as job_dir:
+                args = ["--simulator", backend, "--waves", "--wave-type", "fsdb" if backend == "VCS" else "vwdb"]
+                if smartlog:
+                    args.append("--smartlog")
+                simulator_type = VcsSimulator if backend == "VCS" else XceliumSimulator
+                simulator = simulator_type(parse_args(args), DummyRegressionConfig(), None)
+                wave_path = simulator.get_wave_artifact_path(job_dir, simulator.options.wave_type)
+                log_path = Path(job_dir) / "stdout.log"
+
+                options = simulator.get_wave_view_script_options(wave_path, job_dir)
+
+                self.assertFalse(Path(wave_path).exists())
+                self.assertFalse(log_path.exists())
+                self.assertNotIn("-smlog", options["wave_view_command"].splitlines())
+                expected_optional = [{"path": str(log_path), "args": ["-smlog", str(log_path)]}] if smartlog else []
+                self.assertEqual(expected_optional, options["optional_wave_view_args"])
+                log_path.touch()
+                self.assertEqual(options, simulator.get_wave_view_script_options(wave_path, job_dir))
+
     def test_wave_viewer_commands_preserve_argv_boundaries(self):
         wave_path = "/tmp/waves with spaces;$(not-executed).fsdb"
         vcs = VcsSimulator(parse_args(["--simulator", "VCS", "--waves"]), DummyRegressionConfig(), None)
@@ -3006,6 +3027,7 @@ run_bounded_process([
             runfiles_dir = job_dir / "bazel runfiles;literal"
             runfiles_dir.mkdir(parents=True)
             wave_path = job_dir / "waves ;$(not-executed).fsdb"
+            smartlog_path = job_dir / "stdout ;$(not-executed).log"
             prefix_capture = root / "prefix-argv.txt"
             viewer_capture = root / "viewer-argv.txt"
             injection_sentinel = root / "injection-ran"
@@ -3050,6 +3072,10 @@ run_bounded_process([
                 wave_file_path=str(wave_path),
                 bazel_runfiles_dir=str(runfiles_dir),
                 wave_view_command=shlex.quote("\n".join(viewer_argv)),
+                optional_wave_view_args=[{
+                    "path": str(smartlog_path),
+                    "args": ["-smlog", str(smartlog_path)]
+                }],
             )
             script = root / "run_waves.sh"
             script.write_text(rendered, encoding="utf-8", newline="\n")
@@ -3065,6 +3091,13 @@ run_bounded_process([
                 "WAVE_INJECTION_SENTINEL":
                 str(injection_sentinel),
             })
+            missing_wave = subprocess.run(["bash", str(script)], check=False, env=env, capture_output=True, text=True)
+            self.assertEqual(1, missing_wave.returncode)
+            self.assertIn("Wave artifact is not available: {}".format(wave_path), missing_wave.stderr)
+            self.assertFalse(prefix_capture.exists())
+            self.assertFalse(viewer_capture.exists())
+
+            wave_path.write_text("partial waveform", encoding="utf-8")
             subprocess.run(["bash", str(script)], check=True, env=env, capture_output=True, text=True)
 
             self.assertEqual(
@@ -3072,6 +3105,13 @@ run_bounded_process([
                 prefix_capture.read_text(encoding="utf-8").splitlines(),
             )
             self.assertEqual(viewer_argv[1:], viewer_capture.read_text(encoding="utf-8").splitlines())
+            self.assertFalse(injection_sentinel.exists())
+
+            # The script was already generated: attach logs that appeared later.
+            smartlog_path.write_text("partial simulation log", encoding="utf-8")
+            subprocess.run(["bash", str(script)], check=True, env=env, capture_output=True, text=True)
+            self.assertEqual(viewer_argv[1:] + ["-smlog", str(smartlog_path)],
+                             viewer_capture.read_text(encoding="utf-8").splitlines())
             self.assertFalse(injection_sentinel.exists())
 
     def test_simmer_log_and_profile_performance_contracts(self):

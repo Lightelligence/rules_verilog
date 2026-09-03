@@ -570,10 +570,17 @@ simmer -t <bench>:<test> --simulator VCS \
   --wave-depth 8 --wave-start 1000 --wave-end 50000
 ```
 
-Successful wave runs create an executable `run_waves.sh` beside `waves.fsdb`.
-It launches the Verdi FSDB viewer with `verdi -apex -ssf`; it does not add
-`-lca`. Sites using LSF can provide a launcher without editing the generated
-script:
+With `--waves`, simmer creates an executable `run_waves.sh` in each test's run
+directory before starting simulation, for both VCS and Xcelium. The script and
+its history path are retained if simulation is interrupted. Run it to open
+whatever wave data has been written; it does not require successful completion
+or guarantee that an interrupted database is readable or complete. If dumping
+has not created the wave artifact yet, it reports the missing path.
+
+For VCS it launches Verdi with `verdi -apex -ssf`; it does not add `-lca`.
+When `--smartlog` is enabled, `stdout.log` is attached only if it exists when
+the viewer script is executed. Sites using LSF can provide a launcher without
+editing the generated script:
 
 ```bash
 SIMMER_WAVE_LAUNCHER="bsub -I -q syn" ./run_waves.sh
@@ -597,8 +604,7 @@ Use `--wave-tcl <file>` for project-specific FSDB dump/probe commands. The
 [editable VCS FSDB example](examples/vcs_fsdb_dump.tcl) shows per-scope depth,
 timed enable/disable, glitch capture, flush and close ordering. A custom Tcl
 file owns scopes, depths, timing, and `dump -glitch on`; keep its output at
-`$::env(SIMRESULTS)/waves.fsdb` so simmer can find it and generate
-`run_waves.sh`.
+`$::env(SIMRESULTS)/waves.fsdb`, the path opened by the generated `run_waves.sh`.
 
 ## Xcelium defaults
 

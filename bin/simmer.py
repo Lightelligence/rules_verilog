@@ -778,6 +778,8 @@ class TestJob(Job):
         self._log_path = None
         self.test_name_seed = None # Initialize attribute used by VCS sim script
         self._run_directory_lock = None
+        self.run_wave_script_path = None
+        self.wave_artifact_path = None
 
     def clone(self):
         # --- Ensure simulator is passed to cloned job ---
@@ -836,6 +838,21 @@ class TestJob(Job):
             return
         directory_lock.release()
         self._run_directory_lock = None
+
+    def _prepare_wave_viewer(self):
+        wave_path = os.path.abspath(self.simulator.get_wave_artifact_path(self.job_dir, self.rcfg.options.wave_type))
+        script_path = os.path.join(self.job_dir, "run_waves.sh")
+        context = self.simulator.get_wave_view_script_options(wave_path, self.job_dir)
+        context.update({
+            "job_dir": self.job_dir,
+            "wave_file_path": wave_path,
+            "bazel_runfiles_dir": os.path.join(self.job_dir, "bazel_runfiles_main"),
+        })
+        context["wave_view_command"] = shlex.quote(context["wave_view_command"])
+        sim_artifacts.write_executable_script(script_path, RUN_WAVE_TEMPLATE.render(context))
+        self.wave_artifact_path = wave_path
+        self.run_wave_script_path = script_path
+        log.info("Run wave (available after dumping starts): %s", script_path)
 
     def pre_run(self):
         log.debug("Preparing test: %s:%s (Simulator: %s)", self.vcomper.name, self.name, self.simulator.get_name())
@@ -955,6 +972,8 @@ class TestJob(Job):
                 with open(wave_tcl_path, 'w') as filep:
                     filep.write(wave_cmd_template.render(**wave_tcl_context))
 
+            self._prepare_wave_viewer()
+
         else:
             # GUI backends can still require a run Tcl even without wave capture.
             no_waves_tcl_path = os.path.join(self.job_dir, "nwaves.tcl")
@@ -1063,7 +1082,7 @@ class TestJob(Job):
 
     def post_run(self):
         options = self.rcfg.options
-        run_wave_script_path = None
+        run_wave_script_path = getattr(self, "run_wave_script_path", None)
         abs_wave_path = None
         super(TestJob, self).post_run()
 
@@ -1125,19 +1144,8 @@ class TestJob(Job):
                     os.chmod(abs_wave_path, 0o755)
                 except OSError as exc:
                     log.debug("Could not chmod wave artifact %s: %s", abs_wave_path, exc)
-                run_wave_script_path = os.path.join(wave_path, "run_waves.sh")
-                bazel_runfiles_dir = os.path.join(wave_path, 'bazel_runfiles_main')
-                absolute_wave_path = os.path.abspath(abs_wave_path)
-                run_wave_template_vars = {
-                    "job_dir": wave_path,
-                    "wave_file_path": absolute_wave_path,
-                    "bazel_runfiles_dir": bazel_runfiles_dir,
-                    "wave_view_command":
-                    shlex.quote(self.simulator.get_wave_view_command(absolute_wave_path, wave_path)),
-                }
-                run_wave_script_content = RUN_WAVE_TEMPLATE.render(run_wave_template_vars)
-                sim_artifacts.write_executable_script(run_wave_script_path, run_wave_script_content)
-                log.info(f"Run wave: {run_wave_script_path}")
+                if run_wave_script_path:
+                    log.info("Run wave: %s", run_wave_script_path)
             else:
                 self.log.error("%s completed without expected wave artifact %s", self, abs_wave_path)
                 if self.jobstatus != JobStatus.FAILED:
