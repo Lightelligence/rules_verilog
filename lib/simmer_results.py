@@ -78,19 +78,41 @@ def _safe_text(value):
     return value if isinstance(value, str) else ""
 
 
-def _record_job_interval(record, job, stopped_at=None):
+def _job_time_interval(job, stopped_at=None):
     started_at = getattr(job, "job_start_time", None)
     finished_at = getattr(job, "job_stop_time", None) or stopped_at
     if started_at is None or finished_at is None:
-        return
+        return None
     try:
         started_at_s = started_at.timestamp()
         finished_at_s = finished_at.timestamp()
     except (AttributeError, OSError, OverflowError, ValueError):
-        return
+        return None
     if finished_at_s < started_at_s:
-        return
-    record["_elapsed_interval_s"] = [started_at_s, finished_at_s]
+        return None
+    return started_at_s, finished_at_s
+
+
+def _record_job_interval(record, job, stopped_at=None):
+    interval = _job_time_interval(job, stopped_at=stopped_at)
+    if interval is not None:
+        record["_elapsed_interval_s"] = list(interval)
+
+
+def _job_duration_seconds(job, status, stopped_at=None):
+    """Return a job's wall duration, recovering an interrupted live interval."""
+    duration = _duration_seconds(getattr(job, "duration_s", None))
+    if status != "INTERRUPTED":
+        return duration
+    if duration is not None and duration > 0:
+        return duration
+
+    interval = _job_time_interval(job, stopped_at=stopped_at)
+    if interval is not None:
+        return _duration_seconds(interval[1] - interval[0])
+    # Job.duration_s is 0 when a job has no stop time.  Without a start time
+    # there is no observed wall interval, so retain that fact as unknown.
+    return None if duration == 0 else duration
 
 
 def _consume_elapsed_time(records):
@@ -226,37 +248,47 @@ def _upsert_by_key(items, key, value):
 def record_compile_job(run, vcomp_job, status=None):
     if run is None:
         return
+    job_status = getattr(vcomp_job, "jobstatus", None)
+    record_status = status or getattr(job_status, "name", job_status)
+    stopped_at = None
+    if record_status == "INTERRUPTED" and getattr(vcomp_job, "job_stop_time", None) is None:
+        stopped_at = datetime.datetime.now()
     compile_record = {
         "bench": vcomp_job.name,
         "vcomp_target": vcomp_job.bazel_vcomp_target,
-        "status": status or vcomp_job.jobstatus.name,
+        "status": record_status,
         "compile_dir": vcomp_job.job_dir,
         "cmp_log": vcomp_job.log_path,
-        "duration_s": _duration_seconds(getattr(vcomp_job, "duration_s", 0) or 0),
+        "duration_s": _job_duration_seconds(vcomp_job, record_status, stopped_at=stopped_at),
         "metrics": getattr(vcomp_job, "compile_metrics", {}),
         "error_message": getattr(vcomp_job, "error_message", None),
     }
-    _record_job_interval(
-        compile_record,
-        vcomp_job,
-        stopped_at=datetime.datetime.now() if status == "INTERRUPTED" else None,
-    )
+    _record_job_interval(compile_record, vcomp_job, stopped_at=stopped_at)
     _upsert_by_key(run["compile"], "vcomp_target", compile_record)
 
 
 def record_test_job(run, test_job, waves_script=None, waves_path=None, status=None, simulation_started=None):
     if run is None:
         return
+    job_status = getattr(test_job, "jobstatus", None)
+    record_status = status or getattr(job_status, "name", job_status)
+    stopped_at = None
+    if record_status == "INTERRUPTED" and getattr(test_job, "job_stop_time", None) is None:
+        stopped_at = datetime.datetime.now()
     waves_enabled = test_job.rcfg.options.waves is not None
     waves = {"enabled": waves_enabled}
     if waves_enabled:
+        if waves_script is None:
+            waves_script = getattr(test_job, "run_wave_script_path", None)
+        if waves_path is None:
+            waves_path = getattr(test_job, "wave_artifact_path", None)
         waves.update({
             "path": waves_path,
             "run_script": waves_script,
             "exists": bool(waves_path and os.path.exists(waves_path)),
         })
 
-    wall_duration_s = _duration_seconds(getattr(test_job, "duration_s", 0) or 0)
+    wall_duration_s = _job_duration_seconds(test_job, record_status, stopped_at=stopped_at)
     simulation_duration_s = getattr(test_job, "simulation_duration_s", None)
     if simulation_started is None:
         simulation_started = simulation_duration_s is not None
@@ -267,7 +299,7 @@ def record_test_job(run, test_job, waves_script=None, waves_path=None, status=No
         "vcomp_target": test_job.vcomper.bazel_vcomp_target,
         "iteration": test_job.iteration,
         "seed": getattr(test_job, "seed", None),
-        "status": status or test_job.jobstatus.name,
+        "status": record_status,
         "simulation_started": bool(simulation_started),
         "duration_s": _duration_seconds(simulation_duration_s),
         "wall_duration_s": wall_duration_s,
@@ -278,11 +310,7 @@ def record_test_job(run, test_job, waves_script=None, waves_path=None, status=No
         "waves": waves,
         "error_message": getattr(test_job, "error_message", None),
     }
-    _record_job_interval(
-        test_record,
-        test_job,
-        stopped_at=datetime.datetime.now() if status == "INTERRUPTED" else None,
-    )
+    _record_job_interval(test_record, test_job, stopped_at=stopped_at)
     for index, existing in enumerate(run["tests"]):
         if all(existing.get(key) == test_record.get(key) for key in ("target", "iteration", "seed")):
             run["tests"][index] = test_record
@@ -571,6 +599,172 @@ def _format_timing(run):
         compile_duration = _format_duration(timing.get("compile_elapsed_s"))
     simulate_duration = _format_duration(timing.get("simulate_elapsed_s"))
     return "[compile {} | simulate {}]".format(compile_duration, simulate_duration)
+
+
+def _summary_count(value):
+    value = _safe_int(value, None)
+    if value is None:
+        return None
+    return max(0, value)
+
+
+def _summary_text(value, default="-"):
+    if value is None:
+        return default
+    try:
+        text = str(value)
+    except Exception:
+        return default
+    text = text.replace("\r", " ").replace("\n", " ").strip()
+    return text or default
+
+
+def _summary_duration(value):
+    if isinstance(value, bool):
+        return "-"
+    return _format_duration(value)
+
+
+def _summary_record_duration(record, key, allow_interval=True):
+    value = record.get(key)
+    if value is not None or not allow_interval:
+        return value
+    interval = record.get("_elapsed_interval_s")
+    if not isinstance(interval, list) or len(interval) != 2:
+        return None
+    start, stop = interval
+    if not all(
+            isinstance(item, (int, float)) and not isinstance(item, bool) and math.isfinite(item) for item in interval):
+        return None
+    return stop - start if stop >= start else None
+
+
+def _summary_status(record):
+    status = _summary_text(record.get("status"), "").upper()
+    return status
+
+
+def _summary_test_counts(run, records):
+    summary = _mapping(run.get("summary"))
+    status_counts = {
+        "passed": sum(1 for record in records if _summary_status(record) == "PASSED"),
+        "failed": sum(1 for record in records if _summary_status(record) == "FAILED"),
+        "interrupted": sum(1 for record in records if _summary_status(record) == "INTERRUPTED"),
+    }
+    total = _summary_count(summary.get("total"))
+    if total is None:
+        total = _summary_count(run.get("planned_tests"))
+    if total is None:
+        total = len(records)
+
+    counts = {}
+    for key in ("passed", "failed", "interrupted"):
+        counts[key] = _summary_count(summary.get(key))
+        if counts[key] is None:
+            counts[key] = status_counts[key]
+    not_run = _summary_count(summary.get("skipped"))
+    if not_run is None:
+        not_run = max(0, total - sum(counts.values()))
+    return total, counts["passed"], counts["failed"], counts["interrupted"], not_run
+
+
+def _summary_test_line(record):
+    status = _summary_status(record) or "-"
+    bench = _summary_text(record.get("bench"))
+    test = _summary_text(record.get("test"))
+    iteration = _summary_text(record.get("iteration"))
+    seed = _summary_text(record.get("seed"))
+    wall = _summary_duration(_summary_record_duration(record, "wall_duration_s"))
+    if record.get("simulation_started") is False:
+        simulated = "-"
+    else:
+        simulated = _summary_duration(_summary_record_duration(record, "duration_s", allow_interval=False))
+    return "  {} {}:{} iteration={} seed={} wall={} sim={}".format(
+        status,
+        bench,
+        test,
+        iteration,
+        seed,
+        wall,
+        simulated,
+    )
+
+
+def _summary_test_artifacts(record):
+    lines = [
+        "    stdout log: {}".format(_summary_text(record.get("stdout_log"))),
+        "    cmp log: {}".format(_summary_text(record.get("cmp_log"))),
+    ]
+    waves = _mapping(record.get("waves"))
+    if waves.get("enabled"):
+        lines.append("    waves: path={} run_script={} (integrity unverified)".format(
+            _summary_text(waves.get("path")),
+            _summary_text(waves.get("run_script")),
+        ))
+    error_message = _summary_text(record.get("error_message"), "")
+    if error_message:
+        lines.append("    error: {}".format(error_message))
+    return lines
+
+
+def _summary_compile_line(record):
+    status = _summary_status(record) or "-"
+    bench = _summary_text(record.get("bench"))
+    target = _summary_text(record.get("vcomp_target"))
+    elapsed = _summary_duration(_summary_record_duration(record, "duration_s"))
+    return "  {} bench={} target={} elapsed={}".format(status, bench, target, elapsed)
+
+
+def format_interrupted_summary(run, reason="SIGINT", shutdown_complete=True):
+    """Format a no-I/O snapshot for a run interrupted during execution."""
+    known_run = isinstance(run, dict)
+    if not known_run:
+        run = {}
+    tests = _records(run.get("tests"))
+    compile_records = _records(run.get("compile"))
+
+    reason_text = _summary_text(reason)
+    lines = ["Interrupted run summary", "reason: {}".format(reason_text)]
+    if shutdown_complete:
+        lines.append("shutdown: complete")
+    else:
+        lines.append("WARNING: shutdown incomplete; some jobs may still be running or resources may remain active.")
+
+    if known_run:
+        total, passed, failed, interrupted, not_run = _summary_test_counts(run, tests)
+        counts_text = "total={} passed={} failed={} interrupted={} not-run={}".format(
+            total,
+            passed,
+            failed,
+            interrupted,
+            not_run,
+        )
+    else:
+        counts_text = "total=- passed=- failed=- interrupted=- not-run=-"
+    lines.append("tests: {}".format(counts_text))
+
+    detail_tests = [record for record in tests if _summary_status(record) in ("INTERRUPTED", "FAILED")]
+    if detail_tests:
+        lines.append("test details:")
+        for record in detail_tests:
+            lines.append(_summary_test_line(record))
+            lines.extend(_summary_test_artifacts(record))
+
+    detail_compile = [record for record in compile_records if _summary_status(record) in ("INTERRUPTED", "FAILED")]
+    if detail_compile:
+        lines.append("compile details:")
+        for record in detail_compile:
+            lines.append(_summary_compile_line(record))
+            lines.append("    cmp log: {}".format(_summary_text(record.get("cmp_log"))))
+            error_message = _summary_text(record.get("error_message"), "")
+            if error_message:
+                lines.append("    error: {}".format(error_message))
+
+    if known_run:
+        regression_log = _summary_text(run.get("regression_log"), "")
+        if regression_log:
+            lines.append("regression log: {}".format(regression_log))
+    return "\n".join(lines)
 
 
 def _is_failed_history_run(run):

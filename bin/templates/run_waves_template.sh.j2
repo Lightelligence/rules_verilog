@@ -16,6 +16,15 @@ printf 'Wave file: %s\n' {{ wave_file_path|shell_quote }}
 printf 'Runfiles directory: %s\n' {{ bazel_runfiles_dir|shell_quote }}
 printf 'Target run directory: %s\n' {{ job_dir|shell_quote }}
 
+# The script is generated before dumping starts. Do not require a completed
+# simulation or attempt to validate/recover a partially written database.
+if [ ! -e {{ wave_file_path|shell_quote }} ]; then
+    printf 'Error: Wave artifact is not available: %s\n' {{ wave_file_path|shell_quote }} >&2
+    echo "Dumping may not have started, or the artifact may have been removed." >&2
+    exit 1
+fi
+echo "Opening available wave data; an interrupted simulation may leave incomplete data."
+
 # Check if bazel_runfiles_main directory exists
 if [ ! -d {{ bazel_runfiles_dir|shell_quote }} ]; then
     printf 'Error: Directory %s does not exist.\n' {{ bazel_runfiles_dir|shell_quote }}
@@ -35,6 +44,12 @@ if [[ -z "${WAVE_VIEW_ARGV[0]:-}" ]]; then
     echo "Error: Wave viewer command is empty." >&2
     exit 1
 fi
+
+{% for optional_input in optional_wave_view_args|default([]) %}
+if [ -f {{ optional_input.path|shell_quote }} ]; then
+    WAVE_VIEW_ARGV+=({% for arg in optional_input.args %}{{ arg|shell_quote }} {% endfor %})
+fi
+{% endfor %}
 
 if [ -n "${SIMMER_WAVE_LAUNCHER:-}" ]; then
     # Parse shell-style quoting without evaluating operators, substitutions, or

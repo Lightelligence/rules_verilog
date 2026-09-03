@@ -778,6 +778,8 @@ class TestJob(Job):
         self._log_path = None
         self.test_name_seed = None # Initialize attribute used by VCS sim script
         self._run_directory_lock = None
+        self.run_wave_script_path = None
+        self.wave_artifact_path = None
 
     def clone(self):
         # --- Ensure simulator is passed to cloned job ---
@@ -836,6 +838,21 @@ class TestJob(Job):
             return
         directory_lock.release()
         self._run_directory_lock = None
+
+    def _prepare_wave_viewer(self):
+        wave_path = os.path.abspath(self.simulator.get_wave_artifact_path(self.job_dir, self.rcfg.options.wave_type))
+        script_path = os.path.join(self.job_dir, "run_waves.sh")
+        context = self.simulator.get_wave_view_script_options(wave_path, self.job_dir)
+        context.update({
+            "job_dir": self.job_dir,
+            "wave_file_path": wave_path,
+            "bazel_runfiles_dir": os.path.join(self.job_dir, "bazel_runfiles_main"),
+        })
+        context["wave_view_command"] = shlex.quote(context["wave_view_command"])
+        sim_artifacts.write_executable_script(script_path, RUN_WAVE_TEMPLATE.render(context))
+        self.wave_artifact_path = wave_path
+        self.run_wave_script_path = script_path
+        log.info("Run wave (available after dumping starts): %s", script_path)
 
     def pre_run(self):
         log.debug("Preparing test: %s:%s (Simulator: %s)", self.vcomper.name, self.name, self.simulator.get_name())
@@ -955,6 +972,8 @@ class TestJob(Job):
                 with open(wave_tcl_path, 'w') as filep:
                     filep.write(wave_cmd_template.render(**wave_tcl_context))
 
+            self._prepare_wave_viewer()
+
         else:
             # GUI backends can still require a run Tcl even without wave capture.
             no_waves_tcl_path = os.path.join(self.job_dir, "nwaves.tcl")
@@ -1063,7 +1082,7 @@ class TestJob(Job):
 
     def post_run(self):
         options = self.rcfg.options
-        run_wave_script_path = None
+        run_wave_script_path = getattr(self, "run_wave_script_path", None)
         abs_wave_path = None
         super(TestJob, self).post_run()
 
@@ -1125,19 +1144,8 @@ class TestJob(Job):
                     os.chmod(abs_wave_path, 0o755)
                 except OSError as exc:
                     log.debug("Could not chmod wave artifact %s: %s", abs_wave_path, exc)
-                run_wave_script_path = os.path.join(wave_path, "run_waves.sh")
-                bazel_runfiles_dir = os.path.join(wave_path, 'bazel_runfiles_main')
-                absolute_wave_path = os.path.abspath(abs_wave_path)
-                run_wave_template_vars = {
-                    "job_dir": wave_path,
-                    "wave_file_path": absolute_wave_path,
-                    "bazel_runfiles_dir": bazel_runfiles_dir,
-                    "wave_view_command":
-                    shlex.quote(self.simulator.get_wave_view_command(absolute_wave_path, wave_path)),
-                }
-                run_wave_script_content = RUN_WAVE_TEMPLATE.render(run_wave_template_vars)
-                sim_artifacts.write_executable_script(run_wave_script_path, run_wave_script_content)
-                log.info(f"Run wave: {run_wave_script_path}")
+                if run_wave_script_path:
+                    log.info("Run wave: %s", run_wave_script_path)
             else:
                 self.log.error("%s completed without expected wave artifact %s", self, abs_wave_path)
                 if self.jobstatus != JobStatus.FAILED:
@@ -1252,15 +1260,47 @@ def resolve_report_root(rcfg, options):
     return os.path.join(rcfg.regression_dir, "regression_results")
 
 
-class _IgnoreAdditionalInterrupts:
-    """Ignore repeated Ctrl-C while the first interrupt performs bounded cleanup."""
+class _TerminationRequested(BaseException):
+    """Unwind to the normal shutdown path without treating SIGTERM as Ctrl-C."""
+
+    def __init__(self, signum):
+        self.signum = signum
+        super().__init__(signal.Signals(signum).name)
+
+
+class _HandleTermination:
+    """Install the CLI's SIGTERM handler, restoring an embedding caller's handler."""
+
+    @staticmethod
+    def _handle(signum, _frame):
+        # No logging or cleanup in the handler: those may hold interrupted locks.
+        raise _TerminationRequested(signum)
 
     def __enter__(self):
-        self._previous_handler = signal.signal(signal.SIGINT, signal.SIG_IGN)
+        self._previous_handler = signal.signal(signal.SIGTERM, self._handle)
         return self
 
     def __exit__(self, _exc_type, _exc_value, _traceback):
-        signal.signal(signal.SIGINT, self._previous_handler)
+        signal.signal(signal.SIGTERM, self._previous_handler)
+
+
+def _interrupt_reason(interrupt):
+    signum = getattr(interrupt, "signum", signal.SIGINT)
+    return signal.Signals(signum).name, 128 + signum
+
+
+class _IgnoreAdditionalInterrupts:
+    """Ignore repeated Ctrl-C/SIGTERM during bounded shutdown and final output."""
+
+    def __enter__(self):
+        self._previous_handlers = {}
+        for signum in (signal.SIGINT, signal.SIGTERM):
+            self._previous_handlers[signum] = signal.signal(signum, signal.SIG_IGN)
+        return self
+
+    def __exit__(self, _exc_type, _exc_value, _traceback):
+        for signum, previous_handler in self._previous_handlers.items():
+            signal.signal(signum, previous_handler)
 
 
 class _SharedRuntimeCleanup:
@@ -1594,9 +1634,10 @@ def main(rcfg, options, active_run=None):
         if options.no_run:
             rcfg.log.info("run_test:main(): --no_run option selected, exiting")
 
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, _TerminationRequested) as interrupt:
         with _IgnoreAdditionalInterrupts():
-            log.info("Saw keyboard interrupt, attempting to shutdown jobs.")
+            reason, exit_code = _interrupt_reason(interrupt)
+            log.info("Received %s, attempting to shutdown jobs.", reason)
             if active_run is not None:
                 active_run.stop_watching()
                 active_run.update(status="STOPPING")
@@ -1614,9 +1655,11 @@ def main(rcfg, options, active_run=None):
                 jm=jm,
                 cleanup_shared_runtime=shutdown_complete,
                 shared_runtime_cleanup=shared_runtime_cleanup,
+                reason=reason,
             )
-        log.error("Exiting due to keyboard interrupt")
-        raise SystemExit(130)
+            _flush_interrupt_logs(rcfg, jm)
+            log.error("Exiting due to %s (status %s)", reason, exit_code)
+            raise SystemExit(exit_code)
 
     workflow_finalize_failed = False
     regression_log_path = getattr(rcfg, "regression_log_path", regression_log_path)
@@ -1690,9 +1733,10 @@ def main(rcfg, options, active_run=None):
         total_failures = sum(failures.values())
         post_processing_complete = True
         rcfg.log.exit_if_warnings_or_errors("Previous errors")
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, _TerminationRequested) as interrupt:
         post_processing_interrupted = True
         with _IgnoreAdditionalInterrupts():
+            reason, exit_code = _interrupt_reason(interrupt)
             _flush_interrupt_logs(rcfg, jm)
             finalize_interrupted_run(
                 rcfg,
@@ -1701,19 +1745,36 @@ def main(rcfg, options, active_run=None):
                 jm=jm,
                 cleanup_shared_runtime=not unsafe_runtime,
                 shared_runtime_cleanup=shared_runtime_cleanup,
+                reason=reason,
             )
-        log.error("Exiting due to keyboard interrupt during regression finalization")
-        raise SystemExit(130)
+            log.error("Exiting due to %s during regression finalization (status %s)", reason, exit_code)
+            raise SystemExit(exit_code)
     finally:
         if not post_processing_interrupted and getattr(rcfg, "simmer_results_run", None) is not None:
-            simmer_results.finalize_run(
-                rcfg.simmer_results_run,
-                regression_log_path=regression_log_path,
-                backend_finalize_failed=(workflow_finalize_failed or coverage_merge_failed
-                                         or not post_processing_complete
-                                         or bool(rcfg.log.warn_count or rcfg.log.error_count)),
-            )
-            persist_simmer_results(rcfg)
+            try:
+                simmer_results.finalize_run(
+                    rcfg.simmer_results_run,
+                    regression_log_path=regression_log_path,
+                    backend_finalize_failed=(workflow_finalize_failed or coverage_merge_failed
+                                             or not post_processing_complete
+                                             or bool(rcfg.log.warn_count or rcfg.log.error_count)),
+                )
+                persist_simmer_results(rcfg)
+            except (KeyboardInterrupt, _TerminationRequested) as interrupt:
+                with _IgnoreAdditionalInterrupts():
+                    reason, exit_code = _interrupt_reason(interrupt)
+                    _flush_interrupt_logs(rcfg, jm)
+                    finalize_interrupted_run(
+                        rcfg,
+                        simulator,
+                        vcomp_jobs,
+                        jm=jm,
+                        cleanup_shared_runtime=not unsafe_runtime,
+                        shared_runtime_cleanup=shared_runtime_cleanup,
+                        reason=reason,
+                    )
+                    log.error("Exiting due to %s during history persistence (status %s)", reason, exit_code)
+                    raise SystemExit(exit_code)
 
     if workflow_finalize_failed or coverage_merge_failed:
         log.info("Exiting with status 1 due to backend finalization or coverage merge failure.")
@@ -1746,8 +1807,9 @@ def finalize_interrupted_run(rcfg,
                              vcomp_jobs,
                              jm=None,
                              cleanup_shared_runtime=True,
-                             shared_runtime_cleanup=None):
-    """Clean backend state and persist a failed result record after Ctrl-C."""
+                             shared_runtime_cleanup=None,
+                             reason="SIGINT"):
+    """Clean, record, and print a final snapshot after Ctrl-C stop or SIGTERM."""
     if cleanup_shared_runtime:
         try:
             if shared_runtime_cleanup is None:
@@ -1760,8 +1822,10 @@ def finalize_interrupted_run(rcfg,
         rcfg.log.warning("Skipping shared runtime cleanup because some jobs have not stopped")
 
     run = getattr(rcfg, "simmer_results_run", None)
+    # --no-run has no persisted test history, but still needs a compile snapshot.
+    persist_run = run is not None
     if run is None:
-        return
+        run = {"planned_tests": 0, "tests": [], "compile": [], "launch_failures": []}
     if jm is not None:
         for job in jm.interrupted_jobs:
             if isinstance(job, TestJob) and job.job_start_time is not None:
@@ -1773,7 +1837,45 @@ def finalize_interrupted_run(rcfg,
         regression_log_path=getattr(rcfg, "regression_log_path", None),
         backend_finalize_failed=True,
     )
-    persist_simmer_results(rcfg, fatal=False)
+    try:
+        if persist_run:
+            persist_simmer_results(rcfg, fatal=False)
+    finally:
+        # Use this invocation's full in-memory snapshot, not condensed history.
+        for line in simmer_results.format_interrupted_summary(run,
+                                                              reason=reason,
+                                                              shutdown_complete=cleanup_shared_runtime).splitlines():
+            rcfg.log.info("%s", line)
+
+
+def _run_regression_cli(options, logger):
+    """Cover discovery/startup as well as the scheduler with SIGTERM handling."""
+    with _HandleTermination():
+        active_run = None
+        rcfg = None
+        try:
+            if not options.discovery_only:
+                active_run = simmer_state.ActiveRun(options.proj_dir, options.simmer_argv, logger=logger)
+            rcfg = regression.RegressionConfig(options, logger)
+            main(rcfg, options, active_run=active_run)
+        except (KeyboardInterrupt, _TerminationRequested) as interrupt:
+            # The scheduler/finalizer handles its own interruptions. This covers
+            # discovery and setup before a managed job graph exists.
+            with _IgnoreAdditionalInterrupts():
+                reason, exit_code = _interrupt_reason(interrupt)
+                run = getattr(rcfg, "simmer_results_run", None)
+                for line in simmer_results.format_interrupted_summary(run, reason=reason).splitlines():
+                    logger.info("%s", line)
+                if run is None:
+                    logger.info("Interrupted during discovery/startup; scheduled simulation results are not available.")
+                logger.error("Exiting due to %s (status %s)", reason, exit_code)
+                sys.stdout.flush()
+                sys.stderr.flush()
+                raise SystemExit(exit_code)
+        finally:
+            if active_run is not None:
+                with _IgnoreAdditionalInterrupts():
+                    active_run.close()
 
 
 if __name__ == '__main__':
@@ -1794,12 +1896,4 @@ if __name__ == '__main__':
     options.simmer_argv = sys.argv[:]
     verbosity = cmn_logging.DEBUG if options.tool_debug else cmn_logging.INFO
     log = cmn_logging.build_logger("sim", level=verbosity, use_color=options.use_color, filehandler="simmer.log")
-    active_run = None
-    if not options.discovery_only:
-        active_run = simmer_state.ActiveRun(options.proj_dir, options.simmer_argv, logger=log)
-    try:
-        rcfg = regression.RegressionConfig(options, log)
-        main(rcfg, options, active_run=active_run)
-    finally:
-        if active_run is not None:
-            active_run.close()
+    _run_regression_cli(options, log)
