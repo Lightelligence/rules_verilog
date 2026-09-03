@@ -170,6 +170,7 @@ py_test(
     timeout = "short",
     srcs = ["simmer_runtime_hardening_test.py"],
     data = [
+        "simmer_interrupt_probe.py",
         "//bin:simmer.py",
         "//bin:templates/rerun_template.sh.j2",
         "//bin:templates/run_waves_template.sh.j2",

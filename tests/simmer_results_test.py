@@ -5,6 +5,7 @@ import threading
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 from lib import simmer_results
 
@@ -239,6 +240,202 @@ class SimmerResultsTest(unittest.TestCase):
 
         self.assertEqual(7, run["tests"][0]["duration_s"])
         self.assertEqual(19.8, run["tests"][0]["wall_duration_s"])
+
+    def test_interrupted_job_wall_duration_uses_live_interval_without_mutating_job(self):
+        run = simmer_results.create_run(["simmer", "-t", "tb:test"], self.rcfg, 1)
+        started_at = datetime.datetime(2026, 8, 7, 10, 0, 0)
+        stopped_at = started_at + datetime.timedelta(seconds=9.5)
+        test_job = SimpleNamespace(
+            rcfg=SimpleNamespace(options=SimpleNamespace(waves=None)),
+            vcomper=SimpleNamespace(
+                name="tb",
+                bazel_vcomp_target="//tb:tb",
+                job_dir="compile",
+                log_path="cmp.log",
+            ),
+            name="test",
+            target="//tb:test",
+            iteration=1,
+            seed=7,
+            jobstatus=SimpleNamespace(name="INTERRUPTED"),
+            duration_s=0,
+            simulation_duration_s=None,
+            job_dir="sim",
+            _log_path="stdout.log",
+            error_message=None,
+            job_start_time=started_at,
+            job_stop_time=None,
+        )
+
+        class FrozenDateTime(datetime.datetime):
+
+            @classmethod
+            def now(cls, tz=None):
+                return stopped_at
+
+        with mock.patch.object(simmer_results.datetime, "datetime", FrozenDateTime):
+            simmer_results.record_test_job(run, test_job, simulation_started=True)
+
+        self.assertEqual(9.5, run["tests"][0]["wall_duration_s"])
+        self.assertIsNone(test_job.job_stop_time)
+
+    def test_interrupted_compile_wall_duration_uses_live_interval(self):
+        run = simmer_results.create_run(["simmer", "-t", "tb:test"], self.rcfg, 1)
+        started_at = datetime.datetime(2026, 8, 7, 10, 0, 0)
+        stopped_at = started_at + datetime.timedelta(seconds=4.25)
+        vcomp = SimpleNamespace(
+            name="tb",
+            bazel_vcomp_target="//tb:tb",
+            jobstatus=SimpleNamespace(name="INTERRUPTED"),
+            job_dir="compile",
+            log_path="cmp.log",
+            duration_s=0,
+            compile_metrics={},
+            error_message=None,
+            job_start_time=started_at,
+            job_stop_time=None,
+        )
+
+        class FrozenDateTime(datetime.datetime):
+
+            @classmethod
+            def now(cls, tz=None):
+                return stopped_at
+
+        with mock.patch.object(simmer_results.datetime, "datetime", FrozenDateTime):
+            simmer_results.record_compile_job(run, vcomp)
+
+        self.assertEqual(4.25, run["compile"][0]["duration_s"])
+        self.assertIsNone(vcomp.job_stop_time)
+
+    def test_interrupted_summary_formats_mixed_counts_and_actionable_details(self):
+        run = {
+            "summary": {
+                "total": 4,
+                "passed": 1,
+                "failed": 1,
+                "interrupted": 1,
+                "skipped": 1,
+            },
+            "tests": [
+                {
+                    "bench": "tb",
+                    "test": "pass",
+                    "status": "PASSED",
+                    "stdout_log": "pass.log",
+                },
+                {
+                    "bench": "tb",
+                    "test": "fail",
+                    "status": "FAILED",
+                    "iteration": 2,
+                    "seed": 17,
+                    "wall_duration_s": 19.8,
+                    "duration_s": 7,
+                    "stdout_log": "fail.log",
+                    "cmp_log": "cmp-fail.log",
+                    "waves": {
+                        "enabled": True,
+                        "path": "fail.fsdb",
+                        "run_script": "fail-wave.sh",
+                    },
+                },
+                {
+                    "bench": "tb",
+                    "test": "stop",
+                    "status": "INTERRUPTED",
+                    "iteration": 3,
+                    "seed": 23,
+                    "wall_duration_s": 4,
+                    "duration_s": None,
+                    "stdout_log": "stop.log",
+                    "cmp_log": "cmp-stop.log",
+                    "waves": {
+                        "enabled": True,
+                        "path": "partial.fsdb",
+                        "run_script": "stop-wave.sh",
+                    },
+                },
+            ],
+            "compile": [],
+            "regression_log":
+            "regression.log",
+        }
+
+        summary = simmer_results.format_interrupted_summary(run, reason="SIGTERM", shutdown_complete=False)
+
+        self.assertIn("reason: SIGTERM", summary)
+        self.assertIn("WARNING: shutdown incomplete", summary)
+        self.assertIn("tests: total=4 passed=1 failed=1 interrupted=1 not-run=1", summary)
+        self.assertIn("FAILED tb:fail iteration=2 seed=17 wall=00:00:19 sim=00:00:07", summary)
+        self.assertIn("INTERRUPTED tb:stop iteration=3 seed=23 wall=00:00:04 sim=-", summary)
+        self.assertIn("stdout log: fail.log", summary)
+        self.assertIn("cmp log: cmp-fail.log", summary)
+        self.assertIn("waves: path=fail.fsdb run_script=fail-wave.sh", summary)
+        self.assertIn("waves: path=partial.fsdb run_script=stop-wave.sh", summary)
+        self.assertIn("regression log: regression.log", summary)
+        self.assertNotIn("pass.log", summary)
+        self.assertNotIn("all simulations stopped", summary.lower())
+        self.assertNotIn("integrity verified", summary.lower())
+
+    def test_interrupted_summary_includes_compile_failures_without_tests(self):
+        run = {
+            "planned_tests":
+            0,
+            "tests": [],
+            "compile": [
+                {
+                    "bench": "tb",
+                    "vcomp_target": "//tb:tb",
+                    "status": "FAILED",
+                    "duration_s": 3,
+                    "cmp_log": "compile.log",
+                    "error_message": "compile failed",
+                },
+                {
+                    "bench": "tb2",
+                    "vcomp_target": "//tb2:tb2",
+                    "status": "INTERRUPTED",
+                    "duration_s": None,
+                    "cmp_log": "compile-stop.log",
+                },
+            ],
+        }
+
+        summary = simmer_results.format_interrupted_summary(run)
+
+        self.assertIn("tests: total=0 passed=0 failed=0 interrupted=0 not-run=0", summary)
+        self.assertIn("compile details:", summary)
+        self.assertIn("FAILED bench=tb target=//tb:tb elapsed=00:00:03", summary)
+        self.assertIn("INTERRUPTED bench=tb2 target=//tb2:tb2 elapsed=-", summary)
+        self.assertIn("cmp log: compile.log", summary)
+        self.assertIn("cmp log: compile-stop.log", summary)
+        self.assertIn("error: compile failed", summary)
+
+    def test_interrupted_summary_handles_none_empty_and_missing_data(self):
+        unknown = simmer_results.format_interrupted_summary(None)
+        empty = simmer_results.format_interrupted_summary({})
+        missing = simmer_results.format_interrupted_summary({
+            "tests": [{
+                "status": "FAILED",
+                "simulation_started": False,
+                "_elapsed_interval_s": [0, 12],
+            }],
+        })
+
+        self.assertIn("tests: total=- passed=- failed=- interrupted=- not-run=-", unknown)
+        self.assertIn("tests: total=0 passed=0 failed=0 interrupted=0 not-run=0", empty)
+        self.assertIn("FAILED -:- iteration=- seed=- wall=00:00:12 sim=-", missing)
+        self.assertIn("stdout log: -", missing)
+        self.assertIn("cmp log: -", missing)
+        unmeasured = simmer_results.format_interrupted_summary({
+            "tests": [{
+                "status": "INTERRUPTED",
+                "simulation_started": True,
+                "_elapsed_interval_s": [0, 12],
+            }],
+        })
+        self.assertIn("wall=00:00:12 sim=-", unmeasured)
 
     def test_missing_simulator_duration_does_not_report_setup_time_as_simulation(self):
         run = simmer_results.create_run(["simmer", "-t", "tb:test"], self.rcfg, 1)

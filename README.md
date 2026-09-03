@@ -103,6 +103,15 @@ interrupted-history persistence, `pause` to stop active process groups and preve
 to keep running, or `status/logs` to print active job directories and log paths. A paused regression can then be resumed
 or stopped. Non-interactive runs stop immediately so batch jobs and CI never wait for input.
 
+Sending `SIGTERM` to simmer (for example, `kill -TERM <simmer-pid>`) also performs bounded cleanup, without
+opening the menu. After cleanup, both Ctrl-C `stop` and SIGTERM print a final snapshot to the terminal and
+`simmer.log`: passed/failed/interrupted/not-run counts, interrupted or failed cases with seeds and elapsed
+times, and available compile/simulation logs and wave-viewer paths. This also works without wave capture;
+unknown simulation time is shown as `-`. The snapshot is printed even if saving history fails.
+Repeated SIGINT/SIGTERM signals are ignored during cleanup. Ctrl-C exits with status 130; SIGTERM exits
+with status 143. `kill -9`, a subsequent forced kill by the scheduler, or host loss cannot guarantee this output.
+This does not change how an EDA process terminated independently of simmer is classified.
+
 ### Inspecting active runs
 
 Use `simmer --status` or its short alias `simmer --st` to print every active simmer run for the current project. The

@@ -2,6 +2,7 @@ import contextlib
 import datetime
 import os
 import multiprocessing
+import signal
 from pathlib import Path
 import subprocess
 import sys
@@ -263,6 +264,9 @@ class SimmerRuntimeHardeningTest(unittest.TestCase):
 
         self.assertEqual("FAILED", run["status"])
         rcfg.log.error.assert_called_once_with("Failed to write interrupted simmer results: %s", mock.ANY)
+        messages = "\n".join(str(call) for call in rcfg.log.info.call_args_list)
+        self.assertIn("Interrupted run summary", messages)
+        self.assertIn("SIGINT", messages)
 
     def test_interrupted_run_skips_cleanup_until_every_job_stops(self):
         rcfg = SimpleNamespace(simmer_results_run=None, log=mock.Mock())
@@ -341,24 +345,42 @@ class SimmerRuntimeHardeningTest(unittest.TestCase):
 
         self.assertEqual("INTERRUPTED", run["compile"][0]["status"])
         save_run.assert_not_called()
+        messages = "\n".join(str(call) for call in rcfg.log.info.call_args_list)
+        self.assertIn("compile details", messages)
+        self.assertIn("/compile/cmp.log", messages)
 
-    def test_interrupt_cleanup_temporarily_ignores_additional_sigint(self):
-        previous_handler = object()
-        with mock.patch("simmer.signal.signal", side_effect=[previous_handler, None]) as set_handler:
+        rcfg.simmer_results_run = None
+        with mock.patch("simmer.simmer_results.save_run") as save_run:
+            simmer.finalize_interrupted_run(rcfg, mock.Mock(), {"//tb:tb": vcomp}, jm=manager, reason="SIGTERM")
+        save_run.assert_not_called()
+        self.assertIsNone(rcfg.simmer_results_run)
+        messages = "\n".join(str(call) for call in rcfg.log.info.call_args_list)
+        self.assertIn("SIGTERM", messages)
+
+    def test_interrupt_cleanup_temporarily_ignores_sigint_and_sigterm(self):
+        previous_sigint = object()
+        previous_sigterm = object()
+        with mock.patch("simmer.signal.signal", side_effect=[previous_sigint, previous_sigterm, None,
+                                                             None]) as set_handler:
             with simmer._IgnoreAdditionalInterrupts():
                 pass
 
         self.assertEqual(
             [
                 mock.call(simmer.signal.SIGINT, simmer.signal.SIG_IGN),
-                mock.call(simmer.signal.SIGINT, previous_handler),
+                mock.call(simmer.signal.SIGTERM, simmer.signal.SIG_IGN),
+                mock.call(simmer.signal.SIGINT, previous_sigint),
+                mock.call(simmer.signal.SIGTERM, previous_sigterm),
             ],
             set_handler.call_args_list,
         )
 
     def test_post_processing_interrupt_cleans_once_and_persists_failed_history(self):
-        for interrupted_phase in ("backend", "coverage", "report", "cleanup"):
-            with self.subTest(interrupted_phase=interrupted_phase), tempfile.TemporaryDirectory() as project_dir:
+        phases = ("waiting", "backend", "coverage", "report", "cleanup", "history")
+        for interrupted_phase, signum in ((phase, sig) for phase in phases for sig in (signal.SIGINT, signal.SIGTERM)):
+            with self.subTest(interrupted_phase=interrupted_phase,
+                              signum=signum), tempfile.TemporaryDirectory() as project_dir:
+                interruption = KeyboardInterrupt() if signum == signal.SIGINT else simmer._TerminationRequested(signum)
                 run = {
                     "planned_tests": 1,
                     "tests": [{
@@ -403,16 +425,18 @@ class SimmerRuntimeHardeningTest(unittest.TestCase):
                 def cleanup_shared_runtime(_vcomp_jobs):
                     lifecycle_events.append("cleanup")
                     if interrupted_phase == "cleanup":
-                        raise KeyboardInterrupt
+                        raise interruption
 
                 simulator.cleanup_shared_runtime_artifacts.side_effect = cleanup_shared_runtime
 
-                if interrupted_phase == "backend":
-                    simulator.finalize_regression_workflow.side_effect = KeyboardInterrupt
+                if interrupted_phase == "waiting":
+                    manager.wait.side_effect = interruption
+                elif interrupted_phase == "backend":
+                    simulator.finalize_regression_workflow.side_effect = interruption
                 elif interrupted_phase == "coverage":
-                    rcfg._profile_step.side_effect = KeyboardInterrupt
+                    rcfg._profile_step.side_effect = interruption
                 elif interrupted_phase == "report":
-                    report.prepare.side_effect = KeyboardInterrupt
+                    report.prepare.side_effect = interruption
 
                 with mock.patch("simmer.os.uname", return_value=("", "test-host"), create=True), \
                      mock.patch("simmer.log", rcfg.log), \
@@ -426,20 +450,113 @@ class SimmerRuntimeHardeningTest(unittest.TestCase):
                      mock.patch("simmer.regression_report.RegressionReport", return_value=report), \
                      mock.patch("simmer.simmer_results.create_run", return_value=run), \
                      mock.patch("simmer.simmer_results.save_run") as save_run, \
+                     mock.patch("simmer._prompt_interrupt_action", return_value="stop") as prompt, \
                      mock.patch("simmer._IgnoreAdditionalInterrupts", return_value=mock.MagicMock()), \
                      self.assertRaises(SystemExit) as raised:
-                    save_run.side_effect = lambda *_args: lifecycle_events.append("save")
+                    save_calls = []
+
+                    def save_results(*_args):
+                        save_calls.append(True)
+                        if interrupted_phase == "history" and len(save_calls) == 1:
+                            raise interruption
+                        lifecycle_events.append("save")
+
+                    save_run.side_effect = save_results
                     simmer.main(rcfg, options)
 
-                self.assertEqual(130, raised.exception.code)
+                self.assertEqual(128 + signum, raised.exception.code)
                 simulator.cleanup_shared_runtime_artifacts.assert_called_once_with({})
-                manager.kill.assert_not_called()
+                if interrupted_phase == "waiting":
+                    manager.kill.assert_called_once_with()
+                else:
+                    manager.kill.assert_not_called()
+                    self.assertLess(lifecycle_events.index("flush"), lifecycle_events.index("save"))
                 manager.flush_output_streams.assert_called_once_with()
-                self.assertLess(lifecycle_events.index("flush"), lifecycle_events.index("save"))
-                if interrupted_phase != "cleanup":
+                if interrupted_phase not in ("cleanup", "waiting", "history"):
                     self.assertLess(lifecycle_events.index("flush"), lifecycle_events.index("cleanup"))
+                if signum == signal.SIGTERM:
+                    prompt.assert_not_called()
+                messages = "\n".join(str(call) for call in rcfg.log.info.call_args_list)
+                self.assertIn(signal.Signals(signum).name, messages)
                 self.assertEqual("FAILED", run["status"])
-                save_run.assert_called_once_with(project_dir, run)
+                self.assertEqual(2 if interrupted_phase == "history" else 1, save_run.call_count)
+                save_run.assert_called_with(project_dir, run)
+
+    def test_sigterm_handler_raises_distinct_stop_request_and_restores_handler(self):
+        previous = signal.getsignal(signal.SIGTERM)
+        with self.assertRaises(simmer._TerminationRequested) as raised:
+            with simmer._HandleTermination():
+                handler = signal.getsignal(signal.SIGTERM)
+                handler(signal.SIGTERM, None)
+        self.assertEqual(signal.SIGTERM, raised.exception.signum)
+        self.assertIs(previous, signal.getsignal(signal.SIGTERM))
+
+    def test_startup_interrupt_reports_snapshot_and_closes_active_state(self):
+        for signum in (signal.SIGINT, signal.SIGTERM):
+            with self.subTest(signum=signum):
+                interruption = KeyboardInterrupt() if signum == signal.SIGINT else simmer._TerminationRequested(signum)
+                options = SimpleNamespace(discovery_only=False, proj_dir="/repo", simmer_argv=["simmer"])
+                logger = mock.Mock()
+                active = mock.Mock()
+                with mock.patch("simmer.regression.RegressionConfig", side_effect=interruption), \
+                     mock.patch("simmer.simmer_state.ActiveRun", return_value=active), \
+                     self.assertRaises(SystemExit) as raised:
+                    simmer._run_regression_cli(options, logger)
+                self.assertEqual(128 + signum, raised.exception.code)
+                active.close.assert_called_once_with()
+                messages = "\n".join(str(call) for call in logger.info.call_args_list)
+                self.assertIn(signal.Signals(signum).name, messages)
+                self.assertIn("discovery/startup", messages)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX subprocess signal delivery")
+    def test_real_cli_signals_print_after_cleanup_and_preserve_wave_paths(self):
+        for signum in (signal.SIGINT, signal.SIGTERM):
+            with self.subTest(signum=signum), tempfile.TemporaryDirectory() as project_dir:
+                project = Path(project_dir)
+                environment = os.environ.copy()
+                environment["PYTHONPATH"] = os.pathsep.join(sys.path)
+                process = subprocess.Popen(
+                    [sys.executable,
+                     str(REPO_ROOT / "tests" / "simmer_interrupt_probe.py"),
+                     str(project)],
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    start_new_session=True,
+                    env=environment,
+                )
+                try:
+                    deadline = time.monotonic() + 10
+                    while not (project / "ready").exists() and process.poll() is None and time.monotonic() < deadline:
+                        time.sleep(0.02)
+                    if not (project / "ready").exists():
+                        if process.poll() is None:
+                            process.kill()
+                        output, _ = process.communicate(timeout=5)
+                        self.fail("probe did not reach scheduler wait:\n" + output)
+                    process.send_signal(signum)
+                    output, _ = process.communicate(timeout=10)
+                    self.assertEqual(128 + signum, process.returncode, output)
+                    self.assertIn("KILL_JOBS", output)
+                    self.assertIn("CLEANUP_DONE", output)
+                    self.assertIn("ACTIVE_STATE_CLOSED", output)
+                    self.assertIn(signal.Signals(signum).name, output)
+                    self.assertIn(str(project / "stdout.log"), output)
+                    self.assertIn(str(project / "run_waves.sh"), output)
+                    self.assertLess(output.index("CLEANUP_DONE"), output.index(str(project / "run_waves.sh")))
+                    self.assertEqual("partial wave data", (project / "waves.fsdb").read_text(encoding="utf-8"))
+                    self.assertNotIn("Select [s]", output)
+                    self.assertNotIn("Traceback", output)
+                    history = simmer.simmer_results.load_store(project_dir)["last_run"]
+                    self.assertEqual(1, history["summary"]["interrupted"])
+                    self.assertEqual(1, history["summary"]["passed"])
+                    self.assertEqual(1, history["summary"]["failed"])
+                    self.assertEqual(1, history["summary"]["skipped"])
+                finally:
+                    if process.poll() is None:
+                        process.kill()
+                    process.communicate(timeout=5)
 
     def test_noninteractive_interrupt_stops_without_prompting(self):
         rcfg = SimpleNamespace(log=mock.Mock(handlers=[]))
