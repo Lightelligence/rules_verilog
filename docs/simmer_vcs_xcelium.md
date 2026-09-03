@@ -571,9 +571,9 @@ simmer -t <bench>:<test> --simulator VCS \
 ```
 
 With `--waves`, simmer creates an executable `run_waves.sh` in each test's run
-directory before starting simulation, for both VCS and Xcelium. The script and
-its history path are retained if simulation is interrupted. Run it to open
-whatever wave data has been written; it does not require successful completion
+directory before starting simulation, for both VCS and Xcelium. The script is
+retained if simulation is interrupted; Ctrl-C history also records its path.
+Run it to open whatever wave data has been written; it does not require successful completion
 or guarantee that an interrupted database is readable or complete. If dumping
 has not created the wave artifact yet, it reports the missing path.
 

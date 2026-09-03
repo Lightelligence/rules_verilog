@@ -1,3 +1,4 @@
+import contextlib
 import datetime
 import os
 import multiprocessing
@@ -605,7 +606,10 @@ class SimmerRuntimeHardeningTest(unittest.TestCase):
                                      iteration=1,
                                      planned_seed=7)
                 job_dir = str(Path(root) / "test dir")
-                with mock.patch.object(job, "_claim_run_directory", return_value=("test", job_dir)), \
+                # Match a real invocation from its project directory, including
+                # Windows CI where the checkout and temp directory use different drives.
+                with contextlib.chdir(root), \
+                     mock.patch.object(job, "_claim_run_directory", return_value=("test", job_dir)), \
                      mock.patch("simmer.replace_symlink"), mock.patch("simmer.log", rcfg.log), \
                      mock.patch("subprocess.Popen") as launch:
                     job.pre_run()
