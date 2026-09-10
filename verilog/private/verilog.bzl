@@ -289,6 +289,10 @@ def verilog_input_manifest(ctx, deps, extra_files, flist_field = "transitive_fli
 
     The manifest is internal and unordered. The digest tool emits the public
     sorted inventory without changing the existing content digest format.
+
+    Returns:
+      A struct containing deferred manifest args, the complete input files
+      depset, and the source and filelist depsets for reuse by runfiles.
     """
     sources = get_transitive_srcs([], deps, VerilogInfo, "transitive_sources", allow_other_outputs = True)
     flists = get_transitive_srcs(
