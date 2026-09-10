@@ -73,8 +73,9 @@ def vcs_dv_unit_test_impl(ctx):
 
     runfiles = merge_default_runfiles(
         ctx,
-        files = flists_list + trans_srcs.to_list() + dpi.to_list() + [compile_args, runtime_args],
+        files = [compile_args, runtime_args],
         targets = ctx.attr.deps + [ctx.attr.default_sim_opts],
+        transitive_files = depset(transitive = [flists, trans_srcs, dpi]),
     )
     return [DefaultInfo(
         runfiles = runfiles,
