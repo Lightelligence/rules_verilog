@@ -17,6 +17,21 @@ class _Log:
 
 class RegressionReportTest(unittest.TestCase):
 
+    @staticmethod
+    def _header(**updates):
+        header = {
+            "branch": "main",
+            "commit": "",
+            "project_name": "project",
+            "revision": "abc",
+            "simulator": "VCS",
+            "tag": "",
+            "time": "20260711_120000_000001",
+            "username": "user",
+        }
+        header.update(updates)
+        return header
+
     def _report_environment(self):
         if os.environ.get("TEST_SRCDIR"):
             runfiles_root = Path(os.environ["TEST_SRCDIR"]) / os.environ.get("TEST_WORKSPACE", "__main__")
@@ -147,6 +162,104 @@ class RegressionReportTest(unittest.TestCase):
             self.assertTrue((bench_path / "index.html").is_file())
             report_html = (bench_path / "index.html").read_text(encoding="utf-8")
             self.assertGreaterEqual(report_html.count("N/A"), 2)
+            self.assertIn(">No tests</span>", report_html)
+
+    def test_compile_only_reports_preserve_compile_failure_and_never_claim_test_pass(self):
+        for compile_failed in (False, True):
+            with self.subTest(compile_failed=compile_failed), tempfile.TemporaryDirectory() as temporary_dir:
+                rcfg = SimpleNamespace(log=_Log(), options=SimpleNamespace(no_run=True))
+                report = RegressionReport(rcfg, self._report_environment(), temporary_dir)
+                header = self._header()
+                trd = [("bench", "vcomp", "", "" if compile_failed else "1", "", "1" if compile_failed else "", "1", "",
+                        "")]
+                report.run(header, trd, {}, {})
+                report_root = Path(temporary_dir) / "regression_report"
+                bench_path = report_root / "project" / "bench"
+                summary = json.loads((bench_path / "regressions.json").read_text(encoding="utf-8"))[header["time"]]
+                self.assertEqual(0, summary["total"])
+                self.assertEqual(0, summary["failed"])
+                self.assertEqual(compile_failed, summary["compile_failed"])
+                self.assertTrue(summary["compile_only"])
+                status = "Failed" if compile_failed else "Compile only"
+                for page in (bench_path / "index.html", bench_path / (header["time"] + ".html")):
+                    html = page.read_text(encoding="utf-8")
+                    self.assertIn(">{}<".format(status), html)
+                    self.assertNotIn('status-passed">Passed', html)
+                for page in (report_root / "index.html", report_root / "project" / "index.html"):
+                    self.assertIn("<td>{}</td>".format(status), page.read_text(encoding="utf-8"))
+
+    def test_report_rejects_unsafe_names_and_timestamps_before_writing(self):
+        invalid_headers = [self._header(project_name=value) for value in ("..", "../escape", "/escape", "C:\\escape")]
+        invalid_headers += [self._header(time=value) for value in ("../../victim", "/victim", "not a timestamp")]
+        cases = [(header, "bench") for header in invalid_headers]
+        cases += [(self._header(), name) for name in ("..", "../escape", "C:\\escape")]
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            for header, bench in cases:
+                with self.subTest(header=header, bench=bench):
+                    report = RegressionReport(SimpleNamespace(log=_Log()), self._report_environment(), temporary_dir)
+                    with self.assertRaises(ValueError):
+                        report.run(header, [(bench, "vcomp", "", "1", "", "", "1", "", "")], {}, {})
+                    self.assertFalse((Path(temporary_dir) / "regression_report").exists())
+
+    def test_malformed_history_never_controls_retention_paths(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            root = Path(temporary_dir)
+            report = RegressionReport(SimpleNamespace(log=_Log()), self._report_environment(), temporary_dir)
+            bench_path = root / "regression_report" / "project" / "bench"
+            bench_path.mkdir(parents=True)
+            victim_directory = root / "regression_report" / "victim"
+            victim_directory.mkdir()
+            marker = victim_directory / "keep.txt"
+            marker.write_text("keep directory", encoding="utf-8")
+            victim_page = root / "victim.html"
+            victim_page.write_text("keep page", encoding="utf-8")
+            history = {"20260101_{:06d}".format(index): {"logs": []} for index in range(30)}
+            history["../../../victim"] = {"logs": []}
+            history["20250101_000000"] = []
+            (bench_path / "regressions.json").write_text(json.dumps(history), encoding="utf-8")
+            report.run(self._header(), [("bench", "vcomp", "", "1", "", "", "1", "", "")], {}, {})
+            retained = json.loads((bench_path / "regressions.json").read_text(encoding="utf-8"))
+            self.assertEqual(30, len(retained))
+            self.assertNotIn("../../../victim", retained)
+            self.assertNotIn("20250101_000000", retained)
+            self.assertEqual("keep directory", marker.read_text(encoding="utf-8"))
+            self.assertEqual("keep page", victim_page.read_text(encoding="utf-8"))
+
+    def test_report_drops_unsafe_persisted_project_index_entries(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            root = Path(temporary_dir) / "regression_report"
+            root.mkdir()
+            (root / "project_info.json").write_text(json.dumps({
+                "../escape": ["bench"],
+                "other": ["../escape"],
+                "bad_type": "bench"
+            }),
+                                                    encoding="utf-8")
+            report = RegressionReport(SimpleNamespace(log=_Log()), self._report_environment(), temporary_dir)
+            report.run(self._header(), [("bench", "vcomp", "", "1", "", "", "1", "", "")], {}, {})
+            self.assertEqual({"project": ["bench"]}, json.loads(
+                (root / "project_info.json").read_text(encoding="utf-8")))
+
+    def test_report_write_and_retention_reject_symlink_escape(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            root = Path(temporary_dir)
+            report = RegressionReport(SimpleNamespace(log=_Log()), self._report_environment(), temporary_dir)
+            bench_path = root / "regression_report" / "project" / "bench"
+            bench_path.mkdir(parents=True)
+            timestamp = self._header()["time"]
+            outside = root / "outside"
+            (outside / timestamp).mkdir(parents=True)
+            marker = outside / timestamp / "keep.txt"
+            marker.write_text("keep", encoding="utf-8")
+            try:
+                (bench_path / "logs").symlink_to(outside, target_is_directory=True)
+            except OSError as exc:
+                self.skipTest("symlinks unavailable: {}".format(exc))
+            report._remove_history_artifacts(str(bench_path), timestamp, {"logs": []})
+            self.assertEqual("keep", marker.read_text(encoding="utf-8"))
+            with self.assertRaisesRegex(ValueError, "escapes"):
+                report.run(self._header(), [("bench", "vcomp", "", "1", "", "", "1", "", "")], {}, {})
+            self.assertEqual(["keep.txt"], [path.name for path in marker.parent.iterdir()])
 
     def test_compile_failure_log_is_copied_and_linked(self):
         with tempfile.TemporaryDirectory() as temporary_dir:

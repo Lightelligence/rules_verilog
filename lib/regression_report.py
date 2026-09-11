@@ -13,6 +13,40 @@ from urllib.parse import quote as url_quote
 import jinja2
 
 MAX_HISTORY = 30
+_TIMESTAMP_RE = re.compile(r"[0-9]{8}_[0-9]{6}(?:_[0-9]{6})?\Z")
+
+
+def _validate_component(value):
+    if (not isinstance(value, str) or not value or value in (".", "..") or value.endswith((".", " "))
+            or re.search(r'[<>:"/\\|?*\x00-\x1f\x7f]', value)):
+        raise ValueError("Invalid report path component: {!r}".format(value))
+    return value
+
+
+def _validate_timestamp(value):
+    if not isinstance(value, str) or not _TIMESTAMP_RE.fullmatch(value):
+        raise ValueError("Invalid report timestamp: {!r}".format(value))
+    return value
+
+
+def _contained_path(root, *components):
+    """Keep report paths, including existing symlink targets, below their owner."""
+    root_path = Path(root).resolve()
+    candidate = root_path.joinpath(*(_validate_component(part) for part in components))
+    if not candidate.resolve().is_relative_to(root_path) or candidate.resolve() == root_path:
+        raise ValueError("Report path escapes its directory: {}".format(candidate))
+    return str(candidate)
+
+
+def regression_status(summary):
+    """Keep compilation failures and unexecuted tests distinct from a pass."""
+    if summary.get("compile_failed") or _safe_int(summary.get("failed")):
+        return "Failed"
+    if summary.get("compile_skipped") or _safe_int(summary.get("skipped")):
+        return "Partial"
+    if summary.get("compile_only"):
+        return "Compile only"
+    return "Passed" if _safe_int(summary.get("total")) else "No tests"
 
 
 def _safe_int(value):
@@ -73,6 +107,7 @@ def create_template_environment(template_dir):
         loader=jinja2.FileSystemLoader(searchpath=template_dir),
     )
     environment.filters["zip"] = zip
+    environment.filters["regression_status"] = regression_status
     return environment
 
 
@@ -94,8 +129,8 @@ class RegressionReport:
         self.rcfg = rcfg
         self.env = template_env
         self.webroot_dir = webroot_dir
-        self.output_path = os.path.join(self.webroot_dir, "regression_report")
-        self.project_info_path = os.path.join(self.output_path, "project_info.json")
+        self.output_path = _contained_path(self.webroot_dir, "regression_report")
+        self.project_info_path = _contained_path(self.output_path, "project_info.json")
 
         self.HOME_TEMPLATE = self.env.get_template("regression_report_templates/home_template.html.j2")
         self.BENCHS_TEMPLATE = self.env.get_template("regression_report_templates/benchs_template.html.j2")
@@ -118,6 +153,20 @@ class RegressionReport:
         except (json.JSONDecodeError, ValueError) as exc:
             self.rcfg.log.warning("Ignoring invalid report project index %s: %s", self.project_info_path, exc)
             project_info = {}
+        safe_projects = {}
+        for project_name, project_benches in project_info.items():
+            try:
+                project_path = _contained_path(self.output_path, project_name)
+                if not isinstance(project_benches, list):
+                    raise ValueError("Report benches must be a list")
+                safe_benches = []
+                for bench in project_benches:
+                    _contained_path(project_path, bench)
+                    safe_benches.append(bench)
+                safe_projects[project_name] = safe_benches
+            except ValueError as exc:
+                self.rcfg.log.warning("Ignoring invalid report project entry %r: %s", project_name, exc)
+        project_info = safe_projects
         benches = set(project_info.get(self.proj_name, []))
         benches.update(self.bench_list)
         project_info[self.proj_name] = sorted(benches)
@@ -190,14 +239,40 @@ class RegressionReport:
         self.render_bench_page()
 
     def prepare(self, header, trd, cov, category_stats):
-        self.header = header
+        self.header = dict(header)
+        self.proj_name = _validate_component(self.header["project_name"])
+        _validate_timestamp(self.header["time"])
         self.cov = cov or {}
         self.category_stats = category_stats or {}
         self.process_trd(trd)
         self.process_category_stats()
-        self.proj_name = self.header["project_name"]
+        project_path = _contained_path(self.output_path, self.proj_name)
+        for bench in self.bench_list:
+            _contained_path(project_path, bench)
         os.makedirs(self.output_path, exist_ok=True)
         self._refresh_project_info()
+
+    def _load_history(self, bench_path):
+        path = _contained_path(bench_path, "regressions.json")
+        try:
+            history = _load_json(path, {})
+        except (json.JSONDecodeError, ValueError) as exc:
+            self.rcfg.log.warning("Ignoring invalid regression history %s: %s", path, exc)
+            return {}
+        return self._safe_history(history)
+
+    def _safe_history(self, history):
+        safe_history = {}
+        for timestamp, summary in history.items():
+            try:
+                _validate_timestamp(timestamp)
+                if not isinstance(summary, dict):
+                    raise ValueError("Report summary must be an object")
+                safe_history[timestamp] = summary
+            except ValueError as exc:
+                # Invalid metadata is dropped, never used to locate artifacts.
+                self.rcfg.log.warning("Ignoring invalid regression history entry %r: %s", timestamp, exc)
+        return safe_history
 
     def dashboard_data(self):
         """Return latest per-bench summaries for every known project."""
@@ -205,10 +280,10 @@ class RegressionReport:
         for project_name, benches in self.project_info.items():
             project_rows = []
             for bench in benches:
-                regressions_path = os.path.join(self.output_path, project_name, bench, "regressions.json")
                 try:
-                    regressions = _load_json(regressions_path, {})
-                except (json.JSONDecodeError, ValueError):
+                    bench_path = _contained_path(self.output_path, project_name, bench)
+                    regressions = self._load_history(bench_path)
+                except ValueError:
                     regressions = {}
                 timestamp = max(regressions, default="")
                 summary = dict(regressions.get(timestamp, {}))
@@ -223,25 +298,25 @@ class RegressionReport:
             project=self.project_info,
             dashboard=self.dashboard_data(),
         )
-        _write_text_atomic(os.path.join(self.output_path, "index.html"), rendered_html)
+        _write_text_atomic(_contained_path(self.output_path, "index.html"), rendered_html)
 
     def render_bench_page(self):
         self._refresh_project_info()
-        project_path = os.path.join(self.output_path, self.proj_name)
+        project_path = _contained_path(self.output_path, self.proj_name)
         os.makedirs(project_path, exist_ok=True)
         for bench in self.bench_list:
-            os.makedirs(os.path.join(project_path, bench), exist_ok=True)
+            os.makedirs(_contained_path(project_path, bench), exist_ok=True)
         _write_json_atomic(self.project_info_path, self.project_info)
         rendered_html = self.BENCHS_TEMPLATE.render(
             project_name=self.proj_name,
             project=self.project_info,
             bench_summaries=self.dashboard_data().get(self.proj_name, []),
         )
-        _write_text_atomic(os.path.join(project_path, "index.html"), rendered_html)
+        _write_text_atomic(_contained_path(project_path, "index.html"), rendered_html)
 
     def write_run_launcher(self, report_url=None):
         """Write an executable that opens this run's immutable report pages."""
-        timestamp = self.header["time"]
+        timestamp = _validate_timestamp(self.header["time"])
         targets = []
         for bench in self.bench_list:
             if report_url:
@@ -252,13 +327,14 @@ class RegressionReport:
                     url_quote(timestamp, safe=""),
                 ))
             else:
-                report_path = Path(self.output_path, self.proj_name, bench, "{}.html".format(timestamp)).resolve()
+                report_path = Path(_contained_path(self.output_path, self.proj_name, bench,
+                                                   "{}.html".format(timestamp)))
                 targets.append(report_path.as_uri())
 
         if not targets:
             return None
 
-        launcher_path = os.path.join(self.output_path, "open_{}.sh".format(timestamp))
+        launcher_path = _contained_path(self.output_path, "open_{}.sh".format(timestamp))
         target_lines = "\n".join("    {}".format(shlex.quote(target)) for target in targets)
         launcher = """#!/usr/bin/env bash
 
@@ -305,14 +381,18 @@ fi
         _write_text_atomic(launcher_path, launcher)
         os.chmod(launcher_path, 0o755)
 
-        launchers = sorted(Path(self.output_path).glob("open_*.sh"))
+        launchers = sorted(path for path in Path(self.output_path).glob("open_*.sh")
+                           if _TIMESTAMP_RE.fullmatch(path.name[5:-3]) and path.is_file())
         for stale_launcher in launchers[:-MAX_HISTORY]:
-            stale_launcher.unlink()
+            try:
+                Path(_contained_path(self.output_path, stale_launcher.name)).unlink()
+            except ValueError as exc:
+                self.rcfg.log.warning("Skipping unsafe report launcher cleanup: %s", exc)
         return launcher_path
 
     def _copy_logs(self, bench_path, details):
-        timestamp = self.header["time"]
-        run_logs_path = os.path.join(bench_path, "logs", timestamp)
+        timestamp = _validate_timestamp(self.header["time"])
+        run_logs_path = _contained_path(bench_path, "logs", timestamp)
         logs_list = []
 
         for row_index, row in enumerate(details[:-1], start=1):
@@ -324,7 +404,7 @@ fi
                     continue
                 os.makedirs(run_logs_path, exist_ok=True)
                 destination_name = "{}_{:02d}_{}.log".format(_slug(row[1]), log_index, _slug(source.parent.name))
-                destination_path = os.path.join(run_logs_path, destination_name)
+                destination_path = _contained_path(run_logs_path, destination_name)
                 shutil.copy2(source, destination_path)
                 os.chmod(destination_path, 0o644)
                 copied_logs.append(destination_name)
@@ -337,22 +417,33 @@ fi
                 bench_name=os.path.basename(bench_path),
                 logs=copied_logs,
             )
-            _write_text_atomic(os.path.join(run_logs_path, logs_page), rendered_logs)
+            _write_text_atomic(_contained_path(run_logs_path, logs_page), rendered_logs)
             row[-1] = "{}/{}".format(timestamp, logs_page)
             logs_list.append(["logs/{}/{}".format(timestamp, name) for name in copied_logs])
 
         return logs_list
 
     def _remove_history_artifacts(self, bench_path, timestamp, summary):
-        shutil.rmtree(os.path.join(bench_path, "logs", timestamp), ignore_errors=True)
-        history_page = os.path.join(bench_path, "{}.html".format(timestamp))
+        try:
+            _validate_timestamp(timestamp)
+            run_logs_path = _contained_path(bench_path, "logs", timestamp)
+            history_page = _contained_path(bench_path, "{}.html".format(timestamp))
+        except ValueError as exc:
+            self.rcfg.log.warning("Skipping unsafe report history cleanup: %s", exc)
+            return
+        shutil.rmtree(run_logs_path, ignore_errors=True)
         if os.path.isfile(history_page):
             os.remove(history_page)
 
         bench_root = Path(bench_path).resolve()
-        for group in summary.get("logs", []):
+        log_groups = summary.get("logs", [])
+        for group in log_groups if isinstance(log_groups, list) else []:
             paths = [group] if isinstance(group, str) else group
+            if not isinstance(paths, list):
+                continue
             for log_path in paths:
+                if not isinstance(log_path, str):
+                    continue
                 candidate = Path(log_path)
                 if not candidate.is_absolute():
                     candidate = bench_root / candidate
@@ -364,6 +455,9 @@ fi
                     resolved.unlink()
 
     def _prune_history(self, bench_path, regressions):
+        safe_history = self._safe_history(regressions)
+        regressions.clear()
+        regressions.update(safe_history)
         timestamps = sorted(regressions)
         for timestamp in timestamps[:-MAX_HISTORY]:
             self._remove_history_artifacts(bench_path, timestamp, regressions[timestamp])
@@ -375,17 +469,22 @@ fi
             coverage = self.cov.get(bench, {})
             cc_info = coverage.get("cc", {})
             cf_info = coverage.get("cf", {})
-            bench_path = os.path.join(self.output_path, self.proj_name, bench)
+            bench_path = _contained_path(self.output_path, self.proj_name, bench)
             os.makedirs(bench_path, exist_ok=True)
             details = [row[:] + [""] for row in source_details]
             logs_list = self._copy_logs(bench_path, details)
 
-            test_rows = source_details[1:-1]
+            compile_row = source_details[0] if source_details[0][1] == "vcomp" else None
+            test_rows = source_details[1:-1] if compile_row else source_details[:-1]
             passed = sum(_safe_int(row[3]) for row in test_rows)
             skipped = sum(_safe_int(row[4]) for row in test_rows)
             failed = sum(_safe_int(row[5]) for row in test_rows)
             total = sum(_safe_int(row[6]) for row in test_rows)
             regression_summary = {
+                "schema_version": 2,
+                "compile_failed": bool(compile_row and _safe_int(compile_row[5])),
+                "compile_skipped": bool(compile_row and _safe_int(compile_row[4])),
+                "compile_only": bool(getattr(getattr(self.rcfg, "options", None), "no_run", not test_rows)),
                 "passed": passed,
                 "skipped": skipped,
                 "failed": failed,
@@ -398,12 +497,8 @@ fi
                 "logs": logs_list,
             }
 
-            json_file_path = os.path.join(bench_path, "regressions.json")
-            try:
-                regressions = _load_json(json_file_path, {})
-            except (json.JSONDecodeError, ValueError) as exc:
-                self.rcfg.log.warning("Ignoring invalid regression history %s: %s", json_file_path, exc)
-                regressions = {}
+            json_file_path = _contained_path(bench_path, "regressions.json")
+            regressions = self._load_history(bench_path)
             regressions[self.header["time"]] = regression_summary
             remain_list = self._prune_history(bench_path, regressions)
             passrate_list, cov_total_list, cov_code_list, cov_func_list = regression_history_series(
@@ -427,7 +522,7 @@ fi
                 processed_category_stats=self.processed_category_stats,
             )
 
-            index_path = os.path.join(bench_path, "index.html")
+            index_path = _contained_path(bench_path, "index.html")
             _write_text_atomic(index_path, rendered_html)
-            _write_text_atomic(os.path.join(bench_path, "{}.html".format(self.header["time"])), rendered_html)
+            _write_text_atomic(_contained_path(bench_path, "{}.html".format(self.header["time"])), rendered_html)
             _write_json_atomic(json_file_path, regressions)

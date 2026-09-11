@@ -10,6 +10,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from lib import compile_cache
 from verilog.private import compile_input_digest
 
 
@@ -212,6 +213,39 @@ class CompileInputDigestTest(unittest.TestCase):
 
     def test_shared_empty_manifest_is_versioned(self):
         self.assertEqual((b"\n", hashlib.sha256(b"rules_verilog.compile_inputs.v2\0").hexdigest()), self.shared([], []))
+
+    def test_runtime_verification_accepts_both_generated_formats_and_rejects_stale_inputs(self):
+        for shared in (False, True):
+            with self.subTest(shared=shared):
+                source = self.source("bench/top.sv", b"module top; endmodule\n\x00\xff")
+                config = self.source("bench/compile config.f", b"+define+ONE\n")
+                records = [("source\tbench/top.sv", source), ("filelist\tbench/compile config.f", config)]
+                if shared:
+                    self.shared(records, [self.index(records)])
+                else:
+                    self.generate(records)
+
+                def fingerprint(verify=False):
+                    return compile_cache.compile_fingerprint(
+                        self.root,
+                        "compiler -f compile.f",
+                        config,
+                        self.inventory,
+                        self.root,
+                        compile_inputs_digest_path=self.output,
+                        verify_compile_inputs_digest=verify,
+                    )
+
+                original = fingerprint()
+                self.assertEqual(original, fingerprint(verify=True))
+                source.write_bytes(b"module changed; endmodule\n")
+                self.assertEqual(original, fingerprint()) # Unrefreshed Bazel digest is deliberately stale.
+                changed = fingerprint(verify=True)
+                self.assertNotEqual(original["compile_inputs_sha256"], changed["compile_inputs_sha256"])
+                self.assertEqual(changed, fingerprint(verify=True))
+                source.unlink()
+                with self.assertRaisesRegex(RuntimeError, "missing file"):
+                    fingerprint(verify=True)
 
 
 if __name__ == "__main__":

@@ -40,9 +40,12 @@ def validate_vcs_runtime_options(options, parser):
             parser.error("--vcs-cm-tgl modportarr must be combined with fullintf. Stopping before Bazel starts.")
         if 'tgl' not in options.cm and 'A' not in options.cm:
             parser.error("--vcs-cm-tgl requires toggle coverage. Stopping before Bazel starts.")
-    if options.vcs_cm_hier is not None and not os.path.exists(options.vcs_cm_hier):
-        parser.error("The specified VCS coverage hierarchy file does not exist: {}. "
-                     "Stopping before Bazel starts.".format(options.vcs_cm_hier))
+    if options.vcs_cm_hier is not None:
+        # CLI paths belong to the invocation directory, unlike Bazel metadata.
+        options.vcs_cm_hier = os.path.abspath(options.vcs_cm_hier)
+        if not os.path.isfile(options.vcs_cm_hier):
+            parser.error("The specified VCS coverage hierarchy file does not exist: {}. "
+                         "Stopping before Bazel starts.".format(options.vcs_cm_hier))
     if not options.xprop and any([
             options.vcs_xprop_flowctrl,
             options.vcs_xprop_mmsopt,

@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import subprocess
 import tempfile
 import unittest
@@ -202,6 +203,11 @@ class VcsFilelistValidationTest(unittest.TestCase):
         self.assertNotIn("-file tests/vcs_filelist_validation/unit_test_top_vcs.f", svunit_script)
         self.assertIn("-s xcelium", xrun_svunit_script)
         self.assertNotIn("-s vcs", xrun_svunit_script)
+        svunit_prefix = xrun_svunit_script.split("runSVUnit", 1)[1].split("    -c ", 1)[0]
+        self.assertEqual(
+            ["-s", "xcelium", "--no_abs_path_flist", "--no_feedback", "-o", "."],
+            shlex.split(svunit_prefix.replace("\\\n", "")),
+        )
 
         self.assertFalse(runfile_exists("tests/vcs_filelist_validation/dv_tb_vcs_compile_args_pldm_ice.f"))
         self.assertFalse(runfile_exists("tests/vcs_filelist_validation/dv_tb_vcs_compile_args_pldm_sa.f"))

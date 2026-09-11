@@ -413,6 +413,12 @@ available without installing a wrapper:
 bazel run //bin:simmer -- --help
 ```
 
+Reports distinguish compile failures from simulation failures. An explicit
+`--no-run --report` run shows `Compile only` after successful compilation, or
+`Failed` after a compile failure; zero executed tests are never labeled `Passed`.
+Report paths are checked before writing or pruning. Malformed history entries
+are excluded from the index without deleting paths named by those entries.
+
 The [simmer command cookbook](docs/simmer_vcs_xcelium.md#command-cookbook)
 collects ready-to-adapt commands for normal runs, reuse, waves, coverage,
 reporting, MSIE, Palladium, ICO, VSO.ai and CCEX.

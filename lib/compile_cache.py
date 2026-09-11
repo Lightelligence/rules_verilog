@@ -68,11 +68,12 @@ def _file_bytes(path):
         return b"<missing>"
 
 
-def _compile_inputs_digest(compile_inputs_path, runfiles_root):
+def _compile_inputs_digest(compile_inputs_path, runfiles_root, expected_digest=None):
     if not compile_inputs_path:
         return None
 
     digest = hashlib.sha256()
+    shared_digest = hashlib.sha256(b"rules_verilog.compile_inputs.v2\0") if expected_digest else None
     with open(compile_inputs_path, "r", encoding="utf-8") as filep:
         for line in filep:
             entry = line.rstrip("\n")
@@ -84,8 +85,21 @@ def _compile_inputs_digest(compile_inputs_path, runfiles_root):
                 raise RuntimeError("Compile input inventory references missing file: {}".format(input_path))
             digest.update(entry.encode("utf-8"))
             digest.update(b"\0")
-            digest.update(_file_bytes(input_path))
+            content_digest = hashlib.sha256() if shared_digest is not None else None
+            with open(input_path, "rb") as input_file:
+                for chunk in iter(lambda: input_file.read(1024 * 1024), b""):
+                    digest.update(chunk)
+                    if content_digest is not None:
+                        content_digest.update(chunk)
             digest.update(b"\0")
+            if shared_digest is not None:
+                shared_digest.update(entry.encode("utf-8") + b"\0")
+                shared_digest.update(content_digest.digest() + b"\0")
+    # Bazel has emitted both legacy raw-byte and shared per-file digests. Retain
+    # its format only after validating it against current source bytes; a stale
+    # or unknown digest falls back to the freshly computed legacy identity.
+    if shared_digest is not None and expected_digest == shared_digest.hexdigest():
+        return expected_digest
     return digest.hexdigest()
 
 
@@ -235,7 +249,8 @@ def compile_fingerprint(project_dir,
                         runfiles_root=None,
                         compile_inputs_digest_path=None,
                         extra_input_paths=(),
-                        environment=None):
+                        environment=None,
+                        verify_compile_inputs_digest=False):
     """Return the source, generated filelist and compile-mode identity."""
     fingerprint = {
         "schema_version": 7,
@@ -244,9 +259,10 @@ def compile_fingerprint(project_dir,
         "environment": dict(sorted((environment or {}).items())),
     }
     if compile_inputs_path:
-        fingerprint["compile_inputs_sha256"] = (_read_compile_inputs_digest(compile_inputs_digest_path)
-                                                if compile_inputs_digest_path else _compile_inputs_digest(
-                                                    compile_inputs_path, runfiles_root))
+        digest = _read_compile_inputs_digest(compile_inputs_digest_path) if compile_inputs_digest_path else None
+        if verify_compile_inputs_digest or digest is None:
+            digest = _compile_inputs_digest(compile_inputs_path, runfiles_root, expected_digest=digest)
+        fingerprint["compile_inputs_sha256"] = digest
         fingerprint["compile_inputs_manifest_sha256"] = _compile_inputs_manifest_digest(compile_inputs_path)
     if extra_input_paths:
         extra_inputs_digest, extra_inputs_content_digest = _extra_input_digests(extra_input_paths)

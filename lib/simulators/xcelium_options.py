@@ -27,9 +27,12 @@ def validate_xcelium_runtime_options(options, parser):
         parser.error("--wave-delta requires '--waves --wave-type shm'. Stopping before Bazel starts.")
     if options.covfile_was_explicit and not options.coverage:
         parser.error("--covfile requires --coverage. Stopping before Bazel starts.")
-    if options.coverage and options.covfile_was_explicit and not os.path.isfile(options.covfile):
-        parser.error("The specified Xcelium coverage configuration file does not exist: {}. "
-                     "Stopping before Bazel starts.".format(options.covfile))
+    if options.coverage and options.covfile_was_explicit:
+        # Keep the caller's file distinct from rule-provided runfiles paths.
+        options.covfile = os.path.abspath(options.covfile)
+        if not os.path.isfile(options.covfile):
+            parser.error("The specified Xcelium coverage configuration file does not exist: {}. "
+                         "Stopping before Bazel starts.".format(options.covfile))
     if options.mce_detail_was_explicit and not options.mce:
         parser.error("Xcelium MCE detail switches require --mce. Stopping before Bazel starts.")
     if options.mce_build_count < 0 or options.mce_sim_count < 0:

@@ -60,7 +60,10 @@ py_test(
     name = "compile_input_digest_test",
     timeout = "short",
     srcs = ["compile_input_digest_test.py"],
-    deps = ["//verilog/private:compile_input_digest_lib"],
+    deps = [
+        "//lib:compile_cache",
+        "//verilog/private:compile_input_digest_lib",
+    ],
 )
 
 py_test(
@@ -189,6 +192,8 @@ py_test(
         "//bin:templates/rerun_template.sh.j2",
         "//bin:templates/run_waves_template.sh.j2",
         "//bin:templates/sim_template.sh.j2",
+        "//bin:templates/vcs_compile_template.sh.j2",
+        "//bin:templates/vcs_cov_merge_template.sh.j2",
         "//bin:templates/vcs_wave_cmd_template.tcl.j2",
         "//bin:templates/xrun_wave_cmd_template.tcl.j2",
     ],
@@ -208,6 +213,7 @@ py_test(
         "//lib:simmer_results",
         "//lib:simmer_state",
         "//lib/simulators",
+        "//verilog/private:compile_input_digest_lib",
     ],
 )
 

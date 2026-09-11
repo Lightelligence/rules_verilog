@@ -3,6 +3,7 @@ import datetime
 import os
 import multiprocessing
 import signal
+import shlex
 from pathlib import Path
 import subprocess
 import sys
@@ -25,6 +26,7 @@ import simmer
 from lib import compile_cache
 from lib.job_lib import JobCancelledError, JobStatus
 from lib.runtime_options import normalize_test_runtime_options
+from verilog.private import compile_input_digest
 
 
 def _replace_symlink_in_process(link_path, target_path, start, result_queue):
@@ -46,6 +48,109 @@ class _FatalLog:
 
 
 class SimmerRuntimeHardeningTest(unittest.TestCase):
+
+    def test_skipping_bazel_rehashes_sources_before_compile_reuse(self):
+        for shared in (False, True):
+            with self.subTest(shared=shared):
+                self._check_skipping_bazel_compile_reuse(shared)
+
+    def _check_skipping_bazel_compile_reuse(self, shared):
+        for strict in (False, True):
+            with self.subTest(strict=strict), tempfile.TemporaryDirectory() as temporary_dir:
+                root = Path(temporary_dir)
+                runfiles = root / "runfiles"
+                bench = runfiles / "bench"
+                bench.mkdir(parents=True)
+                source = bench / "top.sv"
+                source.write_text("module top; endmodule\n", encoding="utf-8")
+                inventory = bench / "inputs.txt"
+                compile_args = bench / "tb_compile_args.f"
+                compile_args.write_text("bench/top.sv\n", encoding="utf-8")
+                digest = bench / "inputs.sha256"
+                manifest = root / "manifest.txt"
+                manifest.write_text("source\tbench/top.sv\t{}\n".format(source), encoding="utf-8")
+                if shared:
+                    index = root / "index.json"
+                    indices = root / "indices.txt"
+                    compile_input_digest.generate_index(manifest, index)
+                    indices.write_text(str(index) + "\n", encoding="utf-8")
+                    compile_input_digest.merge_digest(manifest, digest, inventory, indices)
+                else:
+                    compile_input_digest.generate_digest(manifest, digest, inventory)
+                (bench / "tb_tb_options.py").write_text(
+                    repr({
+                        "compile_inputs": "bench/inputs.txt",
+                        "compile_inputs_digest": "bench/inputs.sha256"
+                    }),
+                    encoding="utf-8",
+                )
+                common_args = ["--simulator", "VCS", "--no-vcs-partcomp"]
+                options = parse_args(common_args)
+                rcfg = SimpleNamespace(options=options, proj_dir=str(root), regression_dir=str(root), log=mock.Mock())
+                simulator = simmer.VcsSimulator(options, rcfg, simmer.jinja2_env)
+                simulator._vcs_tool_identity = "test compiler"
+                with mock.patch.dict(simmer.VCompJob.all_names, clear=True), mock.patch("simmer.log", rcfg.log):
+                    job = simmer.VCompJob(rcfg, "//bench:tb", simulator)
+                    job.bazel_runfiles_main = str(runfiles)
+                    with mock.patch.object(job, "_acquire_compile_lock"), \
+                         mock.patch("simmer.subprocess.run") as host_probe:
+                        job.pre_run()
+                        executable = Path(job.job_dir) / "simv"
+                        executable.write_text("fixture executable", encoding="utf-8")
+                        executable.chmod(0o755)
+                        compile_cache.write_compile_fingerprint(job.job_dir, job.compile_fingerprint)
+                        options = parse_args(common_args + ["--no-compile" if strict else "--no-bazel"])
+                        rcfg.options = options
+                        simulator.options = options
+                        job.pre_run()
+                        self.assertIn("Bypassing", job.main_cmdline)
+                        source.write_text("module top; logic changed; endmodule\n", encoding="utf-8")
+                        if strict:
+                            with self.assertRaisesRegex(RuntimeError, "compile_inputs_sha256"):
+                                job.pre_run()
+                        else:
+                            job.pre_run()
+                            self.assertFalse(job.compile_cache_hit)
+                            self.assertTrue(job.main_cmdline.startswith("bash "))
+                        self.assertTrue(all(call.args[0] == ["hostname"] for call in host_probe.call_args_list))
+
+    def _check_relative_coverage_config(self, backend):
+        with tempfile.TemporaryDirectory() as temporary_dir, contextlib.chdir(temporary_dir):
+            root = Path(temporary_dir)
+            runfiles = root / "runfiles"
+            runfiles.mkdir()
+            config = root / "coverage config.txt"
+            config.write_text("caller configuration", encoding="utf-8")
+            (runfiles / config.name).write_text("different runfiles configuration", encoding="utf-8")
+            args = (["--simulator", "VCS", "--no-vcs-partcomp", "--cm", "line", "--vcs-cm-hier", config.name]
+                    if backend == "VCS" else ["--simulator", "XRUN", "--coverage", "A", "--covfile", config.name])
+            options = parse_args(args)
+            rcfg = SimpleNamespace(proj_dir=str(root), regression_dir=str(root), deferred_messages=[])
+            simulator_type = simmer.VcsSimulator if backend == "VCS" else simmer.XceliumSimulator
+            simulator = simulator_type(options, rcfg, simmer.jinja2_env)
+            simulator._vcs_tool_identity = simulator._xcelium_tool_identity = "test compiler"
+            simulator.validate_resolved_options()
+            job = SimpleNamespace(name="tb",
+                                  job_dir=str(root / "vcomp"),
+                                  bench_dir=str(root),
+                                  tb_options={},
+                                  bazel_runfiles_main=str(runfiles),
+                                  acquire_shared_runtime_lock=mock.Mock())
+            # Rendering and fingerprinting must still use the validated caller
+            # file after the compile working directory changes.
+            with contextlib.chdir(runfiles):
+                argv = shlex.split(simulator.generate_compile_options(job)["cov_opts"])
+                flag = "-cm_hier" if backend == "VCS" else "-covfile"
+                emitted_path = Path(argv[argv.index(flag) + 1])
+                self.assertEqual(config, emitted_path)
+                self.assertEqual("caller configuration", emitted_path.read_text(encoding="utf-8"))
+                self.assertIn(str(config), simulator.get_compile_fingerprint_inputs(job)["extra_input_paths"])
+
+    def test_vcs_relative_coverage_config_uses_invocation_directory(self):
+        self._check_relative_coverage_config("VCS")
+
+    def test_xcelium_relative_coverage_config_uses_invocation_directory(self):
+        self._check_relative_coverage_config("XRUN")
 
     def test_simulation_directory_name_bounds_overlong_utf8_component(self):
         suffix = "_report_rerun_20260808_120000_0123456789abcdef"
