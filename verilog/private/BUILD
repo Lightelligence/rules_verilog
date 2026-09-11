@@ -1,7 +1,12 @@
 # vim: set ft=bzl :
-load("@rules_python//python:defs.bzl", "py_binary")
+load("@rules_python//python:defs.bzl", "py_binary", "py_library")
 
 package(default_visibility = ["//visibility:public"])
+
+py_library(
+    name = "compile_input_digest_lib",
+    srcs = ["compile_input_digest.py"],
+)
 
 py_binary(
     name = "compile_input_digest",

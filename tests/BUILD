@@ -54,6 +54,13 @@ py_test(
 )
 
 py_test(
+    name = "compile_input_digest_test",
+    timeout = "short",
+    srcs = ["compile_input_digest_test.py"],
+    deps = ["//verilog/private:compile_input_digest_lib"],
+)
+
+py_test(
     name = "coverage_data_test",
     timeout = "short",
     srcs = ["coverage_data_test.py"],

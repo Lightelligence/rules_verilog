@@ -226,6 +226,7 @@ class VcsFilelistValidationTest(unittest.TestCase):
         self.assertNotIn("msie_primary_inputs", vcs_options)
 
         compile_inputs = read_runfile(vcs_options["compile_inputs"])
+        self.assertEqual(sorted(set(compile_inputs.splitlines())), compile_inputs.splitlines())
         self.assertIn("source\ttests/vcs_filelist_validation/unit_test_top.sv", compile_inputs)
         self.assertIn("source\texternal/filelist_external_fixture/external_ip.sv", compile_inputs)
         self.assertIn("filelist\ttests/vcs_filelist_validation/unit_test_top_vcs.f", compile_inputs)

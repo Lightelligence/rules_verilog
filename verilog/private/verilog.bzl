@@ -281,6 +281,39 @@ def merge_default_runfiles(ctx, files, targets, transitive_files = None):
         transitive_files = transitive_files,
     ).merge_all([target[DefaultInfo].default_runfiles for target in targets])
 
+def _compile_input_manifest_entry(file):
+    return "{}\t{}".format(runfiles_relative_short_path(file), file.path)
+
+def verilog_input_manifest(ctx, deps, extra_files, flist_field = "transitive_flists", fallback_field = None):
+    """Keep compile inputs shared until the digest action canonicalizes them.
+
+    The manifest is internal and unordered. The digest tool emits the public
+    sorted inventory without changing the existing content digest format.
+
+    Returns:
+      A struct containing deferred manifest args, the complete input files
+      depset, and the source and filelist depsets for reuse by runfiles.
+    """
+    sources = get_transitive_srcs([], deps, VerilogInfo, "transitive_sources", allow_other_outputs = True)
+    flists = get_transitive_srcs(
+        [],
+        deps,
+        VerilogInfo,
+        flist_field,
+        fallback_attr_name = fallback_field,
+    )
+    args = ctx.actions.args()
+    args.set_param_file_format("multiline")
+    args.add_all(sources, map_each = _compile_input_manifest_entry, format_each = "source\t%s", expand_directories = False)
+    args.add_all(flists, map_each = _compile_input_manifest_entry, format_each = "filelist\t%s", expand_directories = False)
+    args.add_all(extra_files, map_each = _compile_input_manifest_entry, format_each = "runfile\t%s", expand_directories = False)
+    return struct(
+        args = args,
+        files = depset(extra_files, transitive = [sources, flists]),
+        sources = sources,
+        flists = flists,
+    )
+
 def verilog_input_inventory_records(deps, extra_files, flist_field = "transitive_flists", fallback_field = None):
     """Return stable inventory entries paired with their source files.
 
