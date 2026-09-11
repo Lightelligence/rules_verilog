@@ -208,6 +208,11 @@ class Job():
         """Execution class used by the scheduler."""
         return "exclusive"
 
+    @property
+    def exclusive_resource(self):
+        """Optional mutable resource that otherwise parallel jobs must not share."""
+        return None
+
     def __lt__(self, other):
         return self.priority < other.priority
 
@@ -858,6 +863,10 @@ class JobManager():
         if job.execution_mode != "parallel":
             raise ValueError("Unknown execution mode '{}'".format(job.execution_mode))
         if any(active_job.execution_mode != "parallel" for active_job in running_jobs):
+            return False
+        resource = job.exclusive_resource
+        if resource is not None and any(active.exclusive_resource == resource
+                                        for active in running_jobs + self._finalizing):
             return False
         return len(running_jobs) < self.active_job_limit
 

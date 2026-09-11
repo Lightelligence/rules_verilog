@@ -8,7 +8,7 @@ import shutil
 import subprocess
 import tarfile
 
-ARCHIVE_PREFIX = "new_rules_verilog-local"
+ARCHIVE_PREFIX = "rules_verilog-local"
 CONSUMER_FILES = (
     ".bazelrc",
     ".bazelversion",

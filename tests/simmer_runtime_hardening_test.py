@@ -806,6 +806,19 @@ class SimmerRuntimeHardeningTest(unittest.TestCase):
             self.assertEqual("prepared viewer\n", viewer.read_text(encoding="utf-8"))
             self.assertEqual(str(viewer), record_job.call_args.kwargs["waves_script"])
 
+    def test_shared_runtime_lock_reuses_canonical_path(self):
+        job = simmer.VCompJob.__new__(simmer.VCompJob)
+        job._shared_runtime_locks = {}
+        job._cancel_event = threading.Event()
+        with tempfile.TemporaryDirectory() as root, mock.patch("simmer.compile_cache.CompileDirectoryLock") as lock:
+            job.rcfg = SimpleNamespace(proj_dir=root)
+            path = os.path.join(root, "coverage")
+            job.acquire_shared_runtime_lock(path)
+            job.acquire_shared_runtime_lock(os.path.normcase(os.path.realpath(path)))
+            self.assertEqual(1, lock.call_count)
+            job.release_shared_runtime_locks()
+            lock.return_value.release.assert_called_once_with()
+
     @unittest.skipUnless(os.name == "posix", "POSIX advisory-lock behavior")
     def test_shared_runtime_lock_serializes_identical_regressions(self):
         first = simmer.VCompJob.__new__(simmer.VCompJob)

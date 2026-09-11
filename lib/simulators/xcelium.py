@@ -21,6 +21,14 @@ from .xcelium_options import validate_xcelium_runtime_options
 log = logging.getLogger(__name__)
 
 MSIE_MANIFEST = ".msie_primary_manifest.json"
+_SHARED_SCRATCH_NAMES = (
+    "xp_elab.log",
+    "ida_diagnostics.log",
+    "lwdgen.log",
+    "cdns_dump.log",
+    "verisium_debug_logs",
+    "verisium_debug_logs_backup",
+)
 _XCELIUM_RELEASE_RE = re.compile(r"(?im)\bxrun(?:\(\d+\))?[ \t]*(?::)?[ \t]+(\d{2}\.\d{2}(?:[-_][A-Za-z0-9._-]+)?)\b")
 
 
@@ -360,15 +368,56 @@ class XceliumSimulator(SimulatorInterface):
         return os.path.join(bazel_runfiles_main, relpath, "{}_compile_args_pldm_ice.f".format(bazel_target))
 
     def prepare_regression_runtime(self, vcomp_jobs):
-        if not self.options.coverage:
-            return
-
-        runtime_jobs = []
+        runtime_jobs = {}
         for vcomp_job in vcomp_jobs.values():
-            vcomp_job.cov_work_dir = os.path.join(self.rcfg.regression_dir, vcomp_job.name + "__COV_WORK")
-            runtime_jobs.append((vcomp_job.cov_work_dir, vcomp_job))
-        for runtime_path, vcomp_job in sorted(runtime_jobs, key=lambda item: os.path.abspath(item[0])):
+            paths = [vcomp_job.resolve_bazel_runfiles_main(), vcomp_job.job_dir]
+            if self.options.msie_incr is not None:
+                paths.append(vcomp_job.base_job_dir + "_PRIM")
+            if self.options.coverage:
+                vcomp_job.cov_work_dir = os.path.join(self.rcfg.regression_dir, vcomp_job.name + "__COV_WORK")
+                paths.append(vcomp_job.cov_work_dir)
+            for path in paths:
+                runtime_jobs.setdefault(os.path.normcase(os.path.realpath(path)), vcomp_job)
+        for runtime_path, vcomp_job in sorted(runtime_jobs.items()):
             vcomp_job.acquire_shared_runtime_lock(runtime_path)
+
+    def get_test_exclusive_resource(self, test_job):
+        # Separate run directories do not establish that the shared XRUN DB is
+        # immutable. Serialize its users until licensed validation proves that.
+        return ("XRUN", os.path.normcase(os.path.realpath(test_job.vcomper.job_dir)))
+
+    def prepare_compile_execution(self, vcomp_job, reusing_compile):
+        if reusing_compile:
+            return
+        runfiles = os.path.normcase(os.path.realpath(vcomp_job.bazel_runfiles_main))
+        if runfiles not in getattr(vcomp_job, "_shared_runtime_locks", {}):
+            return
+        # Never delete pre-existing source/runfiles entries, even if their names
+        # happen to match simulator scratch. Record ownership before execution.
+        vcomp_job.xrun_scratch_candidates = [
+            os.path.join(runfiles, name) for name in _SHARED_SCRATCH_NAMES
+            if not os.path.lexists(os.path.join(runfiles, name))
+        ]
+
+    def cleanup_shared_runtime_artifacts(self, vcomp_jobs):
+        try:
+            for job in vcomp_jobs.values():
+                for path in getattr(job, "xrun_scratch_candidates", []):
+                    parent = os.path.dirname(path)
+                    if parent not in getattr(job, "_shared_runtime_locks", {}):
+                        continue
+                    if os.path.islink(path) or os.path.normcase(os.path.realpath(path)) != os.path.normcase(path):
+                        continue
+                    try:
+                        if os.path.isdir(path):
+                            shutil.rmtree(path)
+                        elif os.path.isfile(path):
+                            os.remove(path)
+                    except OSError as exc:
+                        log.warning("Could not remove XRUN scratch %s: %s", path, exc)
+                job.xrun_scratch_candidates = []
+        finally:
+            super().cleanup_shared_runtime_artifacts(vcomp_jobs)
 
     def generate_compile_options(self, vcomp_job):
         opts = {'cov_opts': '', 'xprop_cmd': None, 'additional_defines': []}

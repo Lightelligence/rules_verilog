@@ -401,7 +401,7 @@ class VCompJob(Job):
 
     def acquire_shared_runtime_lock(self, runtime_path):
         """Hold exclusive ownership of a shared backend directory for this run."""
-        runtime_path = os.path.abspath(runtime_path)
+        runtime_path = os.path.normcase(os.path.realpath(runtime_path))
         if runtime_path in self._shared_runtime_locks:
             return
         runtime_identity = os.path.normcase(runtime_path).encode("utf-8")
@@ -744,6 +744,10 @@ class TestJob(Job):
     @property
     def execution_mode(self):
         return "parallel"
+
+    @property
+    def exclusive_resource(self):
+        return self.simulator.get_test_exclusive_resource(self)
 
     def __init__(self,
                  rcfg,

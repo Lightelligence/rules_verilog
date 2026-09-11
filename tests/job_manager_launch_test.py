@@ -14,6 +14,29 @@ from lib import rv_utils
 from lib.job_lib import BazelTBJob, BazelTestCfgJob, Job, JobManager, JobStatus, SubprocessJobRunner
 
 
+class SchedulerResourceTest(unittest.TestCase):
+
+    def test_same_resource_waits_for_active_and_launching_jobs(self):
+        manager = JobManager.__new__(JobManager)
+        manager.active_job_limit = 8
+        manager._finalizing = []
+        first = SimpleNamespace(execution_mode="parallel", exclusive_resource=("XRUN", "db1"))
+        same = SimpleNamespace(execution_mode="parallel", exclusive_resource=("XRUN", "db1"))
+        other = SimpleNamespace(execution_mode="parallel", exclusive_resource=("XRUN", "db2"))
+        vcs = SimpleNamespace(execution_mode="parallel", exclusive_resource=None)
+        for active, launching in (([first], []), ([], [first])):
+            manager._active, manager._launching = active, launching
+            self.assertFalse(manager._can_launch_locked(same))
+            self.assertTrue(manager._can_launch_locked(other))
+            self.assertTrue(manager._can_launch_locked(vcs))
+        manager._active, manager._launching = [], []
+        manager._finalizing = [first]
+        self.assertFalse(manager._can_launch_locked(same))
+        self.assertTrue(manager._can_launch_locked(other))
+        manager._finalizing = []
+        self.assertTrue(manager._can_launch_locked(same))
+
+
 class _Logger:
 
     def __getattr__(self, _):

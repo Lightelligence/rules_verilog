@@ -271,6 +271,10 @@ class SimulatorInterface(abc.ABC):
         """Prepare backend-owned state and optionally return a seed override."""
         return None
 
+    def get_test_exclusive_resource(self, test_job):
+        """Return a scheduler resource key for simulations sharing mutable state."""
+        return None
+
     def prepare_test_directory(self, test_job):
         """Prepare backend-owned files after the isolated test directory exists."""
         return
