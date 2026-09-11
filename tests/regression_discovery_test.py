@@ -479,6 +479,8 @@ class RegressionDiscoveryTest(unittest.TestCase):
                 "load('//:repos.bzl', 'repos')\nrepos()\n",
                 "load('//:repos.bzl', alias='declare')\nalias()\n",
                 "maybe(native.local_repository, name='ip', path='../ip')\n",
+                "load('//:repos.bzl', 'local_repository')\nlocal_repository(name='ip', path='../ip')\n",
+                "local_repository = other_rule\nlocal_repository(name='ip', path='../ip')\n",
         ):
             with self.subTest(source=source), tempfile.TemporaryDirectory() as temporary:
                 project = Path(temporary)

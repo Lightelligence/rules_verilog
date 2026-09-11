@@ -70,12 +70,19 @@ def external_metadata(project_root, project_paths):
             for node in tree.body if isinstance(node, ast.Expr) and isinstance(node.value, ast.Call)
         }
         for node in ast.walk(tree):
+            if workspace and isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store) and node.id in LOCAL_RULES:
+                unsafe(path, "Repository builtin is rebound in the workspace")
             if not isinstance(node, ast.Call):
                 continue
             call = node.func
             direct = isinstance(call, ast.Name) or (isinstance(call, ast.Attribute)
                                                     and isinstance(call.value, ast.Name) and call.value.id == "native")
             function = _symbol(call)
+            if workspace and function == "load":
+                bindings = [_literal_string(argument) for argument in node.args[1:]]
+                bindings.extend(keyword.arg for keyword in node.keywords)
+                if LOCAL_RULES.intersection(bindings):
+                    unsafe(path, "Loaded repository symbol is not a proven native builtin")
             if function in LOCAL_RULES:
                 keywords = {keyword.arg: keyword.value for keyword in node.keywords}
                 repo_name = _literal_string(keywords.get("name"))

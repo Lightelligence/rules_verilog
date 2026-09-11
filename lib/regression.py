@@ -741,7 +741,13 @@ class RegressionConfig():
         for query_chunk in self._chunk_arguments(test_queries):
             combined_test_query = " union ".join(query_chunk)
             dtp.reset()
-            returncode, stdout, stderr = self._run_command(["bazel", "cquery", combined_test_query], )
+            # Test cfgs point to their TB through ordinary rule attributes.
+            # Discovery does not need aspect-added edges. Traversing stale
+            # aspect nodes after an external macro edit crashes Bazel 7.7.1's
+            # reverse-dependency walk; the metadata build below still applies
+            # the cfg-info aspect normally.
+            returncode, stdout, stderr = self._run_command(
+                ["bazel", "cquery", combined_test_query, "--noinclude_aspects"], )
             dtp.stop_and_print()
             if returncode:
                 self.log.critical("bazel test discovery failed:\n%s", stderr)
