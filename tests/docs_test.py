@@ -43,10 +43,12 @@ class DocsTest(unittest.TestCase):
         for parameter in parameters:
             self.assertIn('<a id="verilog_dv_test_cfg-{}"></a>'.format(parameter), api_docs)
 
-    def test_setup_docs_do_not_reference_retired_repository(self):
+    def test_setup_docs_use_canonical_repository_and_archive_prefix(self):
         readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
 
-        self.assertNotIn("Lightelligence/rules_verilog", readme)
+        self.assertIn('"https://github.com/Lightelligence/rules_verilog/archive/{}.tar.gz"', readme)
+        self.assertIn('strip_prefix = "rules_verilog-{}".format(RULES_VERILOG_COMMIT)', readme)
+        self.assertNotIn("justin371/new_rules_verilog", readme)
         self.assertNotIn("LM_LICENESE_FILE", readme)
 
     def test_vcs_config_uses_declared_simulator_settings(self):

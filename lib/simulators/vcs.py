@@ -460,6 +460,13 @@ class VcsSimulator(SimulatorInterface):
     def get_effective_partcomp_mode(self):
         if not self.options.vcs_partcomp:
             return 'disabled'
+        explicit = self.options.vcs_explicit_switches
+        requested = any(switch == '--vcs-partcomp' or switch.startswith('--vcs-partcomp-') for switch in explicit)
+        # A site Y-2026.03-1 single-slot compile crashed with automatic partcomp.
+        # Keep defaults conservative without probing licensed tools during generation.
+        # DTL requires partitions, and explicit tuning remains a diagnostic opt-in.
+        if not self.options.dtl and not requested and self.get_partcomp_jobs() == 1:
+            return 'disabled'
         return self.options.vcs_partcomp_mode
 
     def get_partcomp_jobs(self):
