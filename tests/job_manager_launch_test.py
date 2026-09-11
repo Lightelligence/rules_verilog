@@ -16,6 +16,55 @@ from lib.job_lib import BazelTBJob, BazelTestCfgJob, Job, JobManager, JobStatus,
 
 class SchedulerResourceTest(unittest.TestCase):
 
+    def test_scheduler_runs_distinct_databases_while_same_database_waits(self):
+
+        class ResourceJob(Job):
+
+            @property
+            def execution_mode(self):
+                return "parallel"
+
+            @property
+            def exclusive_resource(self):
+                return self.resource
+
+            def pre_run(self):
+                return
+
+            def post_run(self):
+                return
+
+        log = _Logger()
+        rcfg = SimpleNamespace(options=SimpleNamespace(timeout=1), log=log)
+        started = {name: threading.Event() for name in ("first", "same", "other")}
+        runners = {}
+
+        def launch(job, manager):
+            runner = _PausableRunner(job, manager)
+            runners[job.name] = runner
+            started[job.name].set()
+            return runner
+
+        manager = JobManager({"idle_print_seconds": 60, "quit_count": 1, "active_job_limit": 3}, log)
+        manager.job_lib_type = launch
+        try:
+            first = ResourceJob(rcfg, "first")
+            first.resource = "db1"
+            manager.add_job(first)
+            self.assertTrue(started["first"].wait(1))
+            for name, resource in (("same", "db1"), ("other", "db2")):
+                job = ResourceJob(rcfg, name)
+                job.resource = resource
+                manager.add_job(job)
+            self.assertTrue(started["other"].wait(1))
+            self.assertFalse(started["same"].is_set())
+            runners["first"].finish.set()
+            self.assertTrue(started["same"].wait(2))
+        finally:
+            for runner in runners.values():
+                runner.finish.set()
+            manager.stop()
+
     def test_same_resource_waits_for_active_and_launching_jobs(self):
         manager = JobManager.__new__(JobManager)
         manager.active_job_limit = 8
