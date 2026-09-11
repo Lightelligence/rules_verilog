@@ -1190,10 +1190,6 @@ class BazelTBJob(Job):
         self.bazel_targets.extend(additional_targets)
         self.bazel_targets = list(dict.fromkeys(self.bazel_targets))
         prebuilt_targets = set(prebuilt_targets)
-        if getattr(rcfg, "use_cached_discovery", False):
-            prebuilt_targets.update(
-                target for target in self.bazel_targets
-                if target != self.bazel_target and self._cached_test_cfg_output_exists(rcfg.proj_dir, target))
         self.bazel_targets = [target for target in self.bazel_targets if target not in prebuilt_targets]
         super(BazelTBJob, self).__init__(rcfg, self)
         self.vcomper = vcomper
@@ -1205,7 +1201,7 @@ class BazelTBJob(Job):
         if self.rcfg.options.no_bazel:
             self.main_cmdline = "echo \"Bypassing {} due to --no-compile/--no-bazel\"".format(target)
         elif not self.bazel_targets:
-            self.main_cmdline = "echo \"Using cached or discovery-built Bazel outputs for {}\"".format(target)
+            self.main_cmdline = "echo \"Using discovery-built Bazel outputs for {}\"".format(target)
         else:
             command = ["bazel", "build"]
             if getattr(self.rcfg.options, "simmer_profile", False):
@@ -1213,11 +1209,6 @@ class BazelTBJob(Job):
                 command.append("--profile={}".format(self.bazel_profile_path))
             command.extend(self.bazel_targets)
             self.main_cmdline = shlex.join(command)
-
-    def _cached_test_cfg_output_exists(self, project_dir, target):
-        package, target_name = target.split(":", 1)
-        output_dir = os.path.join(project_dir, "bazel-bin", package[2:])
-        return os.path.isfile(os.path.join(output_dir, "{}_dynamic_args.py".format(target_name)))
 
     def pre_run(self):
         super(BazelTBJob, self).pre_run()

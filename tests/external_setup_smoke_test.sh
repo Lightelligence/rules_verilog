@@ -47,3 +47,5 @@ run_fixture "$fixture_dir" "$temporary_root/local-output-user-root"
   --output-root "$temporary_root"
 
 run_fixture "$http_archive_fixture_dir" "$temporary_root/http-archive-output-user-root"
+
+"$python_path" "$repo_root/tests/discovery_cache_smoke_test.py"
