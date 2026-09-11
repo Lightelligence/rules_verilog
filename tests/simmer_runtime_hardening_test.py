@@ -810,7 +810,8 @@ class SimmerRuntimeHardeningTest(unittest.TestCase):
         job = simmer.VCompJob.__new__(simmer.VCompJob)
         job._shared_runtime_locks = {}
         job._cancel_event = threading.Event()
-        with tempfile.TemporaryDirectory() as root, mock.patch("simmer.compile_cache.CompileDirectoryLock") as lock:
+        with tempfile.TemporaryDirectory() as root, \
+             mock.patch("simmer.compile_cache.CompileDirectoryLock") as lock, mock.patch("simmer.log", mock.Mock()):
             job.rcfg = SimpleNamespace(proj_dir=root)
             path = os.path.join(root, "coverage")
             job.acquire_shared_runtime_lock(path)
