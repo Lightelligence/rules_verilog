@@ -60,7 +60,10 @@ py_test(
     name = "compile_input_digest_test",
     timeout = "short",
     srcs = ["compile_input_digest_test.py"],
-    deps = ["//verilog/private:compile_input_digest_lib"],
+    deps = [
+        "//lib:compile_cache",
+        "//verilog/private:compile_input_digest_lib",
+    ],
 )
 
 py_test(
@@ -206,6 +209,7 @@ py_test(
         "//lib:simmer_results",
         "//lib:simmer_state",
         "//lib/simulators",
+        "//verilog/private:compile_input_digest_lib",
     ],
 )
 

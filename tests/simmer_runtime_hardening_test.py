@@ -26,6 +26,7 @@ import simmer
 from lib import compile_cache
 from lib.job_lib import JobCancelledError, JobStatus
 from lib.runtime_options import normalize_test_runtime_options
+from verilog.private import compile_input_digest
 
 
 def _replace_symlink_in_process(link_path, target_path, start, result_queue):
@@ -49,6 +50,11 @@ class _FatalLog:
 class SimmerRuntimeHardeningTest(unittest.TestCase):
 
     def test_skipping_bazel_rehashes_sources_before_compile_reuse(self):
+        for shared in (False, True):
+            with self.subTest(shared=shared):
+                self._check_skipping_bazel_compile_reuse(shared)
+
+    def _check_skipping_bazel_compile_reuse(self, shared):
         for strict in (False, True):
             with self.subTest(strict=strict), tempfile.TemporaryDirectory() as temporary_dir:
                 root = Path(temporary_dir)
@@ -58,11 +64,19 @@ class SimmerRuntimeHardeningTest(unittest.TestCase):
                 source = bench / "top.sv"
                 source.write_text("module top; endmodule\n", encoding="utf-8")
                 inventory = bench / "inputs.txt"
-                inventory.write_text("source\tbench/top.sv\n", encoding="utf-8")
                 compile_args = bench / "tb_compile_args.f"
                 compile_args.write_text("bench/top.sv\n", encoding="utf-8")
                 digest = bench / "inputs.sha256"
-                digest.write_text(compile_cache._compile_inputs_digest(inventory, runfiles), encoding="ascii")
+                manifest = root / "manifest.txt"
+                manifest.write_text("source\tbench/top.sv\t{}\n".format(source), encoding="utf-8")
+                if shared:
+                    index = root / "index.json"
+                    indices = root / "indices.txt"
+                    compile_input_digest.generate_index(manifest, index)
+                    indices.write_text(str(index) + "\n", encoding="utf-8")
+                    compile_input_digest.merge_digest(manifest, digest, inventory, indices)
+                else:
+                    compile_input_digest.generate_digest(manifest, digest, inventory)
                 (bench / "tb_tb_options.py").write_text(
                     repr({
                         "compile_inputs": "bench/inputs.txt",
