@@ -526,6 +526,9 @@ class VCompJob(Job):
             self.simulator.compile_script_for_fingerprint(compile_script),
             {"BAZEL_RUNFILES_MAIN": self.bazel_runfiles_main},
         )
+        # A skipped Bazel build cannot refresh its source digest. In particular,
+        # --no-compile must validate current runfile bytes, not the previous build.
+        compile_inputs_digest = self.tb_options["compile_inputs_digest"] if not options.no_bazel else None
         self.compile_fingerprint = compile_cache.compile_fingerprint(
             self.rcfg.proj_dir,
             fingerprint_script,
@@ -535,8 +538,8 @@ class VCompJob(Job):
             self.bazel_runfiles_main,
             compile_inputs_digest_path=os.path.join(
                 self.bazel_runfiles_main,
-                self.tb_options["compile_inputs_digest"],
-            ) if self.tb_options["compile_inputs_digest"] else None,
+                compile_inputs_digest,
+            ) if compile_inputs_digest else None,
             **fingerprint_inputs,
         )
         self.simulator.validate_compile_cache_context(self)

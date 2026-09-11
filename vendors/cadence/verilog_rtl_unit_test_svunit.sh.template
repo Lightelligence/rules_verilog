@@ -44,7 +44,7 @@ fi
     -s xcelium \
     --no_abs_path_flist \
     --no_feedback \
-    {PRE_FLIST_ARGS} \
+    {PRE_FLIST_ARGS}
     -o . \
     -c '-define\ TBV' \
     -c '-libext\ .sv' \

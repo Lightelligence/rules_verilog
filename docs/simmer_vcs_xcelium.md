@@ -174,8 +174,8 @@ simmer -t <bench>:<test> --simulator VCS --no-compile
 simmer -t <bench>:<test> --simulator VCS --no-compile --no-bazel
 ```
 
-`--no-compile` validates a fingerprint of tracked/untracked source state,
-runfile content, the rendered compile script, compile arguments, external
+`--no-compile` validates the current content of the compile-input runfiles,
+the rendered compile script, compile arguments, external
 compile configuration files and the resolved VCS/VSO tool identity and
 locations. It fails before simulation when the existing compile output does not
 match the current inputs.
@@ -185,6 +185,10 @@ by default. If that cache is missing or stale, simmer refreshes discovery once
 before validating the existing compile output. Add explicit `--no-bazel` when
 the invocation must not run Bazel at all; a missing or stale scoped cache is
 then an error.
+
+When Bazel is skipped, simmer hashes the current compile-input runfiles instead
+of trusting a previously generated digest. This does not regenerate Bazel
+outputs: rebuild those outputs first if their generator inputs have changed.
 
 VCS compile logs can contain a GNU make future-mtime warning when an NFS
 timestamp is less than 100 ms ahead of the execution host. Simmer treats that
@@ -763,6 +767,10 @@ These flows are not enabled by default because they require feature-specific
 licenses, setup and real workload validation.
 
 ## Coverage generation and merge
+
+Explicit CLI `--vcs-cm-hier` and `--covfile` paths are relative to the directory
+where simmer is invoked. They are resolved before compilation and fingerprinting;
+rule-provided coverage paths remain relative to the Bazel runfiles directory.
 
 VCS `--vcs-cm` writes one `.vdb` per vcomp and generates
 `<vcomp>_vcs_cov_merge.sh`. The same configured VCS runner is used for `urg`

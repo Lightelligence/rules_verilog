@@ -1804,7 +1804,10 @@ run_bounded_process([
         script_text = template.replace("{SIMULATOR_COMMAND}", shlex.quote("./" + simulator_stub.name))
         script_text = script_text.replace("{WAVES_RENDER_CMD_PATH}", wave_tcl.name)
         script_text = script_text.replace("{WAVE_VIEWER_COMMAND}", shlex.quote("./" + viewer_stub.name))
-        for placeholder in ("{PRE_FLIST_ARGS}", "{FLISTS}", "{POST_FLIST_ARGS}"):
+        # Use the same continuation-bearing input emitted by the RTL rule,
+        # including the no-user-options case.
+        script_text = script_text.replace("{PRE_FLIST_ARGS}", "    \\\n   \\")
+        for placeholder in ("{FLISTS}", "{POST_FLIST_ARGS}"):
             script_text = script_text.replace(placeholder, "")
         script = root / "run svunit.sh"
         script.write_text(script_text, encoding="utf-8", newline="\n")
@@ -1816,6 +1819,8 @@ run_bounded_process([
         )
 
         arguments = simulator_args.read_text(encoding="utf-8").splitlines()
+        self.assertNotIn(" ", arguments)
+        self.assertNotIn("", arguments)
         wave_index = arguments.index("-input {}".format(wave_tcl.name))
         self.assertEqual(["-r", "-input {}".format(wave_tcl.name), "-r", "-access r"],
                          arguments[wave_index - 1:wave_index + 3])

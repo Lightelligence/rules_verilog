@@ -15,13 +15,8 @@
     <h1>{{ bench_name }}</h1>
     <p class="subtitle">{{ header.simulator|upper }} regression at {{ header.time }}</p>
   </div>
-  {% if summary.failed|default(0, true)|int > 0 %}
-  <span class="status-text status-failed">Failed</span>
-  {% elif summary.skipped|default(0, true)|int > 0 %}
-  <span class="status-text status-skipped">Partial</span>
-  {% else %}
-  <span class="status-text status-passed">Passed</span>
-  {% endif %}
+  {% set run_status = summary|regression_status %}
+  <span class="status-text {% if run_status == 'Failed' %}status-failed{% elif run_status == 'Passed' %}status-passed{% else %}status-skipped{% endif %}">{{ run_status }}</span>
 </div>
 
 {% set passrate = summary.passrate|default(0, true)|float %}
@@ -178,6 +173,7 @@
       <thead>
         <tr>
           <th scope="col">Run</th>
+          <th scope="col">Status</th>
           <th scope="col">Tests</th>
           <th scope="col">Passing</th>
           <th scope="col">Total Coverage</th>
@@ -194,6 +190,7 @@
         {% set history_functional_available = item.cov_func is not none and item.cov_func is defined %}
         <tr>
           <td class="cell-primary"><a href="{{ item.timestamp|urlencode }}.html"><code>{{ item.timestamp }}</code></a></td>
+          <td>{{ item|regression_status }}</td>
           <td>{{ item.total|default(0, true) }}</td>
           <td class="{% if history_passrate >= 99.999 %}heat-good{% elif history_passrate >= 90 %}heat-warn{% else %}heat-bad{% endif %}">{{ "%.2f"|format(history_passrate) }}%</td>
           <td>{% if history_total_available %}{{ "%.2f"|format(item.cov_total|float) }}%{% else %}N/A{% endif %}</td>

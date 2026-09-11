@@ -23,6 +23,7 @@
     <thead>
       <tr>
         <th scope="col">Block</th>
+        <th scope="col">Status</th>
         <th scope="col">Tests</th>
         <th scope="col">Passing</th>
         <th scope="col">Total Coverage</th>
@@ -45,6 +46,7 @@
       {% set functional_coverage = item.cov_func|float if functional_available else 0 %}
       <tr>
         <td class="cell-primary"><a href="{{ item.bench|urlencode }}/index.html">{{ item.bench }}</a></td>
+        <td>{{ item|regression_status }}</td>
         <td>{{ item.total|default(0, true) }}</td>
         <td class="{% if passrate >= 99.999 %}heat-good{% elif passrate >= 90 %}heat-warn{% else %}heat-bad{% endif %}">{{ "%.2f"|format(passrate) }}%</td>
         <td class="{% if not total_available %}heat-neutral{% elif total_coverage >= 90 %}heat-good{% elif total_coverage >= 75 %}heat-warn{% else %}heat-bad{% endif %}">{% if total_available %}{{ "%.2f"|format(total_coverage) }}%{% else %}N/A{% endif %}</td>
