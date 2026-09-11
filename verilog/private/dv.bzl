@@ -967,13 +967,13 @@ verilog_dv_unit_test = rule(
             default = Label("@rules_verilog//vendors/synopsys:verilog_dv_tb_compile_args.f.template"),
         ),
         "sim_args": attr.string_list(
-            doc = "Deprecated compile arguments. Use compile_args and run_args instead. With VCS, legacy '-define NAME' entries become '+define+NAME'; Xcelium-only debug/wave flags are omitted.",
+            doc = "Deprecated one-step arguments. Use compile_args and run_args instead. With VCS, legacy '-define NAME' entries become '+define+NAME'; Xcelium-only debug/wave flags are omitted and non-compiler plusargs are passed to simv.",
         ),
         "compile_args": attr.string_list(
             doc = "Additional arguments passed to compilation/elaboration. With VCS, legacy '-define NAME' entries become '+define+NAME'; Xcelium-only debug/wave flags are omitted.",
         ),
         "run_args": attr.string_list(
-            doc = "Additional arguments passed only to simulation runtime.",
+            doc = "Additional arguments passed only to simulation runtime. With VCS, legacy Xcelium debug/wave controls are omitted; compile defines must be placed in compile_args.",
         ),
         "_command_override": attr.label(
             default = Label("@rules_verilog//:verilog_dv_unit_test_command"),

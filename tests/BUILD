@@ -1,6 +1,9 @@
 # vim: set ft=bzl :
 load("@buildifier_prebuilt//:rules.bzl", "buildifier")
 load("@rules_python//python:defs.bzl", "py_test")
+load(":vcs_unit_args_test.bzl", "vcs_unit_args_test_suite")
+
+vcs_unit_args_test_suite(name = "vcs_unit_args_test")
 
 buildifier(
     name = "buildifier_format_diff",

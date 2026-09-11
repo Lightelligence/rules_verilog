@@ -1,7 +1,7 @@
 # vim: set ft=bzl :
 """Rules to gather and compile RTL."""
 
-load(":verilog.bzl", "CUSTOM_SHELL", "ShellInfo", "ToolEncapsulationInfo", "VerilogInfo", "gather_shell_defines", "get_transitive_srcs", "merge_default_runfiles", "partition_vcs_unit_test_args", "resolve_unit_test_simulator", "runfiles_relative_short_path")
+load(":verilog.bzl", "CUSTOM_SHELL", "ShellInfo", "ToolEncapsulationInfo", "VerilogInfo", "gather_shell_defines", "get_transitive_srcs", "merge_default_runfiles", "normalize_vcs_unit_test_compile_args", "partition_vcs_unit_test_args", "resolve_unit_test_simulator", "runfiles_relative_short_path")
 
 _SHELLS_DOC = """List of verilog_rtl_shell Labels.
 For each Label, a gumi define will be placed on the command line to use this shell instead of the original module.
@@ -415,6 +415,7 @@ def _verilog_rtl_unit_test_impl(ctx):
     target_post_flist_args = ctx.attr.post_flist_args
     runtime_args = ctx.attr.run_args
     if simulator == "VCS":
+        runtime_args = normalize_vcs_unit_test_compile_args(runtime_args, runtime = True)
         partitioned_pre_args = partition_vcs_unit_test_args(target_pre_flist_args)
         partitioned_post_args = partition_vcs_unit_test_args(target_post_flist_args)
         target_pre_flist_args = partitioned_pre_args.compile_args
@@ -544,7 +545,7 @@ verilog_rtl_unit_test = rule(
             doc = "Simulator to use for this one-step RTL unit test. When omitted, verilog_unit_test_simulator selects XRUN or VCS.\n",
         ),
         "run_args": attr.string_list(
-            doc = "Additional arguments passed only to simulation runtime. With VCS, legacy runtime plusargs in pre_flist_args or post_flist_args are also passed to simv, or through runSVUnit -r for the bundled SVUnit template.\n",
+            doc = "Additional arguments passed only to simulation runtime. With VCS, legacy runtime plusargs in pre_flist_args or post_flist_args are also passed to simv, or through runSVUnit -r for the bundled SVUnit template. Legacy Xcelium debug/wave controls are omitted; compile defines must be placed in pre_flist_args.\n",
         ),
         "ut_sim_template": attr.label(
             allow_single_file = True,
