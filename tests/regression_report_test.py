@@ -337,6 +337,41 @@ class RegressionReportTest(unittest.TestCase):
             self.assertFalse((bench_path / "{}.html".format(oldest)).exists())
             self.assertFalse(old_logs.exists())
 
+    def test_run_launcher_attempts_remaining_reports_after_browser_failure(self):
+        if os.name == "nt":
+            self.skipTest("generated launcher execution requires POSIX shell semantics")
+        for failure_mode, failures in (("first", 1), ("all", 3)):
+            with self.subTest(failure_mode=failure_mode), \
+                 tempfile.TemporaryDirectory(prefix="report launcher failure ") as temporary_dir:
+                report = RegressionReport(SimpleNamespace(log=_Log()), self._report_environment(), temporary_dir)
+                report.header = {"time": "20260716_140000_000001"}
+                report.proj_name = "project name"
+                report.bench_list = ["bench one", "bench two", "bench three"]
+                launcher = report.write_run_launcher()
+                capture = Path(temporary_dir) / "opened reports.txt"
+                browser = Path(temporary_dir) / "browser stub.sh"
+                browser.write_text(
+                    "#!/usr/bin/env bash\n"
+                    "printf '%s\\n' \"$1\" >> \"$REPORT_CAPTURE\"\n"
+                    "if [ \"$REPORT_FAILURE_MODE\" = all ]; then exit 7; fi\n"
+                    "case \"$1\" in */bench%20one/*) exit 7 ;; esac\n",
+                    encoding="utf-8",
+                )
+                browser.chmod(0o755)
+                environment = dict(os.environ,
+                                   BROWSER=str(browser),
+                                   REPORT_CAPTURE=str(capture),
+                                   REPORT_FAILURE_MODE=failure_mode)
+
+                result = subprocess.run([launcher], env=environment, check=False, capture_output=True, text=True)
+
+                self.assertEqual(1, result.returncode)
+                opened = capture.read_text(encoding="utf-8").splitlines()
+                self.assertEqual(3, len(opened))
+                self.assertEqual(3, len(set(opened)))
+                self.assertIn("{} report(s) could not be opened".format(failures), result.stderr)
+                self.assertEqual(failures, result.stderr.count("Failed to open report (exit 7)"))
+
     def test_run_launcher_opens_only_this_regression_snapshot(self):
         if os.name == "nt":
             self.skipTest("generated launcher execution requires POSIX shell semantics")

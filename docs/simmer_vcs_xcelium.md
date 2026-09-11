@@ -13,12 +13,15 @@ simmer -t <bench>:<test> --simulator XRUN
 ```
 
 Normal Xcelium compilation is fingerprinted and protected by a compile-directory
-lock. After one process publishes a matching elaboration database, other
-`simmer` processes reuse it and may run simulations concurrently from their
-separate test directories. Xcelium compile scratch such as `xp_elab.log` may
-remain in the shared Bazel runfiles directory. Coverage runs still serialize on
-their shared coverage work directory. Do not force a rebuild or change compile
-inputs for the same VCOMP directory while simulations are using it.
+lock. Matching elaboration databases are reused, but regressions sharing a
+VCOMP database or Bazel runfiles tree hold a runtime lock through simulation
+and cleanup. Tests using the same database run serially; tests using distinct
+databases may run concurrently. This conservative policy does not assume that
+XRUN's `run.*.d` is read-only: licensed concurrent-database validation is still
+unavailable. Known top-level scratch created by the current compilation is
+removed before releasing the lock; pre-existing files and symlinks are preserved.
+Coverage retains its shared coverage-directory lock. These locks coordinate
+`simmer` only; do not modify active databases with external commands.
 
 VCS uses the two-step compile/sim flow:
 
@@ -26,7 +29,7 @@ VCS uses the two-step compile/sim flow:
 simmer -t <bench>:<test> --simulator VCS
 ```
 
-VCS follows the same concurrency contract: compilation is serialized, while
+VCS retains its separate concurrency contract: compilation is serialized, while
 matching normal simulations reuse `simv` concurrently without a regression-wide
 Bazel runfiles lock. VCS coverage retains its separate shared coverage-directory
 lock. Do not use `--recompile` or change compile inputs for the same VCOMP while
@@ -319,6 +322,12 @@ affinity. A multi-host LSF total without per-host evidence falls back to one
 worker. Affinity-only and host-count fallbacks are capped at the conservative
 default of eight. `--vcs-partcomp-jobs N` always overrides automatic detection.
 
+An automatically selected single worker disables Partition Compile and uses
+regular `-Mupdate`, protecting the default single-slot flow from the observed
+Y-2026.03-1 frontend crash. Explicit `--vcs-partcomp` or `--vcs-partcomp-*`
+options opt back in, including `j1`; DTL retains its required partition flow.
+This is a conservative allocation guard, not a claim that other releases fail.
+
 For an LSF wrapper such as `bs='bsub -I -q syn'`, omitting `-n` normally means
 the queue's default allocation, often one slot. Request parallel capacity from
 LSF when it is needed:
@@ -370,7 +379,8 @@ compiles normally, unlike strict `--no-compile`.
 Available modes are `auto`, `adaptive`, `low`, `high` and `relax`. Keep `auto`
 until profiling shows a reason to tune the partition thresholds or adaptive
 scheduler. Use `--no-vcs-partcomp` for the regular `-Mupdate` flow. This opt-out
-is also required for the known Y-2026.03 partition frontend regression:
+is also available for the known Y-2026.03 partition frontend regression when
+explicit tuning or a multi-worker allocation enables partitions:
 
 ```bash
 simmer -t 'sys_tb:smoke_test@1' --simulator VCS --no-vcs-partcomp --vcs-profile
@@ -828,15 +838,25 @@ seed and original simulator options. Run it directly from any directory. Set
   under `.simmer/cache/discovery/` and can be deleted at any time. Running one
   TB does not replace another TB's discovery data. Each cache file tracks
   BUILD-prefixed files, `.bzl`, MODULE/WORKSPACE and Bazel configuration files
-  (including `.bazelignore`) inside the main workspace. External IP/VIP
-  repositories are intentionally excluded; run `bazel clean` after changing
-  them.
-- Cached discovery reuses existing test-config outputs, but normal compile
-  runs still issue an incremental `bazel build` for each selected testbench.
+  (including `.bazelignore`) inside the main workspace. Direct literal native
+  `local_repository` declarations also track external
+  BUILD and `.bzl` metadata, including additions and deletions, without hashing
+  RTL contents. Old manifest generations are invalidated automatically.
+  Unresolved external labels, repository macros/rules, nonliteral paths,
+  injected `new_local_repository` BUILD inputs, repository overrides,
+  module repositories, globs, unreadable metadata,
+  directory symlinks or bounded-scan limits disable discovery reuse with a
+  warning; normal invocations rediscover through Bazel. This conservative
+  fallback may increase discovery time for complex workspaces. Explicit
+  `--no-bazel` rejects an unprovable cache instead of silently using it.
+- Normal runs issue an incremental `bazel build` for each selected testbench
+  **and its selected test-config targets**, even if their output files exist.
   This refreshes runfiles and compile-input digests after Verilog source
   changes while letting Bazel reuse unchanged outputs. Targets built during
-  the current discovery pass are not built twice. A changed workspace metadata
-  file invalidates discovery, and `bazel clean` removes all cached outputs.
+  the current discovery pass are not built twice. The `--no-compile` /
+  `--no-bazel` reuse controls described above remain in force. `bazel clean`
+  removes Bazel outputs, not `.simmer/cache/discovery/`; deleting the latter
+  forces discovery but is not required after tracked external metadata edits.
 - Passing tests are removed by default. `--nt` intentionally retains them.
 - Do not enable waves, coverage, SmartLog, ICO artifacts or `--nt` in routine
   throughput regressions.

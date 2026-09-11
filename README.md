@@ -15,9 +15,9 @@ RULES_VERILOG_COMMIT = "<40-character commit SHA>"
 
 http_archive(
     name = "rules_verilog",
-    urls = ["https://github.com/justin371/new_rules_verilog/archive/{}.tar.gz".format(RULES_VERILOG_COMMIT)],
+    urls = ["https://github.com/Lightelligence/rules_verilog/archive/{}.tar.gz".format(RULES_VERILOG_COMMIT)],
     sha256 = "<sha256 of the archive>",
-    strip_prefix = "new_rules_verilog-{}".format(RULES_VERILOG_COMMIT),
+    strip_prefix = "rules_verilog-{}".format(RULES_VERILOG_COMMIT),
 )
 
 load("@rules_verilog//:deps.bzl", "verilog_dependencies")
@@ -229,7 +229,9 @@ to be available on `PATH`.
 
 VCS enables automatic compile fingerprint reuse and Partition Compile by
 default. An unchanged fingerprint bypasses VCS; a changed build uses the
-allocation-aware partition flow. The writable partition database is
+allocation-aware partition flow (automatic single-worker allocations use
+regular `-Mupdate` as a crash safeguard; explicit partition options opt in).
+The writable partition database is
 `<tb>__VCS_VCOMP/partitionlib`; `--waves` and `--gui` use sibling
 `partitionlib_waves` and `partitionlib_gui` databases so incompatible KDB
 options do not invalidate each other. Stable third-party IP/VIP
