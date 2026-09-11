@@ -382,7 +382,7 @@ class JobManagerLaunchTest(unittest.TestCase):
 
         self.assertEqual("bazel build //pkg/tests:second", job.main_cmdline)
 
-    def test_cached_discovery_rebuilds_tb_to_refresh_source_outputs(self):
+    def test_cached_discovery_rebuilds_tb_and_existing_configs(self):
         project_dir = tempfile.mkdtemp()
         os.makedirs(os.path.join(project_dir, "bazel-bin", "pkg", "tb.runfiles", "__main__"))
         tests_dir = os.path.join(project_dir, "bazel-bin", "pkg", "tests")
@@ -399,7 +399,7 @@ class JobManagerLaunchTest(unittest.TestCase):
 
         job = BazelTBJob(rcfg, "//pkg:tb", vcomper, additional_targets=["//pkg/tests:first"])
 
-        self.assertEqual("bazel build //pkg:tb", job.main_cmdline)
+        self.assertEqual("bazel build //pkg:tb //pkg/tests:first", job.main_cmdline)
 
     def test_cached_discovery_rebuilds_outputs_missing_after_bazel_clean(self):
         project_dir = tempfile.mkdtemp()

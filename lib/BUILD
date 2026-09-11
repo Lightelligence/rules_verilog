@@ -38,10 +38,16 @@ py_library(
 )
 
 py_library(
+    name = "discovery_inputs",
+    srcs = ["discovery_inputs.py"],
+)
+
+py_library(
     name = "regression",
     srcs = ["regression.py"],
     deps = [
         ":bazel_profile",
+        ":discovery_inputs",
         ":rv_utils",
     ],
 )
