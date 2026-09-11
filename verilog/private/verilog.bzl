@@ -50,7 +50,7 @@ def resolve_unit_test_simulator(explicit_simulator, configured_simulator):
 
 _XRUN_ONLY_UNIT_TEST_FLAGS = [
     "+rw",
-    "-ALLOWREDEFINITION",
+    "-allowredefinition",
     "-64bit",
     "-disable_sem2009",
     "-mess",
@@ -129,11 +129,13 @@ def _tokenize_unit_test_args(args):
                     current = []
                 continue
             current.append(char)
+        if quote:
+            fail("Unterminated quote in VCS unit-test argument: {}".format(arg))
         if current:
             tokens.append("".join(current))
     return tokens
 
-def normalize_vcs_unit_test_compile_args(args):
+def normalize_vcs_unit_test_compile_args(args, runtime = False):
     """Translate legacy Xcelium one-step compile arguments for VCS.
 
     Existing consumers commonly attach Xcelium defines and debug controls to
@@ -142,6 +144,7 @@ def normalize_vcs_unit_test_compile_args(args):
 
     Args:
       args: Compile argument strings from a one-step unit-test rule.
+      runtime: Whether these are explicit run_args; compile defines are invalid here.
 
     Returns:
       VCS-safe compile argument strings.
@@ -152,23 +155,32 @@ def normalize_vcs_unit_test_compile_args(args):
         stripped = arg.strip()
 
         if pending_flag == "-define":
-            if not stripped:
+            if not stripped or stripped.startswith("-") or stripped.startswith("+"):
                 fail("-define in VCS unit-test arguments requires a non-empty value")
             result.append("+define+{}".format(stripped))
             pending_flag = None
             continue
         if pending_flag:
+            if stripped.startswith("-") or (stripped.startswith("+") and pending_flag != "-access"):
+                fail("{} in VCS unit-test arguments requires a value before {}".format(pending_flag, stripped))
             pending_flag = None
             continue
 
         if stripped == "-define":
+            if runtime:
+                fail("-define is a compile option; move it from run_args to compile_args or pre_flist_args")
             pending_flag = stripped
             continue
         if stripped.startswith("-define="):
-            result.append("+define+{}".format(stripped[len("-define="):].strip()))
+            if runtime:
+                fail("-define is a compile option; move it from run_args to compile_args or pre_flist_args")
+            value = stripped[len("-define="):].strip()
+            if not value:
+                fail("-define in VCS unit-test arguments requires a non-empty value")
+            result.append("+define+{}".format(value))
             continue
 
-        if stripped in _XRUN_ONLY_UNIT_TEST_FLAGS:
+        if stripped.lower() in _XRUN_ONLY_UNIT_TEST_FLAGS:
             continue
 
         consumed_xrun_value = False
@@ -177,11 +189,16 @@ def normalize_vcs_unit_test_compile_args(args):
                 pending_flag = flag
                 consumed_xrun_value = True
                 break
-            if stripped.startswith(flag + " ") or stripped.startswith(flag + "="):
+            if stripped.startswith(flag + "="):
+                if not stripped[len(flag) + 1:]:
+                    fail("{} in VCS unit-test arguments requires a value".format(flag))
                 consumed_xrun_value = True
                 break
         if consumed_xrun_value:
             continue
+
+        if runtime and stripped.startswith("+define+"):
+            fail("+define+ is a compile option; move it from run_args to compile_args or pre_flist_args")
 
         result.append(arg)
 
@@ -203,7 +220,9 @@ def partition_vcs_unit_test_args(args):
     compile_args = []
     runtime_args = []
     for arg in normalize_vcs_unit_test_compile_args(args):
-        if arg.startswith("+") and not any([arg.startswith(prefix) for prefix in _VCS_COMPILE_PLUSARG_PREFIXES]):
+        # Preserve shell quoting in the output, but not when classifying a token.
+        option = arg[1:-1] if arg[:1] in ["'", "\""] and arg[-1:] == arg[:1] else arg
+        if option.startswith("+") and not any([option.startswith(prefix) for prefix in _VCS_COMPILE_PLUSARG_PREFIXES]):
             runtime_args.append(arg)
         else:
             compile_args.append(arg)

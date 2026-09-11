@@ -1,6 +1,6 @@
 """VCS backend helpers for DV rules."""
 
-load("//verilog/private:verilog.bzl", "ToolEncapsulationInfo", "VerilogInfo", "flists_to_arguments", "get_transitive_srcs", "merge_default_runfiles", "normalize_vcs_unit_test_compile_args", "runfiles_relative_short_path")
+load("//verilog/private:verilog.bzl", "ToolEncapsulationInfo", "VerilogInfo", "flists_to_arguments", "get_transitive_srcs", "merge_default_runfiles", "normalize_vcs_unit_test_compile_args", "partition_vcs_unit_test_args", "runfiles_relative_short_path")
 
 def _use_vcs_default(selected_file, xrun_default_file, vcs_default_file):
     if selected_file.short_path == xrun_default_file.short_path:
@@ -28,8 +28,10 @@ def vcs_dv_unit_test_impl(ctx):
         ctx.file._ut_sim_template_xrun,
         ctx.file._ut_sim_template_vcs,
     )
-    sim_arg_values = normalize_vcs_unit_test_compile_args(ctx.attr.sim_args)
+    legacy_args = partition_vcs_unit_test_args(ctx.attr.sim_args)
+    sim_arg_values = legacy_args.compile_args
     compile_arg_values = sim_arg_values + normalize_vcs_unit_test_compile_args(ctx.attr.compile_args)
+    run_arg_values = legacy_args.runtime_args + normalize_vcs_unit_test_compile_args(ctx.attr.run_args, runtime = True)
 
     compile_args = ctx.actions.declare_file(ctx.label.name + "_compile_args.f")
     ctx.actions.expand_template(
@@ -65,7 +67,7 @@ def vcs_dv_unit_test_impl(ctx):
             "{DEFAULT_SIM_OPTS}": "-f {}".format(runfiles_relative_short_path(runtime_args)),
             "{DPI_LIBS}": flists_to_arguments(ctx.attr.deps, VerilogInfo, "transitive_dpi", "-sv_lib", "", "vcs"),
             "{FLISTS}": flist_args,
-            "{RUN_ARGS}": " ".join(ctx.attr.run_args),
+            "{RUN_ARGS}": " ".join(run_arg_values),
             "{SIM_ARGS}": " ".join(sim_arg_values),
         },
         is_executable = True,

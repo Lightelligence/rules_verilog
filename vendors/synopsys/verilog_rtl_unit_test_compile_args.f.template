@@ -2,13 +2,13 @@
 -licqueue
 -V
 +libext+.sv+.svh+.v+.vh+.vams+.vp+.svp
--timescale=1ns/1ps
+-timescale=100fs/100fs
 -Mupdate
 +define+TBV
 +define+VCS
 +plusarg_save
-+define+TIMESCALE_STEP_FS=1000
-+define+TIMESCALE_PREC_FS=1000
++define+TIMESCALE_STEP_FS=100
++define+TIMESCALE_PREC_FS=100
 
 {DEFINES}
 {FLISTS}
