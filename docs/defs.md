@@ -75,6 +75,13 @@ A DV Testbench.
     The compile and runtime filelists are generated according to the selected
     simulator. The generated file names are `<name>_compile_args.f` and
     `<name>_runtime_args.f`.
+
+VCS compile-input fingerprints use versioned per-file content hashes shared
+across testbenches with the same direct dependencies. This preserves the sorted
+input inventory and compiler filelist order, but safely invalidates pre-upgrade
+compile caches once. Runtime-only inputs and DPI libraries remain excluded.
+Sharing is at the direct dependency closure level, not individual source files;
+overlapping closures can still repeat hashing. Xcelium fingerprints are unchanged.
     
 
 **ATTRIBUTES**

@@ -233,12 +233,12 @@ class VcsFilelistValidationTest(unittest.TestCase):
         self.assertNotIn("filelist\ttests/vcs_filelist_validation/unit_test_top.f\n", compile_inputs)
         self.assertIn("runfile\ttests/vcs_filelist_validation/coverage_hier.cfg", compile_inputs)
         compile_inputs_digest = read_runfile(vcs_options["compile_inputs_digest"]).strip()
-        expected_digest = hashlib.sha256()
+        expected_digest = hashlib.sha256(b"rules_verilog.compile_inputs.v2\0")
         for entry in compile_inputs.splitlines():
             _, relative_path = entry.split("\t", 1)
             expected_digest.update(entry.encode("utf-8"))
             expected_digest.update(b"\0")
-            expected_digest.update(find_runfile(relative_path).read_bytes())
+            expected_digest.update(hashlib.sha256(find_runfile(relative_path).read_bytes()).digest())
             expected_digest.update(b"\0")
         self.assertEqual(expected_digest.hexdigest(), compile_inputs_digest)
 

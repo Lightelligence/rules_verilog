@@ -1,12 +1,14 @@
 """Deferred inventory generation must retain the legacy content fingerprint."""
 
 import hashlib
+import json
 import random
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from verilog.private import compile_input_digest
 
@@ -122,6 +124,94 @@ class CompileInputDigestTest(unittest.TestCase):
             check=True)
         self.assertEqual(b"\n", self.inventory.read_bytes())
         self.assertEqual(hashlib.sha256().hexdigest(), self.output.read_text(encoding="ascii").strip())
+
+    def shared(self, records, indices):
+        self.manifest.write_text("".join("{}\t{}\n".format(entry, path) for entry, path in records), encoding="utf-8")
+        index_list = self.root / "indices.txt"
+        index_list.write_text("".join(str(path) + "\n" for path in indices), encoding="utf-8")
+        compile_input_digest.merge_digest(self.manifest, self.output, self.inventory, index_list)
+        return self.inventory.read_bytes(), self.output.read_text(encoding="ascii").strip()
+
+    def index(self, records, name="index"):
+        manifest = self.root / (name + ".txt")
+        manifest.write_text("".join("{}\t{}\n".format(entry, path) for entry, path in records), encoding="utf-8")
+        index = self.root / (name + ".json")
+        compile_input_digest.generate_index(manifest, index)
+        return index
+
+    def test_shared_digest_matches_independent_reference_without_source_reads(self):
+        source = self.source("space 模块.sv", b"sv\x00\xff")
+        filelist = self.source("lib.f", b"+define+ONE\n")
+        records = [("source\texternal/ip/top.sv", source), ("filelist\tlib.f", filelist)]
+        expected = hashlib.sha256(b"rules_verilog.compile_inputs.v2\0")
+        for entry, path in sorted(records):
+            expected.update(entry.encode("utf-8") + b"\0" + hashlib.sha256(path.read_bytes()).digest() + b"\0")
+        index = self.index(records)
+        source.unlink()
+        filelist.unlink()
+        with mock.patch.object(compile_input_digest, "file_digest", side_effect=AssertionError("unexpected read")):
+            inventory, digest = self.shared(records + records, [index, index])
+        self.assertEqual(("\n".join(sorted(dict(records))) + "\n").encode(), inventory)
+        self.assertEqual(expected.hexdigest(), digest)
+
+    def test_shared_digest_is_independent_of_index_partition_and_exec_paths(self):
+        first = self.source("first.sv", b"one")
+        second = self.source("second.sv", b"two")
+        records = [("source\ta.sv", first), ("source\tb.sv", second)]
+        expected = self.shared(records, [self.index(records)])
+        self.assertEqual(
+            expected,
+            self.shared(list(reversed(records)),
+                        [self.index(records[:1], "a"), self.index(records[1:], "b")]))
+        relocated = self.source("other/config/first.sv", b"one")
+        moved = [("source\ta.sv", relocated), records[1]]
+        self.assertEqual(expected, self.shared(moved, [self.index(moved, "moved")]))
+
+    def test_shared_digest_invalidates_content_path_category_and_membership(self):
+        source = self.source("top.sv", b"old")
+        records = [("source\ttop.sv", source)]
+        before = self.shared(records, [self.index(records)])
+        self.assertNotEqual(before[1], self.generate(records)[1]) # Safe legacy cache miss.
+        source.write_bytes(b"new")
+        self.assertNotEqual(before[1], self.shared(records, [self.index(records)])[1])
+        source.write_bytes(b"old")
+        for changed in [[("source\trenamed.sv", source)], [("runfile\ttop.sv", source)], [],
+                        records + [("source\tadded.sv", source)]]:
+            self.assertNotEqual(before[1], self.shared(changed, [self.index(changed)])[1])
+
+    def test_shared_last_record_wins_and_direct_runfiles_are_hashed(self):
+        first = self.source("first.sv", b"first")
+        last = self.source("last.sv", b"last")
+        extra = self.source("extra.cfg", b"extra")
+        records = [("source\ttop.sv", first), ("source\ttop.sv", last)]
+        index = self.index(records)
+        self.assertEqual(self.shared(records, [index]), self.shared(records[1:], [index]))
+        records.append(("runfile\textra.cfg", extra))
+        before = self.shared(records, [index])
+        extra.write_bytes(b"changed")
+        self.assertNotEqual(before[1], self.shared(records, [index])[1])
+        runtime = self.source("runtime.data", b"not indexed")
+        before = self.shared(records, [index])
+        runtime.write_bytes(b"still irrelevant")
+        self.assertEqual(before, self.shared(records, [index]))
+
+    def test_shared_missing_corrupt_and_conflicting_indices_fail_closed(self):
+        source = self.source("top.sv")
+        records = [("source\ttop.sv", source)]
+        with self.assertRaisesRegex(RuntimeError, "Missing"):
+            self.shared(records, [])
+        good = self.index(records)
+        bad = self.root / "bad.json"
+        bad.write_text(json.dumps({str(source): "corrupt"}), encoding="utf-8")
+        with self.assertRaisesRegex(RuntimeError, "Malformed"):
+            self.shared(records, [bad])
+        bad.write_text(json.dumps({str(source): "0" * 64}), encoding="utf-8")
+        with self.assertRaisesRegex(RuntimeError, "Conflicting"):
+            self.shared(records, [good, bad])
+        self.assertFalse(self.output.exists())
+
+    def test_shared_empty_manifest_is_versioned(self):
+        self.assertEqual((b"\n", hashlib.sha256(b"rules_verilog.compile_inputs.v2\0").hexdigest()), self.shared([], []))
 
 
 if __name__ == "__main__":
