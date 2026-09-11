@@ -384,7 +384,6 @@ def verilog_rtl_shell(
 
 def _verilog_rtl_unit_test_impl(ctx):
     trans_srcs = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_sources")
-    srcs_list = trans_srcs.to_list()
     simulator = resolve_unit_test_simulator(ctx.attr.simulator, ctx.attr._unit_test_simulator)
     flist_field = "transitive_vcs_flists" if simulator == "VCS" else "transitive_flists"
     flists = get_transitive_srcs(
@@ -509,8 +508,9 @@ def _verilog_rtl_unit_test_impl(ctx):
         generated_files.append(compile_args)
     runfiles = merge_default_runfiles(
         ctx,
-        files = flists_list + srcs_list + ctx.files.data + ctx.files.shells + generated_files,
+        files = ctx.files.data + ctx.files.shells + generated_files,
         targets = ctx.attr.shells + ctx.attr.deps + ctx.attr.data,
+        transitive_files = depset(transitive = [flists, trans_srcs]),
     )
     return [DefaultInfo(
         runfiles = runfiles,
@@ -790,8 +790,9 @@ def _verilog_rtl_lint_test_impl(ctx):
         lint_runfile_targets.append(ctx.attr.rulefile_vcs)
     runfiles = merge_default_runfiles(
         ctx,
-        files = trans_srcs.to_list() + trans_flists.to_list() + ctx.files.design_info + [rulefile, lint_parser] + ctx.files._lint_parser_lib + [ctx.outputs.command_script],
+        files = ctx.files.design_info + [rulefile, lint_parser] + ctx.files._lint_parser_lib + [ctx.outputs.command_script],
         targets = lint_runfile_targets,
+        transitive_files = depset(transitive = [trans_srcs, trans_flists]),
     )
 
     return [
