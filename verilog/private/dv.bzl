@@ -2,10 +2,10 @@
 """Rules for building DV infrastructure."""
 
 load("//deps:gatesim_modes_list.bzl", "GATESIM_MODES")
+load(":input_digest.bzl", "VcsInputIndexInfo", "vcs_input_index")
 load(":simulators/pldm.bzl", "pldm_dv_backend")
 load(":simulators/vcs.bzl", "vcs_dv_backend", "vcs_dv_unit_test_impl")
 load(":simulators/xcelium.bzl", "xcelium_dv_backend", "xcelium_dv_unit_test_impl")
-load(":input_digest.bzl", "VcsInputIndexInfo", "vcs_input_index")
 load(":verilog.bzl", "VerilogInfo", "gather_shell_defines", "get_transitive_srcs", "merge_default_runfiles", "resolve_unit_test_simulator", "runfiles_relative_short_path", "verilog_input_manifest")
 
 DVTestInfo = provider("Runtime configuration for a DV test.", fields = {
