@@ -2,6 +2,7 @@
 """Rules for building DV infrastructure."""
 
 load("//deps:gatesim_modes_list.bzl", "GATESIM_MODES")
+load(":input_digest.bzl", "VcsInputIndexInfo", "vcs_input_index")
 load(":simulators/pldm.bzl", "pldm_dv_backend")
 load(":simulators/vcs.bzl", "vcs_dv_backend", "vcs_dv_unit_test_impl")
 load(":simulators/xcelium.bzl", "xcelium_dv_backend", "xcelium_dv_unit_test_impl")
@@ -602,10 +603,21 @@ def _verilog_dv_tb_impl(ctx):
         output = digest_manifest,
         content = compile_input_manifest.args,
     )
+    digest_arguments = [digest_manifest.path, ctx.outputs.compile_inputs_digest.path, ctx.outputs.compile_inputs.path]
+    digest_inputs = depset([digest_manifest], transitive = [compile_input_manifest.files])
+    if simulator == "VCS":
+        indices = depset([dep[VcsInputIndexInfo].index for dep in all_deps])
+        index_list = ctx.actions.declare_file(ctx.label.name + "_compile_input_indices.txt")
+        index_args = ctx.actions.args()
+        index_args.set_param_file_format("multiline")
+        index_args.add_all(indices)
+        ctx.actions.write(output = index_list, content = index_args)
+        digest_arguments = ["--merge"] + digest_arguments + [index_list.path]
+        digest_inputs = depset([digest_manifest, index_list] + compile_input_files, transitive = [indices])
     ctx.actions.run(
         executable = ctx.executable._compile_input_digest,
-        arguments = [digest_manifest.path, ctx.outputs.compile_inputs_digest.path, ctx.outputs.compile_inputs.path],
-        inputs = depset([digest_manifest], transitive = [compile_input_manifest.files]),
+        arguments = digest_arguments,
+        inputs = digest_inputs,
         outputs = [ctx.outputs.compile_inputs_digest, ctx.outputs.compile_inputs],
         mnemonic = "VerilogCompileInputDigest",
         progress_message = "Hashing Verilog compile inputs for %{label}",
@@ -703,6 +715,7 @@ verilog_dv_tb = rule(
     attrs = {
         "deps": attr.label_list(
             mandatory = True,
+            aspects = [vcs_input_index],
             doc = "A list of verilog_dv_library or verilog_rtl_library labels that the testbench is dependent on.\n" +
                   "Dependency ordering within this label list is not necessary if dependencies are consistently declared in all other rules.",
         ),
@@ -750,6 +763,7 @@ verilog_dv_tb = rule(
                   "Xcelium waivers commonly match '\\*W,<ID>'; VCS waivers commonly match 'Warning-\\[<ID>\\]'.\n",
         ),
         "shells": attr.label_list(
+            aspects = [vcs_input_index],
             doc = "List of shells to use. Each label must be a verilog_rtl_shell instance.\n" +
                   "Each shell thrown will create two defines:\n" +
                   " \\`define gumi_{module} {module}_shell\n" +

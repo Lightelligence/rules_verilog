@@ -288,7 +288,7 @@ def verilog_input_manifest(ctx, deps, extra_files, flist_field = "transitive_fli
     """Keep compile inputs shared until the digest action canonicalizes them.
 
     The manifest is internal and unordered. The digest tool emits the public
-    sorted inventory without changing the existing content digest format.
+    sorted inventory independently of the selected digest format.
 
     Returns:
       A struct containing deferred manifest args, the complete input files

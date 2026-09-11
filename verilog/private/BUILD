@@ -17,6 +17,7 @@ py_binary(
 exports_files([
     "rtl.bzl",
     "dv.bzl",
+    "input_digest.bzl",
     "simulators/pldm.bzl",
     "simulators/vcs.bzl",
     "simulators/xcelium.bzl",

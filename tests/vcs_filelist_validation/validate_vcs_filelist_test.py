@@ -233,14 +233,28 @@ class VcsFilelistValidationTest(unittest.TestCase):
         self.assertNotIn("filelist\ttests/vcs_filelist_validation/unit_test_top.f\n", compile_inputs)
         self.assertIn("runfile\ttests/vcs_filelist_validation/coverage_hier.cfg", compile_inputs)
         compile_inputs_digest = read_runfile(vcs_options["compile_inputs_digest"]).strip()
-        expected_digest = hashlib.sha256()
+        expected_digest = hashlib.sha256(b"rules_verilog.compile_inputs.v2\0")
         for entry in compile_inputs.splitlines():
             _, relative_path = entry.split("\t", 1)
             expected_digest.update(entry.encode("utf-8"))
             expected_digest.update(b"\0")
-            expected_digest.update(find_runfile(relative_path).read_bytes())
+            expected_digest.update(hashlib.sha256(find_runfile(relative_path).read_bytes()).digest())
             expected_digest.update(b"\0")
         self.assertEqual(expected_digest.hexdigest(), compile_inputs_digest)
+
+    def test_shell_and_overlapping_dependency_indices_preserve_input_identity(self):
+        options = ast.literal_eval(read_runfile("tests/vcs_filelist_validation/dv_tb_vcs_shell_tb_options.py"))
+        entries = read_runfile(options["compile_inputs"]).splitlines()
+        self.assertEqual(entries, sorted(set(entries)))
+        self.assertIn("source\ttests/vcs_filelist_validation/digest_shell.sv", entries)
+        self.assertIn("filelist\ttests/vcs_filelist_validation/digest_shell.f", entries)
+        self.assertEqual(1, entries.count("source\texternal/filelist_external_fixture/external_ip.sv"))
+        expected = hashlib.sha256(b"rules_verilog.compile_inputs.v2\0")
+        for entry in entries:
+            _, relative = entry.split("\t", 1)
+            expected.update(entry.encode("utf-8") + b"\0")
+            expected.update(hashlib.sha256(find_runfile(relative).read_bytes()).digest() + b"\0")
+        self.assertEqual(expected.hexdigest(), read_runfile(options["compile_inputs_digest"]).strip())
 
     def test_runtime_only_runfiles_are_excluded_from_vcs_compile_inputs(self):
         options = ast.literal_eval(
