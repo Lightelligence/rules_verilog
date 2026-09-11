@@ -1,4 +1,4 @@
-"""Deferred inventory generation must retain the legacy content fingerprint."""
+"""Legacy inventories and shared VCS indices preserve compile input identity."""
 
 import hashlib
 import json

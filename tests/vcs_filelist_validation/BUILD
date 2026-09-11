@@ -8,6 +8,7 @@ load(
     "verilog_dv_unit_test",
     "verilog_rtl_library",
     "verilog_rtl_lint_test",
+    "verilog_rtl_shell",
     "verilog_rtl_unit_test",
 )
 load(":synth_aspect_compat.bzl", "synth_flist_set")
@@ -50,6 +51,20 @@ verilog_dv_library(
     name = "dv_makelib",
     srcs = ["unit_test_top.sv"],
     makelib = "dv_unit_test_lib",
+)
+
+verilog_rtl_shell(
+    name = "digest_shell",
+    module_to_shell_name = "custom",
+    shell_module_label = "digest_shell.sv",
+    deps = ["@filelist_external_fixture//:external_rtl"],
+)
+
+verilog_dv_tb(
+    name = "dv_tb_vcs_shell",
+    shells = [":digest_shell"],
+    simulator = "VCS",
+    deps = [":unit_test_top"],
 )
 
 verilog_rtl_lint_test(
@@ -311,6 +326,7 @@ py_test(
         ":dv_tb_vcs_runtime_only_runfile_compile_args.f",
         ":dv_tb_vcs_runtime_only_runfile_runtime_args.f",
         ":dv_tb_vcs_runtime_only_runfile_tb_options.py",
+        ":dv_tb_vcs_shell",
         ":dv_tb_vcs_tb_options.py",
         ":dv_tb_vcs_three_step",
         ":dv_tb_xrun_ccf",
