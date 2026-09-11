@@ -510,6 +510,30 @@ class RegressionDiscoveryTest(unittest.TestCase):
             config._publish_discovery_cache(manifest)
             self.assertFalse(config._should_use_cached_discovery())
 
+    def test_repository_override_in_arbitrarily_named_import_disables_reuse(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            (project / ".bazelrc").write_text("import %workspace%/settings\n", encoding="utf-8")
+            (project / "settings").write_text("common --override_repository=ip=/mutable/elsewhere\n", encoding="utf-8")
+            config = self._config(project)
+            config._write_discovery_manifest()
+            self.assertFalse(config._should_use_cached_discovery())
+
+    def test_directory_symlink_disables_external_metadata_reuse(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            repository = project / "ip"
+            repository.mkdir()
+            target = project / "linked"
+            target.mkdir()
+            try:
+                (repository / "link").symlink_to(target, target_is_directory=True)
+            except OSError as exc:
+                self.skipTest("directory symlinks are unavailable: {}".format(exc))
+            (project / "WORKSPACE").write_text("local_repository(name='ip', path='ip')\n", encoding="utf-8")
+            config = self._config(project)
+            self.assertFalse(config._discovery_dependency_manifest()["cacheable"])
+
     def test_no_bazel_rejects_stale_cache(self):
         config = self._config(Path(tempfile.mkdtemp()))
         config.options.no_bazel = True

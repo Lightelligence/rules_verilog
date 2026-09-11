@@ -48,6 +48,10 @@ def _info(target, ctx):
     return []
 
 verilog_dv_test_cfg_info_aspect = aspect(implementation = _info)
+'''
+
+CASES_MACRO = '''
+load(":dv.bzl", "cfg")
 
 def cases():
     for name, disabled, tags in CASES:
@@ -107,13 +111,14 @@ def main():
             'load("@rules_verilog//verilog/private:dv.bzl", "dv_tb")\ndv_tb(name="soc_tb", visibility=["//visibility:public"])\n'
         )
         write(project / "benches/soc_tb/tests/BUILD",
-              'load("@rules_verilog//verilog/private:dv.bzl", "cases")\ncases()\n')
+              'load("@rules_verilog//verilog/private:cases.bzl", "cases")\ncases()\n')
         runtime = project / "benches/soc_tb/tests/runtime.txt"
         write(runtime, '{"simulator": "VCS", "uvm_testname": "old_name"}\n')
         write(external / "WORKSPACE", 'workspace(name="rules_verilog")\n')
-        write(external / "verilog/private/BUILD", 'exports_files(["dv.bzl"])\n')
-        definitions = external / "verilog/private/dv.bzl"
-        write(definitions, RULES + '\nCASES = [("first", 0, ["old"])]\n')
+        write(external / "verilog/private/BUILD", 'exports_files(["dv.bzl", "cases.bzl"])\n')
+        write(external / "verilog/private/dv.bzl", RULES)
+        definitions = external / "verilog/private/cases.bzl"
+        write(definitions, CASES_MACRO + '\nCASES = [("first", 0, ["old"])]\n')
         os.chdir(project)
         try:
             first = config(project)
@@ -138,7 +143,7 @@ def main():
 
             # Only the external macro changes: add a test, change tags and hide
             # the previous test through no_run. No clean or main BUILD edit.
-            write(definitions, RULES + '\nCASES = [("first", 1, ["changed"]), ("second", 0, ["new"])]\n')
+            write(definitions, CASES_MACRO + '\nCASES = [("first", 1, ["changed"]), ("second", 0, ["new"])]\n')
             updated = config(project)
             assert not updated._should_use_cached_discovery()
             updated.test_discovery_all()
@@ -148,7 +153,7 @@ def main():
             # Bazel clean is not a substitute for discovery invalidation.
             subprocess.run(["bazel", "clean"], check=True)
             assert Path(updated._discovery_cache_path()).exists()
-            write(definitions, RULES + '\nCASES = [("third", 0, ["after_clean"])]\n')
+            write(definitions, CASES_MACRO + '\nCASES = [("third", 0, ["after_clean"])]\n')
             after_clean = config(project)
             assert not after_clean._should_use_cached_discovery()
             after_clean.test_discovery_all()

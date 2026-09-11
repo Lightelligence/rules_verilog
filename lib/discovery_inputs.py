@@ -15,6 +15,18 @@ MAX_FILE_BYTES = 4 * 1024 * 1024
 LOCAL_RULES = {"local_repository", "new_local_repository"}
 
 
+def _symbol(node):
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    return ""
+
+
+def _literal_string(node):
+    return node.value if isinstance(node, ast.Constant) and isinstance(node.value, str) else None
+
+
 def external_metadata(project_root, project_paths):
     paths = set()
     reasons = []
@@ -31,10 +43,15 @@ def external_metadata(project_root, project_paths):
             if name not in (".bazelversion", ".bazelignore", ".gitmodules", "MODULE.bazel.lock"):
                 try:
                     with open(path, encoding="utf-8") as stream:
-                        if "--override_repository" in stream.read(MAX_FILE_BYTES + 1):
+                        source = stream.read(MAX_FILE_BYTES + 1)
+                        if len(source) > MAX_FILE_BYTES:
+                            unsafe(path, "Bazel configuration exceeds the bounded parser size")
+                        elif "--override_repository" in source:
                             unsafe(path, "Repository overrides require fresh Bazel discovery")
-                except (OSError, UnicodeError):
+                except FileNotFoundError:
                     pass
+                except (OSError, UnicodeError):
+                    unsafe(path, "Cannot inspect Bazel configuration")
             return
         try:
             with open(path, encoding="utf-8") as stream:
@@ -58,15 +75,14 @@ def external_metadata(project_root, project_paths):
             call = node.func
             direct = isinstance(call, ast.Name) or (isinstance(call, ast.Attribute)
                                                     and isinstance(call.value, ast.Name) and call.value.id == "native")
-            function = call.id if isinstance(call, ast.Name) else call.attr if isinstance(call, ast.Attribute) else ""
+            function = _symbol(call)
             if function in LOCAL_RULES:
                 keywords = {keyword.arg: keyword.value for keyword in node.keywords}
-                literal = lambda key: keywords.get(key).value if isinstance(keywords.get(
-                    key), ast.Constant) and isinstance(keywords[key].value, str) else None
-                repo_name, repo_path = literal("name"), literal("path")
-                if external or not workspace or id(
-                        node
-                ) not in top_calls or not direct or not repo_name or repo_path is None or None in keywords or "repo_mapping" in keywords:
+                repo_name = _literal_string(keywords.get("name"))
+                repo_path = _literal_string(keywords.get("path"))
+                declaration_is_direct = workspace and not external and id(node) in top_calls and direct
+                attributes_are_literal = repo_name and repo_path is not None and None not in keywords and "repo_mapping" not in keywords
+                if not declaration_is_direct or not attributes_are_literal:
                     unsafe(path, "Local repository declaration is not directly resolvable")
                     continue
                 resolved = os.path.realpath(os.path.join(project_root, repo_path))
@@ -82,9 +98,7 @@ def external_metadata(project_root, project_paths):
             elif function in ("repository_rule", "module_extension", "glob"):
                 unsafe(path, "Dynamic repository or glob inputs require fresh Bazel discovery")
             for argument in list(node.args) + [keyword.value for keyword in node.keywords]:
-                reference = argument.id if isinstance(
-                    argument, ast.Name) else argument.attr if isinstance(argument, ast.Attribute) else ""
-                if reference in LOCAL_RULES:
+                if _symbol(argument) in LOCAL_RULES:
                     unsafe(path, "Wrapped repository declaration requires fresh Bazel discovery")
         if name == "MODULE.bazel" and source.strip():
             unsafe(path, "Module repository provenance requires fresh Bazel discovery")
@@ -117,7 +131,7 @@ def external_metadata(project_root, project_paths):
                             unsafe(directory, "External metadata entry limit exceeded")
                             return sorted(paths), reasons[0]
                         if entry.is_dir(follow_symlinks=False):
-                            if entry.name not in (".git", ".simmer") and not entry.name.startswith("bazel-"):
+                            if entry.name not in (".git", ".simmer"):
                                 pending.append((entry.path, depth + 1))
                         elif entry.is_symlink() and entry.is_dir():
                             unsafe(entry.path, "External directory symlink requires fresh Bazel discovery")
