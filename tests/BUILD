@@ -129,7 +129,10 @@ py_test(
     name = "regression_discovery_test",
     timeout = "short",
     srcs = ["regression_discovery_test.py"],
-    deps = ["//lib:regression"],
+    deps = [
+        "//lib:discovery_inputs",
+        "//lib:regression",
+    ],
 )
 
 py_test(
