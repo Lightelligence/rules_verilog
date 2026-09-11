@@ -286,10 +286,21 @@ open_report() {{
     fi
 }}
 
+failed_reports=0
 for report_target in "${{REPORT_TARGETS[@]}}"; do
     printf 'Opening Simmer report: %s\n' "$report_target"
-    open_report "$report_target"
+    if open_report "$report_target"; then
+        continue
+    else
+        status=$?
+        printf 'ERROR: Failed to open report (exit %s): %s\n' "$status" "$report_target" >&2
+        failed_reports=$((failed_reports + 1))
+    fi
 done
+if [ "$failed_reports" -gt 0 ]; then
+    printf 'ERROR: %s report(s) could not be opened.\n' "$failed_reports" >&2
+    exit 1
+fi
 """.format(targets=target_lines)
         _write_text_atomic(launcher_path, launcher)
         os.chmod(launcher_path, 0o755)

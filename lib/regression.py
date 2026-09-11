@@ -719,6 +719,9 @@ class RegressionConfig():
         Discover all available tests in the checkout
         Filters based on command line specifications
         """
+        # A refresh must not retain successful-build claims from an earlier
+        # attempt. Failure handling must also work with nonfatal loggers.
+        self.discovery_prebuilt_targets = set()
         self.log.summary("Starting test discovery")
         dtp = rv_utils.DatetimePrinter(self.log)
 
@@ -729,6 +732,7 @@ class RegressionConfig():
         dtp.stop_and_print()
         if returncode:
             self.log.critical("bazel bench discovery failed: %s", stderr)
+            raise RuntimeError("bazel bench discovery failed: {}".format(stderr))
         self.all_vcomp = dict((label, {}) for label in stdout.splitlines() if label)
 
         if not self.all_vcomp:
@@ -751,6 +755,7 @@ class RegressionConfig():
             dtp.stop_and_print()
             if returncode:
                 self.log.critical("bazel test discovery failed:\n%s", stderr)
+                raise RuntimeError("bazel test discovery failed: {}".format(stderr))
             query_results.extend(re.sub(r"\([a-z0-9]{7,64}\) *", "", stdout.replace('\n', ' ')).split())
         query_results = list(dict.fromkeys(query_results))
 
@@ -772,6 +777,7 @@ class RegressionConfig():
             dtp.stop_and_print()
             if returncode:
                 self.log.critical("bazel test discovery failed:\n%s", stderr)
+                raise RuntimeError("bazel test discovery failed: {}".format(stderr))
             text.extend(stdout.split('\n') + stderr.split('\n'))
         self.discovery_prebuilt_targets = set(discovery_build_targets)
 

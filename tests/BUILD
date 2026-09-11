@@ -130,6 +130,7 @@ py_test(
     timeout = "short",
     srcs = ["regression_discovery_test.py"],
     deps = [
+        "//lib:cmn_logging",
         "//lib:discovery_inputs",
         "//lib:regression",
     ],

@@ -11,6 +11,7 @@ from unittest import mock
 
 from lib import discovery_inputs
 from lib.regression import RegressionConfig
+from lib.cmn_logging import CmnLogger
 
 
 class _Log:
@@ -761,6 +762,38 @@ class RegressionDiscoveryTest(unittest.TestCase):
             }},
             config.all_vcomp,
         )
+
+    def test_failed_discovery_never_marks_targets_prebuilt_or_publishes_cache(self):
+        for fatal_logger in (False, True):
+            for failed_phase in range(3):
+                with self.subTest(fatal_logger=fatal_logger, phase=failed_phase), \
+                     tempfile.TemporaryDirectory() as directory:
+                    config = self._config(Path(directory))
+                    config.discovery_prebuilt_targets = {"//stale:previous_build"}
+                    if fatal_logger:
+                        config.log = CmnLogger("discovery_failure_test")
+                        config.log.disabled = True
+                    else:
+                        config.log = mock.Mock()
+                    results = [
+                        (0, "//benches/soc_tb:soc_tb\n", ""),
+                        (0, "//benches/soc_tb/tests:dma_single_transfer (abc1234)\n", ""),
+                        (0, "", "verilog_dv_test_cfg_info(@//benches/soc_tb/tests:dma_single_transfer, "
+                         "@//benches/soc_tb:soc_tb, ['smoke'], VCS)\n"),
+                    ]
+                    _, stdout, stderr = results[failed_phase]
+                    results[failed_phase] = (1, stdout, stderr + "synthetic discovery failure")
+                    config._run_command = mock.Mock(side_effect=results)
+                    config._discovery_dependency_manifest = mock.Mock(return_value={})
+                    config._publish_discovery_cache = mock.Mock()
+
+                    with mock.patch("lib.regression.rv_utils.DatetimePrinter", _Timer), \
+                         self.assertRaises(SystemExit if fatal_logger else RuntimeError):
+                        config.test_discovery_all()
+
+                    self.assertEqual(set(), config.discovery_prebuilt_targets)
+                    self.assertEqual(failed_phase + 1, config._run_command.call_count)
+                    config._publish_discovery_cache.assert_not_called()
 
     def test_discovery_argument_chunks_stay_under_configured_budget(self):
         self.assertEqual(
