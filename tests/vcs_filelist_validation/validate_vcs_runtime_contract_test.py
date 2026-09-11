@@ -1209,7 +1209,7 @@ run_bounded_process([
                 self.assertEqual("xrun release = 25.03-s001", simulator.get_tool_identity())
                 self.assertEqual(["xrun", "-64", "-version"], run.call_args.args[0])
 
-    def test_vcs_partcomp_default_preserves_single_slot_lsf_job(self):
+    def test_vcs_partcomp_default_protects_single_slot_lsf_job(self):
         lsf_environment = {
             "LSB_DJOB_NUMPROC": "1",
             "LSB_HOSTS": "sh-cloud30",
@@ -1225,10 +1225,16 @@ run_bounded_process([
             partcomp_opts = simulator.generate_compile_options(DummyVcompJob())["partcomp_opts"]
             metrics = simulator.collect_compile_metrics(SimpleNamespace(log_path="missing", compile_cache_hit=False))
 
-        self.assertIn("-partcomp", shlex.split(partcomp_opts))
-        self.assertIn("-fastpartcomp=j1", shlex.split(partcomp_opts))
-        self.assertEqual("auto", metrics["partcomp_mode"])
-        self.assertEqual(1, metrics["partcomp_jobs"])
+        self.assertEqual("", partcomp_opts)
+        self.assertEqual("disabled", metrics["partcomp_mode"])
+        self.assertIsNone(metrics["partcomp_jobs"])
+
+    def test_vcs_default_partcomp_retains_multiple_allocated_workers(self):
+        simulator = VcsSimulator(parse_args(["--simulator", "VCS"]), DummyRegressionConfig(), None)
+        with mock.patch("lib.simulators.vcs.detect_allocated_cpus", return_value=(8, "LSF")):
+            args = shlex.split(simulator.generate_compile_options(DummyVcompJob())["partcomp_opts"])
+        self.assertIn("-partcomp", args)
+        self.assertIn("-fastpartcomp=j8", args)
 
     def test_vcs_explicit_partcomp_jobs_preserve_single_worker_flow(self):
         options = parse_args(["--simulator", "VCS", "--vcs-partcomp", "--vcs-partcomp-jobs", "1"])
@@ -2581,7 +2587,7 @@ run_bounded_process([
         def jobs(trace):
             result = {}
             for name, runfiles_name in (("z_tb", "a.runfiles"), ("a_tb", "z.runfiles")):
-                job = SimpleNamespace(name=name, cov_work_dir=None)
+                job = SimpleNamespace(name=name, cov_work_dir=None, job_dir=str(root / (name + "_VCOMP")))
                 job.resolve_bazel_runfiles_main = lambda value=str(root / runfiles_name): value
                 job.acquire_shared_runtime_lock = lambda path, value=name: trace.append((os.path.abspath(path), value))
                 result[name] = job
@@ -2605,13 +2611,70 @@ run_bounded_process([
         xrun_config.regression_dir = str(root / "xrun")
         XceliumSimulator(xrun_options, xrun_config, None).prepare_regression_runtime(jobs(xrun_trace))
         self.assertEqual(sorted(xrun_trace), xrun_trace)
-        self.assertEqual(2, len(xrun_trace))
-        self.assertTrue(all(Path(path).name.endswith("__COV_WORK") for path, _ in xrun_trace))
+        self.assertEqual(6, len(xrun_trace))
+        self.assertEqual(2, sum(path.endswith("__cov_work") or path.endswith("__COV_WORK") for path, _ in xrun_trace))
 
         xrun_shared_compile_trace = []
         xrun_options = parse_args(["--simulator", "XRUN"])
         XceliumSimulator(xrun_options, xrun_config, None).prepare_regression_runtime(jobs(xrun_shared_compile_trace))
-        self.assertEqual([], xrun_shared_compile_trace)
+        self.assertEqual(4, len(xrun_shared_compile_trace))
+        self.assertEqual(sorted(xrun_shared_compile_trace), xrun_shared_compile_trace)
+
+    def test_xcelium_resource_serializes_only_same_database(self):
+        simulator = XceliumSimulator(parse_args(["--simulator", "XRUN"]), DummyRegressionConfig(), None)
+        first = SimpleNamespace(vcomper=SimpleNamespace(job_dir="one"))
+        same = SimpleNamespace(vcomper=SimpleNamespace(job_dir="./one"))
+        other = SimpleNamespace(vcomper=SimpleNamespace(job_dir="two"))
+        self.assertEqual(simulator.get_test_exclusive_resource(first), simulator.get_test_exclusive_resource(same))
+        self.assertNotEqual(simulator.get_test_exclusive_resource(first), simulator.get_test_exclusive_resource(other))
+        vcs = VcsSimulator(parse_args(["--simulator", "VCS"]), DummyRegressionConfig(), None)
+        self.assertIsNone(vcs.get_test_exclusive_resource(first))
+
+    def test_xcelium_runtime_locks_deduplicate_shared_paths(self):
+        trace = []
+        jobs = {}
+        for name in ("first", "second"):
+            jobs[name] = SimpleNamespace(job_dir="same_database",
+                                         resolve_bazel_runfiles_main=lambda: "same_runfiles",
+                                         acquire_shared_runtime_lock=trace.append)
+        simulator = XceliumSimulator(parse_args(["--simulator", "XRUN"]), DummyRegressionConfig(), None)
+        simulator.prepare_regression_runtime(jobs)
+        self.assertEqual(2, len(trace))
+        self.assertEqual(sorted(set(trace)), trace)
+
+    def test_xcelium_incremental_locks_primary_database(self):
+        trace = []
+        job = SimpleNamespace(job_dir="incremental",
+                              base_job_dir="base",
+                              resolve_bazel_runfiles_main=lambda: "runfiles",
+                              acquire_shared_runtime_lock=trace.append)
+        simulator = XceliumSimulator(parse_args(["--simulator", "XRUN", "--msie-incr", "top"]), DummyRegressionConfig(),
+                                     None)
+        simulator.prepare_regression_runtime({"tb": job})
+        self.assertIn(os.path.normcase(os.path.realpath("base_PRIM")), trace)
+
+    def test_xcelium_cleanup_removes_only_new_owned_scratch(self):
+        with tempfile.TemporaryDirectory() as root:
+            runfiles = Path(root)
+            preserved = runfiles / "xp_elab.log"
+            preserved.write_text("pre-existing data", encoding="utf-8")
+            release = mock.Mock()
+            job = SimpleNamespace(bazel_runfiles_main=root,
+                                  _shared_runtime_locks={os.path.normcase(os.path.realpath(root)): object()},
+                                  release_shared_runtime_locks=release)
+            simulator = XceliumSimulator(parse_args(["--simulator", "XRUN"]), DummyRegressionConfig(), None)
+            simulator.prepare_compile_execution(job, False)
+            scratch = runfiles / "verisium_debug_logs"
+            scratch.mkdir()
+            (scratch / "generated.log").touch()
+            (runfiles / "ida_diagnostics.log").touch()
+            (runfiles / "user.sv").touch()
+            simulator.cleanup_shared_runtime_artifacts({"tb": job})
+            self.assertFalse(scratch.exists())
+            self.assertFalse((runfiles / "ida_diagnostics.log").exists())
+            self.assertEqual("pre-existing data", preserved.read_text(encoding="utf-8"))
+            self.assertTrue((runfiles / "user.sv").exists())
+            release.assert_called_once_with()
 
     def test_xcelium_shared_cleanup_preserves_unlocked_runfiles_scratch(self):
         runfiles = Path(tempfile.mkdtemp(prefix="xrun shared runfiles "))

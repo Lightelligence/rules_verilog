@@ -17,7 +17,7 @@ import time
 
 ################################################################################
 # rules_verilog lib imports
-from lib import bazel_profile, rv_utils
+from lib import bazel_profile, discovery_inputs, rv_utils
 
 # I'd rather create a "plain" message in the logger
 # that doesn't format, but more work than its worth
@@ -411,13 +411,15 @@ class RegressionConfig():
                 digest = "missing"
             files.append({"path": relative_path, "sha256": digest})
         manifest = {
-            "schema_version": 5,
-            "cacheable": True,
+            "schema_version": 6,
+            "cacheable": self._discovery_input_error is None,
             "allow_no_run": bool(self.options.allow_no_run),
             "discovery_query": self._build_vcomp_discovery_query(),
             "git_submodules": submodule_state,
             "files": files,
         }
+        if self._discovery_input_error:
+            manifest["uncacheable_reason"] = self._discovery_input_error
         return manifest
 
     def _git_submodule_state(self):
@@ -544,16 +546,21 @@ class RegressionConfig():
         yield from self._bazelrc_dependency_paths()
 
     def _iter_discovery_dependency_paths(self, submodule_state=None):
-        """Yield main-workspace metadata; external IP/VIP changes require bazel clean."""
+        """Yield metadata only; incomplete external provenance disables reuse."""
         if submodule_state is None:
             submodule_state = self._git_submodule_state()
         project_paths = list(self._iter_project_discovery_dependency_paths(submodule_state))
+        external_paths, self._discovery_input_error = discovery_inputs.external_metadata(self.proj_dir, project_paths)
         yield from project_paths
+        yield from external_paths
 
     def _discovery_cache_is_fresh(self):
         if not os.path.exists(self._discovery_cache_path()) and not self._have_legacy_discovery_cache():
             return False
         current_manifest = self._discovery_dependency_manifest()
+        if not current_manifest["cacheable"]:
+            self._warn_if_discovery_uncacheable(current_manifest)
+            return False
         try:
             _, _, _, cached_manifest = self._read_or_migrate_discovery_cache(current_manifest)
         except (OSError, ValueError, json.JSONDecodeError):
@@ -570,6 +577,9 @@ class RegressionConfig():
         if not os.path.exists(self._discovery_cache_path()) and not self._have_legacy_discovery_cache():
             return False
         current_manifest = self._discovery_dependency_manifest()
+        if not current_manifest["cacheable"]:
+            self._warn_if_discovery_uncacheable(current_manifest)
+            return False
         try:
             all_vcomp, tests_to_tags, tests_to_simulator, cached_manifest = self._read_or_migrate_discovery_cache(
                 current_manifest)
@@ -735,7 +745,13 @@ class RegressionConfig():
         for query_chunk in self._chunk_arguments(test_queries):
             combined_test_query = " union ".join(query_chunk)
             dtp.reset()
-            returncode, stdout, stderr = self._run_command(["bazel", "cquery", combined_test_query], )
+            # Test cfgs point to their TB through ordinary rule attributes.
+            # Discovery does not need aspect-added edges. Traversing stale
+            # aspect nodes after an external macro edit crashes Bazel 7.7.1's
+            # reverse-dependency walk; the metadata build below still applies
+            # the cfg-info aspect normally.
+            returncode, stdout, stderr = self._run_command(
+                ["bazel", "cquery", combined_test_query, "--noinclude_aspects"], )
             dtp.stop_and_print()
             if returncode:
                 self.log.critical("bazel test discovery failed:\n%s", stderr)

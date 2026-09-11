@@ -102,7 +102,8 @@ def add_vcs_arguments(parser):
         '--vcs-partcomp',
         dest='vcs_partcomp',
         action='store_true',
-        help=('Keep VCS Partition Compile enabled (default). The --vcs-partcomp-* options tune the enabled flow; '
+        help=('Explicitly enable VCS Partition Compile, including single-slot jobs. Defaults enable it only with '
+              'multiple workers; the --vcs-partcomp-* options also opt in and tune the flow. '
               'use --no-vcs-partcomp for unsupported VCS releases or diagnostics.'))
     partcomp_control.add_argument('--no-vcs-partcomp',
                                   dest='vcs_partcomp',

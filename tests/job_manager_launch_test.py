@@ -14,6 +14,78 @@ from lib import rv_utils
 from lib.job_lib import BazelTBJob, BazelTestCfgJob, Job, JobManager, JobStatus, SubprocessJobRunner
 
 
+class SchedulerResourceTest(unittest.TestCase):
+
+    def test_scheduler_runs_distinct_databases_while_same_database_waits(self):
+
+        class ResourceJob(Job):
+
+            @property
+            def execution_mode(self):
+                return "parallel"
+
+            @property
+            def exclusive_resource(self):
+                return self.resource
+
+            def pre_run(self):
+                return
+
+            def post_run(self):
+                return
+
+        log = _Logger()
+        rcfg = SimpleNamespace(options=SimpleNamespace(timeout=1), log=log)
+        started = {name: threading.Event() for name in ("first", "same", "other")}
+        runners = {}
+
+        def launch(job, manager):
+            runner = _PausableRunner(job, manager)
+            runners[job.name] = runner
+            started[job.name].set()
+            return runner
+
+        manager = JobManager({"idle_print_seconds": 60, "quit_count": 1, "active_job_limit": 3}, log)
+        manager.job_lib_type = launch
+        try:
+            first = ResourceJob(rcfg, "first")
+            first.resource = "db1"
+            manager.add_job(first)
+            self.assertTrue(started["first"].wait(1))
+            for name, resource in (("same", "db1"), ("other", "db2")):
+                job = ResourceJob(rcfg, name)
+                job.resource = resource
+                manager.add_job(job)
+            self.assertTrue(started["other"].wait(1))
+            self.assertFalse(started["same"].is_set())
+            runners["first"].finish.set()
+            self.assertTrue(started["same"].wait(2))
+        finally:
+            for runner in runners.values():
+                runner.finish.set()
+            manager.stop()
+
+    def test_same_resource_waits_for_active_and_launching_jobs(self):
+        manager = JobManager.__new__(JobManager)
+        manager.active_job_limit = 8
+        manager._finalizing = []
+        first = SimpleNamespace(execution_mode="parallel", exclusive_resource=("XRUN", "db1"))
+        same = SimpleNamespace(execution_mode="parallel", exclusive_resource=("XRUN", "db1"))
+        other = SimpleNamespace(execution_mode="parallel", exclusive_resource=("XRUN", "db2"))
+        vcs = SimpleNamespace(execution_mode="parallel", exclusive_resource=None)
+        for active, launching in (([first], []), ([], [first])):
+            manager._active, manager._launching = active, launching
+            self.assertFalse(manager._can_launch_locked(same))
+            self.assertTrue(manager._can_launch_locked(other))
+            self.assertTrue(manager._can_launch_locked(vcs))
+        manager._active, manager._launching = [], []
+        manager._finalizing = [first]
+        self.assertFalse(manager._can_launch_locked(same))
+        self.assertTrue(manager._can_launch_locked(other))
+        manager._finalizing = []
+        self.assertTrue(manager._can_launch_locked(same))
+
+
 class _Logger:
 
     def __getattr__(self, _):
@@ -310,7 +382,7 @@ class JobManagerLaunchTest(unittest.TestCase):
 
         self.assertEqual("bazel build //pkg/tests:second", job.main_cmdline)
 
-    def test_cached_discovery_rebuilds_tb_to_refresh_source_outputs(self):
+    def test_cached_discovery_rebuilds_tb_and_existing_configs(self):
         project_dir = tempfile.mkdtemp()
         os.makedirs(os.path.join(project_dir, "bazel-bin", "pkg", "tb.runfiles", "__main__"))
         tests_dir = os.path.join(project_dir, "bazel-bin", "pkg", "tests")
@@ -327,7 +399,7 @@ class JobManagerLaunchTest(unittest.TestCase):
 
         job = BazelTBJob(rcfg, "//pkg:tb", vcomper, additional_targets=["//pkg/tests:first"])
 
-        self.assertEqual("bazel build //pkg:tb", job.main_cmdline)
+        self.assertEqual("bazel build //pkg:tb //pkg/tests:first", job.main_cmdline)
 
     def test_cached_discovery_rebuilds_outputs_missing_after_bazel_clean(self):
         project_dir = tempfile.mkdtemp()
