@@ -737,6 +737,7 @@ class RegressionDiscoveryTest(unittest.TestCase):
         self.assertEqual(3, len(commands))
         self.assertEqual(["bazel", "query"], commands[0][:2])
         self.assertEqual(["bazel", "cquery"], commands[1][:2])
+        self.assertIn("--noinclude_aspects", commands[1])
         self.assertEqual(["bazel", "build"], commands[2][:2])
         self.assertIn("//benches/soc_tb:soc_tb", commands[2])
         self.assertEqual(

@@ -835,8 +835,8 @@ seed and original simulator options. Run it directly from any directory. Set
   **and its selected test-config targets**, even if their output files exist.
   This refreshes runfiles and compile-input digests after Verilog source
   changes while letting Bazel reuse unchanged outputs. Targets built during
-  the current discovery pass are not built twice. `--no-compile` still checks
-  selected test configs unless Bazel is explicitly bypassed. `bazel clean`
+  the current discovery pass are not built twice. The `--no-compile` /
+  `--no-bazel` reuse controls described above remain in force. `bazel clean`
   removes Bazel outputs, not `.simmer/cache/discovery/`; deleting the latter
   forces discovery but is not required after tracked external metadata edits.
 - Passing tests are removed by default. `--nt` intentionally retains them.
