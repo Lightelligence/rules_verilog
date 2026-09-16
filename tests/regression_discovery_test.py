@@ -112,6 +112,24 @@ class RegressionDiscoveryTest(unittest.TestCase):
     def _cache_payload(config):
         return json.loads(Path(config._discovery_cache_path()).read_text(encoding="utf-8"))
 
+    def test_uncacheable_discovery_falls_back_without_failing_warning_gate(self):
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            subprocess.run(["git", "init", "-q"], cwd=project, check=True)
+            (project / "BUILD").write_text('filegroup(name="sources", srcs=glob(["*.sv"]))\n', encoding="utf-8")
+            config = self._config(project)
+            config.log = CmnLogger("discovery_fallback_test")
+            config.log.disabled = True
+            with mock.patch.object(config.log, "info", wraps=config.log.info) as notice:
+                config._write_discovery_manifest()
+                self.assertFalse(self._cache_payload(config)["manifest"]["cacheable"])
+                self.assertFalse(config._should_use_cached_discovery())
+                self.assertFalse(config._discovery_cache_is_fresh())
+                notice.assert_called_once()
+            self.assertEqual(0, config.log.warn_count)
+            self.assertEqual(0, config.log.error_count)
+            config.log.exit_if_warnings_or_errors("Unexpected discovery failure")
+
     def test_cache_manifest_tracks_content_changes_and_deleted_files(self):
         proj_dir = Path(tempfile.mkdtemp())
         build_file = proj_dir / "benches" / "soc_tb" / "BUILD"

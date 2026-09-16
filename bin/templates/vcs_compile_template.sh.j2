@@ -9,7 +9,9 @@ cd {{ bazel_runfiles_main|shell_quote }}
 {{ vcs_runner }} vcs \
   -full64 \
   -Mdir={{ (VCOMP_DIR ~ '/csrc')|shell_quote }} \
+  {% if not partcomp_opts -%}
   -Mlib={{ (VCOMP_DIR ~ '/csrc')|shell_quote }} \
+  {% endif -%}
   {% if options.fgp is not none -%}
     -fgp \
   {% endif -%}

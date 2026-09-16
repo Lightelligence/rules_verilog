@@ -927,6 +927,34 @@ run_bounded_process([
         self.assertIn("+define+UVM_VCS_RECORD", gui)
         self.assertNotIn(" -sml ", " ".join(gui.split()))
 
+    def test_partition_template_does_not_bind_shared_library_to_vcomp_directory(self):
+        environment = jinja2.Environment(undefined=jinja2.StrictUndefined)
+        environment.filters["shell_quote"] = shlex.quote
+        template = environment.from_string(self._read_repo_file("bin/templates/vcs_compile_template.sh.j2"))
+        options = parse_args(["-t", "unit:test", "--simulator", "VCS"])
+        cases = ("", "-partcomp -partcomp_dir=/shared/baseline",
+                 "-partcomp -partcomp_dir=/tmp/local -partcomp_sharedlib=/shared/baseline")
+        for partcomp_opts in cases:
+            for vcomp_dir in ("/tmp/publisher", "/tmp/consumer with spaces"):
+                with self.subTest(partcomp=partcomp_opts, vcomp_dir=vcomp_dir):
+                    rendered = template.render(VCOMP_DIR=vcomp_dir,
+                                               additional_defines=[],
+                                               bazel_compile_args="/tmp/compile_args.f",
+                                               bazel_runfiles_main="/tmp/runfiles",
+                                               cov_opts="",
+                                               debug_mode="default",
+                                               options=options,
+                                               partcomp_opts=partcomp_opts,
+                                               vcs_runner="vcs-runner",
+                                               vso_build_name="",
+                                               vso_workdir="",
+                                               xprop_cmd=None)
+                    command = rendered[rendered.index("vcs-runner vcs"):]
+                    argv = shlex.split(command.replace("\\\n", " "))
+                    self.assertIn("-Mdir=" + vcomp_dir + "/csrc", argv)
+                    self.assertEqual([] if partcomp_opts else ["-Mlib=" + vcomp_dir + "/csrc"],
+                                     [arg for arg in argv if arg.startswith("-Mlib=")])
+
     def test_vcs_partition_compile_and_cache_are_enabled_by_default(self):
         options = parse_args(["-t", "unit:test", "--simulator", "VCS"])
         simulator = VcsSimulator(options, DummyRegressionConfig(), None)

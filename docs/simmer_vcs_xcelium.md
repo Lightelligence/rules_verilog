@@ -404,6 +404,17 @@ simmer -t 'sys_tb:smoke_test@1' --simulator VCS \
   --vcs-partcomp-sharedlib /shared/vcs-partitions/X-2025.06-SP2-4/sys_tb-default
 ```
 
+Partition compilation keeps `-Mdir` local but omits `-Mlib`, because VCS
+compares the `-Mlib` path when deciding whether a shared partition is reusable.
+Publisher and consumer output directories (including `--dir-suffix`) may differ.
+Republish databases created by older scripts that included `-Mlib`; changing
+only the consumer command does not make those databases portable. Non-partition
+compilation retains its existing local `-Mlib` setting.
+
+Shared partitions reduce backend compilation work; a one-step VCS invocation
+still parses its source files. An unchanged repeat can bypass VCS entirely via
+simmer's automatic compile cache. Keep source and option validation enabled.
+
 The writable `--vcs-partcomp-dir` and read-only
 `--vcs-partcomp-sharedlib` must differ. Do not reuse a baseline across VCS
 versions, source inventories, defines, coverage/debug modes or compile arguments.
