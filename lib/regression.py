@@ -366,7 +366,7 @@ class RegressionConfig():
         """Publish all discovery payloads as one advisory-locked generation."""
         if manifest is None:
             manifest = self._discovery_dependency_manifest()
-        self._warn_if_discovery_uncacheable(manifest)
+        self._report_discovery_cache_fallback(manifest)
         with self._discovery_cache_lock(exclusive=True):
             self.dict_to_json(self._discovery_cache_payload(manifest), self._discovery_cache_relative_path())
             try:
@@ -376,18 +376,20 @@ class RegressionConfig():
             if legacy_manifest is not None and self._same_discovery_scope(legacy_manifest, manifest):
                 self._remove_legacy_discovery_cache_locked()
 
-    def _warn_if_discovery_uncacheable(self, manifest):
+    def _report_discovery_cache_fallback(self, manifest):
         reason = manifest.get("uncacheable_reason")
         if manifest.get("cacheable", True) or not reason:
             return
-        if getattr(self, "_discovery_uncacheable_warning_emitted", False):
+        if getattr(self, "_discovery_uncacheable_notice_emitted", False):
             return
         location = reason.get("path", "unknown path")
         if reason.get("line") is not None:
             location = "{}:{}".format(location, reason["line"])
-        self.log.warning("Test discovery cache disabled: %s (%s)", reason.get("detail", reason.get("kind", "unknown")),
-                         location)
-        self._discovery_uncacheable_warning_emitted = True
+        # Full Bazel discovery is the safe fallback, not a compile warning.
+        # Do not turn this expected cache miss into a fatal warning count.
+        self.log.info("Test discovery cache disabled: %s (%s)", reason.get("detail", reason.get("kind", "unknown")),
+                      location)
+        self._discovery_uncacheable_notice_emitted = True
 
     @staticmethod
     def _manifest_relative_path(path, project_root):
@@ -559,14 +561,14 @@ class RegressionConfig():
             return False
         current_manifest = self._discovery_dependency_manifest()
         if not current_manifest["cacheable"]:
-            self._warn_if_discovery_uncacheable(current_manifest)
+            self._report_discovery_cache_fallback(current_manifest)
             return False
         try:
             _, _, _, cached_manifest = self._read_or_migrate_discovery_cache(current_manifest)
         except (OSError, ValueError, json.JSONDecodeError):
             return False
         if not cached_manifest.get("cacheable", True):
-            self._warn_if_discovery_uncacheable(cached_manifest)
+            self._report_discovery_cache_fallback(cached_manifest)
             return False
         if cached_manifest != current_manifest:
             self.log.debug("Discovery cache dependency manifest changed")
@@ -578,7 +580,7 @@ class RegressionConfig():
             return False
         current_manifest = self._discovery_dependency_manifest()
         if not current_manifest["cacheable"]:
-            self._warn_if_discovery_uncacheable(current_manifest)
+            self._report_discovery_cache_fallback(current_manifest)
             return False
         try:
             all_vcomp, tests_to_tags, tests_to_simulator, cached_manifest = self._read_or_migrate_discovery_cache(
@@ -586,7 +588,7 @@ class RegressionConfig():
         except (OSError, ValueError, json.JSONDecodeError):
             return False
         if not cached_manifest.get("cacheable", True):
-            self._warn_if_discovery_uncacheable(cached_manifest)
+            self._report_discovery_cache_fallback(cached_manifest)
             return False
         if cached_manifest != current_manifest:
             self.log.debug("Discovery cache dependency manifest changed")
