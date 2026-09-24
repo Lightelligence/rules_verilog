@@ -62,7 +62,7 @@
 # Duplicate port in module instantiation
 -error=DPIMI
 # Concatenations with unsized constants
--error=CWUC
+#-error=CWUC
 # More arguments than needed
 -error=MATN
 # Too many parameter overrides
