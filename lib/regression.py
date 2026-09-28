@@ -46,7 +46,7 @@ DISCOVERY_MAX_SOURCE_RETRIES = 2
 # Use the same resolved provider as the metadata aspect, including inherited TBs.
 # Avoid allpaths/rdeps: Bazel 7.7.1 can crash on invalidated reverse-dependency
 # nodes after test removal, even with --noinclude_aspects.
-DISCOVERY_CFG_STARLARK = ('"\\n".join([str(target.label) + "\\t" + str(info.tb.label) '
+DISCOVERY_CFG_STARLARK = ('repr([[str(target.label), str(info.tb.label), info.tags, info.simulator] '
                           'for name, info in providers(target).items() '
                           'if name.endswith("//verilog/private:dv.bzl%DVTestInfo") and info.tb != None])')
 DISCOVERY_GIT_METADATA_PATHS = (
@@ -747,6 +747,7 @@ class RegressionConfig():
 
         test_queries = ["({})".format(self._build_test_cfg_query(vcomp)) for vcomp in sorted(self.all_vcomp)]
         query_results = []
+        matching_tests = []
         for query_chunk in self._chunk_arguments(test_queries):
             combined_test_query = " union ".join(query_chunk)
             dtp.reset()
@@ -759,23 +760,34 @@ class RegressionConfig():
                 "--starlark:expr=" + DISCOVERY_CFG_STARLARK,
             ])
             dtp.stop_and_print()
-            if returncode:
+            if returncode or "Starlark evaluation error for " in stderr:
                 self.log.critical("bazel test discovery failed:\n%s", stderr)
                 raise RuntimeError("bazel test discovery failed: {}".format(stderr))
             for line in stdout.splitlines():
                 if not line.strip():
                     continue
-                labels = line.split("\t")
-                if len(labels) != 2:
+                try:
+                    records = ast.literal_eval(line)
+                    if not isinstance(records, list):
+                        raise ValueError("Expected a list of configured tests")
+                    for record in records:
+                        if (not isinstance(record, list) or len(record) != 4
+                                or not all(isinstance(record[index], str)
+                                           for index in (0, 1, 3)) or not isinstance(record[2], list)
+                                or not all(isinstance(tag, str) for tag in record[2])):
+                            raise ValueError("Invalid configured test record")
+                except (ValueError, SyntaxError) as exc:
                     self.log.critical("Invalid Bazel discovery metadata: %s", line)
-                    raise RuntimeError("Invalid Bazel discovery metadata: {}".format(line))
-                test, vcomp = [re.sub(r"^@@?//", "//", label) for label in labels]
-                if vcomp not in self.all_vcomp:
-                    continue
-                test_package = test.rsplit(":", 1)[0]
-                expected_package = vcomp.rsplit(":", 1)[0] + "/tests"
-                if test_package == expected_package or test_package.startswith(expected_package + "/"):
-                    query_results.append(test)
+                    raise RuntimeError("Invalid Bazel discovery metadata: {}".format(line)) from exc
+                for test, vcomp, tags, simulator in records:
+                    test, vcomp = [re.sub(r"^@@?//", "//", label) for label in (test, vcomp)]
+                    if vcomp not in self.all_vcomp:
+                        continue
+                    test_package = test.rsplit(":", 1)[0]
+                    expected_package = vcomp.rsplit(":", 1)[0] + "/tests"
+                    if test_package == expected_package or test_package.startswith(expected_package + "/"):
+                        query_results.append(test)
+                        matching_tests.append((test, vcomp, tags, simulator))
         query_results = list(dict.fromkeys(query_results))
 
         discovery_build_targets = list(query_results)
@@ -783,34 +795,17 @@ class RegressionConfig():
             discovery_build_targets.extend(sorted(self.all_vcomp))
         discovery_build_targets = list(dict.fromkeys(discovery_build_targets))
 
-        text = []
         for target_chunk in self._chunk_arguments(discovery_build_targets):
             dtp.reset()
-            returncode, stdout, stderr = self._run_command([
-                "bazel",
-                "build",
-                *target_chunk,
-                "--aspects",
-                "@rules_verilog//verilog/private:dv.bzl%verilog_dv_test_cfg_info_aspect",
-            ])
+            returncode, stdout, stderr = self._run_command(["bazel", "build", *target_chunk])
             dtp.stop_and_print()
             if returncode:
                 self.log.critical("bazel test discovery failed:\n%s", stderr)
                 raise RuntimeError("bazel test discovery failed: {}".format(stderr))
-            text.extend(stdout.split('\n') + stderr.split('\n'))
         self.discovery_prebuilt_targets = set(discovery_build_targets)
 
-        # Parse test information from output
-        ttv = [
-            re.search(
-                r'verilog_dv_test_cfg_info\(@(?:@)?(?P<test>[^,]+), @(?:@)?(?P<vcomp>[^,]+), (?P<tags>\[.*\]), (?P<simulator>[A-Z0-9_]+)\)',
-                line,
-            ) for line in text
-        ]
-        ttv = [match for match in ttv if match]
-
-        matching_tests = [(mt.group('test'), mt.group('vcomp'), ast.literal_eval(mt.group('tags')),
-                           mt.group('simulator')) for mt in ttv]
+        # cquery emits providers on every invocation, including no-op builds.
+        # Aspect print() output is not replayed from Bazel's analysis cache.
         self.tests_to_tags = {test_name: tags for test_name, _, tags, _ in matching_tests}
         self.tests_to_simulator = {test_name: simulator for test_name, _, _, simulator in matching_tests}
         for test_name, vcomp, _, _ in matching_tests:

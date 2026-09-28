@@ -768,10 +768,11 @@ class RegressionDiscoveryTest(unittest.TestCase):
             if cmd[:2] == ["bazel", "query"]:
                 return 0, "//benches/soc_tb:soc_tb\n", ""
             if cmd[:2] == ["bazel", "cquery"]:
-                return 0, "@@//benches/soc_tb/tests:dma_single_transfer\t@@//benches/soc_tb:soc_tb\n", ""
+                return 0, repr(
+                    [["@@//benches/soc_tb/tests:dma_single_transfer", "@@//benches/soc_tb:soc_tb", ["smoke"],
+                      "VCS"]]), ""
             if cmd[:2] == ["bazel", "build"]:
-                return 0, "", ("verilog_dv_test_cfg_info(@//benches/soc_tb/tests:dma_single_transfer, "
-                               "@//benches/soc_tb:soc_tb, ['smoke'], VCS)\n")
+                return 0, "", "" # A no-op build need not print analysis metadata.
             raise AssertionError("Unexpected command: {!r}".format(cmd))
 
         config._run_command = fake_run_command
@@ -821,24 +822,25 @@ class RegressionDiscoveryTest(unittest.TestCase):
             target = "//benches/soc_tb/tests/sub:inherited"
             config._run_command = mock.Mock(side_effect=[
                 (0, "//benches/soc_tb:soc_tb\n", ""),
-                (0, "@{}\t@//benches/soc_tb:soc_tb\n"
-                 "//benches/soc_tb/tests:wrong_tb\t//benches/other_tb:other_tb\n"
-                 "//benches/other_tb/tests:wrong_directory\t//benches/soc_tb:soc_tb\n"
-                 "//benches/soc_tb/tests:external_tb\t@@ip//benches/soc_tb:soc_tb\n".format(target), ""),
-                (0, "", "verilog_dv_test_cfg_info(@{}, @//benches/soc_tb:soc_tb, [], VCS)".format(target)),
+                (0,
+                 repr([
+                     ["@" + target, "@//benches/soc_tb:soc_tb", [], "VCS"],
+                     ["//benches/soc_tb/tests:wrong_tb", "//benches/other_tb:other_tb", [], "VCS"],
+                     ["//benches/other_tb/tests:wrong_directory", "//benches/soc_tb:soc_tb", [], "VCS"],
+                     ["//benches/soc_tb/tests:external_tb", "@@ip//benches/soc_tb:soc_tb", [], "VCS"],
+                 ]), ""),
+                (0, "", ""),
             ])
             with mock.patch("lib.regression.rv_utils.DatetimePrinter", _Timer):
                 config.test_discovery_all()
             self.assertEqual({target: []}, config.tests_to_tags)
             self.assertEqual({target, "//benches/soc_tb:soc_tb"}, config.discovery_prebuilt_targets)
             build = config._run_command.call_args.args[0]
-            self.assertEqual([
-                "bazel", "build", target, "//benches/soc_tb:soc_tb", "--aspects",
-                "@rules_verilog//verilog/private:dv.bzl%verilog_dv_test_cfg_info_aspect"
-            ], build)
+            self.assertEqual(["bazel", "build", target, "//benches/soc_tb:soc_tb"], build)
 
     def test_cquery_failures_are_not_ignored_or_retried(self):
         for code, stderr in ((1, "BUILD file error"), (37, "unrelated internal error"),
+                             (0, "ERROR: Starlark evaluation error for //test:cfg: missing field"),
                              (1, "java.lang.NullPointerException\n"
                               "PostAnalysisQueryEnvironment.unwindReverseDependencyDelegationLayers")):
             with self.subTest(code=code, stderr=stderr), tempfile.TemporaryDirectory() as directory:
@@ -881,9 +883,11 @@ class RegressionDiscoveryTest(unittest.TestCase):
                         config.log = mock.Mock()
                     results = [
                         (0, "//benches/soc_tb:soc_tb\n", ""),
-                        (0, "//benches/soc_tb/tests:dma_single_transfer\t//benches/soc_tb:soc_tb\n", ""),
-                        (0, "", "verilog_dv_test_cfg_info(@//benches/soc_tb/tests:dma_single_transfer, "
-                         "@//benches/soc_tb:soc_tb, ['smoke'], VCS)\n"),
+                        (0,
+                         repr([[
+                             "//benches/soc_tb/tests:dma_single_transfer", "//benches/soc_tb:soc_tb", ["smoke"], "VCS"
+                         ]]), ""),
+                        (0, "", ""),
                     ]
                     _, stdout, stderr = results[failed_phase]
                     results[failed_phase] = (1, stdout, stderr + "synthetic discovery failure")

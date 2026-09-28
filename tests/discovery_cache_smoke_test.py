@@ -1,7 +1,7 @@
 """Real Bazel discovery and cfg-rebuild contract; no simulator or license needed.
 
 Run directly from the checkout (not inside a Bazel sandbox). The small Starlark
-rules model discovery's marker/aspect/output interface, not simulator behavior.
+rules model discovery's marker/provider/output interface, not simulator behavior.
 """
 
 import os
@@ -18,7 +18,7 @@ from lib.cmn_logging import CmnLogger
 from lib.regression import RegressionConfig
 
 RULES = '''
-DVTestInfo = provider(fields = ["tb"])
+DVTestInfo = provider(fields = ["tb", "tags", "simulator"])
 def _tb(ctx):
     return []
 
@@ -35,7 +35,7 @@ def _cfg(ctx):
         arguments = [ctx.file.data.path, output.path],
         command = "cp \\"$1\\" \\"$2\\"",
     )
-    return [DefaultInfo(files = depset([output])), DVTestInfo(tb = tb)]
+    return [DefaultInfo(files = depset([output])), DVTestInfo(tb = tb, tags = ctx.attr.tags, simulator = "VCS")]
 
 cfg = rule(implementation = _cfg, attrs = {
     "verilog_dv_test_cfg_marker": attr.int(default = 1),
@@ -46,13 +46,6 @@ cfg = rule(implementation = _cfg, attrs = {
     "data": attr.label(allow_single_file = True),
 })
 
-def _info(target, ctx):
-    if hasattr(ctx.rule.attr, "verilog_dv_test_cfg_marker"):
-        print("verilog_dv_test_cfg_info({}, {}, {}, VCS)".format(
-            target.label, target[DVTestInfo].tb.label, ctx.rule.attr.tags))
-    return []
-
-verilog_dv_test_cfg_info_aspect = aspect(implementation = _info)
 '''
 
 CASES_MACRO = '''
@@ -169,7 +162,8 @@ load("@rules_verilog//verilog/private:dv.bzl", "cfg")
                 current = config(project)
                 assert not current._should_use_cached_discovery()
                 current.test_discovery_all()
-                assert set(current.tests_to_tags) == {"//benches/soc_tb/tests:" + name for name in expected}
+                assert set(current.tests_to_tags) == {"//benches/soc_tb/tests:" + name for name in expected}, \
+                    "Expected {}, discovered {}".format(sorted(expected), current.tests_to_tags)
                 assert not current._should_use_cached_discovery(), "Dynamic membership cannot use a stale cache"
                 assert current.log.warn_count == current.log.error_count == 0
                 current.log.exit_if_warnings_or_errors("Previous errors")
