@@ -189,6 +189,29 @@ before validating the existing compile output. Add explicit `--no-bazel` when
 the invocation must not run Bazel at all; a missing or stale scoped cache is
 then an error.
 
+Discovery freshness and simulator compile reuse are separate decisions. When
+dynamic repository or `glob` inputs cannot be safely tracked, simmer reports
+`Test discovery cache disabled` at INFO level and performs fresh Bazel discovery
+on normal runs. This notice does not fail an otherwise successful simulation or
+mark its history as failed. Explicit `--no-bazel` still rejects an unusable cache.
+
+Discovery reads each configured test's resolved `DVTestInfo` provider, so
+inherited and overridden testbench assignments are respected before building
+the selected cfg outputs. Query output supplies testbench, tags and simulator
+metadata even when a no-op build does not repeat aspect diagnostic messages.
+It does not use `allpaths` reverse-dependency traversal,
+which can crash Bazel 7.7.1 after test membership changes. Query or build failures
+still stop discovery; they never authorize stale-cache reuse.
+
+Fresh discovery does not itself force recompilation. With automatic compile
+reuse enabled, unchanged compile inputs, options, tool identity and valid build
+artifacts reuse the existing build, including after a timestamp-only touch.
+Changed compile-input content or membership invalidates the dependent testbench
+fingerprint; unrelated logs and runtime-only inputs do not. Bazel refreshes the
+generated metadata first, and the simulator's existing incremental compilation
+flow handles changed compilation units. `--no-compile` remains strict: it rejects
+a changed build rather than silently compiling or running stale artifacts.
+
 When Bazel is skipped, simmer hashes the current compile-input runfiles instead
 of trusting a previously generated digest. This does not regenerate Bazel
 outputs: rebuild those outputs first if their generator inputs have changed.
@@ -846,7 +869,7 @@ seed and original simulator options. Run it directly from any directory. Set
   injected `new_local_repository` BUILD inputs, repository overrides,
   module repositories, globs, unreadable metadata,
   directory symlinks or bounded-scan limits disable discovery reuse with a
-  warning; normal invocations rediscover through Bazel. This conservative
+  one-time INFO notice; normal invocations rediscover through Bazel. This conservative
   fallback may increase discovery time for complex workspaces. Explicit
   `--no-bazel` rejects an unprovable cache instead of silently using it.
 - Normal runs issue an incremental `bazel build` for each selected testbench

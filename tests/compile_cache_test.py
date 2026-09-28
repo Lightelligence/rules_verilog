@@ -78,6 +78,26 @@ class CompileCacheTest(unittest.TestCase):
 
         self.assertEqual(initial, compile_fingerprint(project, "vcs -f compile.f", compile_args))
 
+    def test_changed_inputs_invalidate_only_the_dependent_bench(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name in ("first", "second"):
+                bench = root / name
+                bench.mkdir()
+                (bench / "top.sv").write_text("module top; endmodule\n", encoding="utf-8")
+                (bench / "compile.f").write_text(name + "/top.sv\n", encoding="utf-8")
+                (bench / "inputs.txt").write_text("source\t" + name + "/top.sv\n", encoding="utf-8")
+
+            def fingerprint(name):
+                bench = root / name
+                return compile_fingerprint(root, "compiler", bench / "compile.f", bench / "inputs.txt", root)
+
+            for name in ("first", "second"):
+                write_compile_fingerprint(root / name, fingerprint(name))
+            (root / "first/top.sv").write_text("module top; logic changed; endmodule\n", encoding="utf-8")
+            self.assertFalse(can_reuse_compile(root / "first", fingerprint("first"), lambda: None)[0])
+            self.assertTrue(can_reuse_compile(root / "second", fingerprint("second"), lambda: None)[0])
+
     def test_manifest_rejects_incompatible_reuse(self):
         project, _, compile_args = self._project()
         job_dir = project / "vcomp"

@@ -43,6 +43,12 @@ DISCOVERY_ROOT_FILES = {
 }
 DISCOVERY_MAX_ARG_CHARS = 100000
 DISCOVERY_MAX_SOURCE_RETRIES = 2
+# Use the same resolved provider as the metadata aspect, including inherited TBs.
+# Avoid allpaths/rdeps: Bazel 7.7.1 can crash on invalidated reverse-dependency
+# nodes after test removal, even with --noinclude_aspects.
+DISCOVERY_CFG_STARLARK = ('repr([[str(target.label), str(info.tb.label), info.tags, info.simulator] '
+                          'for name, info in providers(target).items() '
+                          'if name.endswith("//verilog/private:dv.bzl%DVTestInfo") and info.tb != None])')
 DISCOVERY_GIT_METADATA_PATHS = (
     "BUILD",
     "BUILD.bazel",
@@ -366,7 +372,7 @@ class RegressionConfig():
         """Publish all discovery payloads as one advisory-locked generation."""
         if manifest is None:
             manifest = self._discovery_dependency_manifest()
-        self._warn_if_discovery_uncacheable(manifest)
+        self._report_discovery_cache_disabled(manifest)
         with self._discovery_cache_lock(exclusive=True):
             self.dict_to_json(self._discovery_cache_payload(manifest), self._discovery_cache_relative_path())
             try:
@@ -376,18 +382,20 @@ class RegressionConfig():
             if legacy_manifest is not None and self._same_discovery_scope(legacy_manifest, manifest):
                 self._remove_legacy_discovery_cache_locked()
 
-    def _warn_if_discovery_uncacheable(self, manifest):
+    def _report_discovery_cache_disabled(self, manifest):
         reason = manifest.get("uncacheable_reason")
         if manifest.get("cacheable", True) or not reason:
             return
-        if getattr(self, "_discovery_uncacheable_warning_emitted", False):
+        if getattr(self, "_discovery_cache_notice_emitted", False):
             return
         location = reason.get("path", "unknown path")
         if reason.get("line") is not None:
             location = "{}:{}".format(location, reason["line"])
-        self.log.warning("Test discovery cache disabled: %s (%s)", reason.get("detail", reason.get("kind", "unknown")),
-                         location)
-        self._discovery_uncacheable_warning_emitted = True
+        # This is a safe fallback to fresh discovery, not a failed regression.
+        # CmnLogger warnings affect both the final exit code and run history.
+        self.log.info("Test discovery cache disabled: %s (%s)", reason.get("detail", reason.get("kind", "unknown")),
+                      location)
+        self._discovery_cache_notice_emitted = True
 
     @staticmethod
     def _manifest_relative_path(path, project_root):
@@ -411,7 +419,7 @@ class RegressionConfig():
                 digest = "missing"
             files.append({"path": relative_path, "sha256": digest})
         manifest = {
-            "schema_version": 6,
+            "schema_version": 7,
             "cacheable": self._discovery_input_error is None,
             "allow_no_run": bool(self.options.allow_no_run),
             "discovery_query": self._build_vcomp_discovery_query(),
@@ -559,14 +567,14 @@ class RegressionConfig():
             return False
         current_manifest = self._discovery_dependency_manifest()
         if not current_manifest["cacheable"]:
-            self._warn_if_discovery_uncacheable(current_manifest)
+            self._report_discovery_cache_disabled(current_manifest)
             return False
         try:
             _, _, _, cached_manifest = self._read_or_migrate_discovery_cache(current_manifest)
         except (OSError, ValueError, json.JSONDecodeError):
             return False
         if not cached_manifest.get("cacheable", True):
-            self._warn_if_discovery_uncacheable(cached_manifest)
+            self._report_discovery_cache_disabled(cached_manifest)
             return False
         if cached_manifest != current_manifest:
             self.log.debug("Discovery cache dependency manifest changed")
@@ -578,7 +586,7 @@ class RegressionConfig():
             return False
         current_manifest = self._discovery_dependency_manifest()
         if not current_manifest["cacheable"]:
-            self._warn_if_discovery_uncacheable(current_manifest)
+            self._report_discovery_cache_disabled(current_manifest)
             return False
         try:
             all_vcomp, tests_to_tags, tests_to_simulator, cached_manifest = self._read_or_migrate_discovery_cache(
@@ -586,7 +594,7 @@ class RegressionConfig():
         except (OSError, ValueError, json.JSONDecodeError):
             return False
         if not cached_manifest.get("cacheable", True):
-            self._warn_if_discovery_uncacheable(cached_manifest)
+            self._report_discovery_cache_disabled(cached_manifest)
             return False
         if cached_manifest != current_manifest:
             self.log.debug("Discovery cache dependency manifest changed")
@@ -636,13 +644,10 @@ class RegressionConfig():
 
     def _build_test_cfg_query(self, vcomp):
         vcomp_path, _ = vcomp.split(':')
-        test_wildcard = os.path.join(vcomp_path, "tests", "...")
+        test_wildcard = vcomp_path + "/tests/..."
         # generator_function names the outermost macro, while this rule marker
         # survives consumer wrappers around verilog_dv_test_cfg.
-        test_cfgs = 'attr(verilog_dv_test_cfg_marker, 1, {test_wildcard} intersect allpaths({test_wildcard}, {vcomp}))'.format(
-            test_wildcard=test_wildcard,
-            vcomp=vcomp,
-        )
+        test_cfgs = 'attr(verilog_dv_test_cfg_marker, 1, {})'.format(test_wildcard)
         if self.options.allow_no_run:
             return 'attr(abstract, 0, {})'.format(test_cfgs)
         return 'attr(no_run, 0, attr(abstract, 0, {}))'.format(test_cfgs)
@@ -742,21 +747,47 @@ class RegressionConfig():
 
         test_queries = ["({})".format(self._build_test_cfg_query(vcomp)) for vcomp in sorted(self.all_vcomp)]
         query_results = []
+        matching_tests = []
         for query_chunk in self._chunk_arguments(test_queries):
             combined_test_query = " union ".join(query_chunk)
             dtp.reset()
-            # Test cfgs point to their TB through ordinary rule attributes.
-            # Discovery does not need aspect-added edges. Traversing stale
-            # aspect nodes after an external macro edit crashes Bazel 7.7.1's
-            # reverse-dependency walk; the metadata build below still applies
-            # the cfg-info aspect normally.
-            returncode, stdout, stderr = self._run_command(
-                ["bazel", "cquery", combined_test_query, "--noinclude_aspects"], )
+            returncode, stdout, stderr = self._run_command([
+                "bazel",
+                "cquery",
+                combined_test_query,
+                "--noinclude_aspects",
+                "--output=starlark",
+                "--starlark:expr=" + DISCOVERY_CFG_STARLARK,
+            ])
             dtp.stop_and_print()
-            if returncode:
+            if returncode or "Starlark evaluation error for " in stderr:
                 self.log.critical("bazel test discovery failed:\n%s", stderr)
                 raise RuntimeError("bazel test discovery failed: {}".format(stderr))
-            query_results.extend(re.sub(r"\([a-z0-9]{7,64}\) *", "", stdout.replace('\n', ' ')).split())
+            for line in stdout.splitlines():
+                if not line.strip():
+                    continue
+                try:
+                    records = ast.literal_eval(line)
+                    if not isinstance(records, list):
+                        raise ValueError("Expected a list of configured tests")
+                    for record in records:
+                        if (not isinstance(record, list) or len(record) != 4
+                                or not all(isinstance(record[index], str)
+                                           for index in (0, 1, 3)) or not isinstance(record[2], list)
+                                or not all(isinstance(tag, str) for tag in record[2])):
+                            raise ValueError("Invalid configured test record")
+                except (ValueError, SyntaxError) as exc:
+                    self.log.critical("Invalid Bazel discovery metadata: %s", line)
+                    raise RuntimeError("Invalid Bazel discovery metadata: {}".format(line)) from exc
+                for test, vcomp, tags, simulator in records:
+                    test, vcomp = [re.sub(r"^@@?//", "//", label) for label in (test, vcomp)]
+                    if vcomp not in self.all_vcomp:
+                        continue
+                    test_package = test.rsplit(":", 1)[0]
+                    expected_package = vcomp.rsplit(":", 1)[0] + "/tests"
+                    if test_package == expected_package or test_package.startswith(expected_package + "/"):
+                        query_results.append(test)
+                        matching_tests.append((test, vcomp, tags, simulator))
         query_results = list(dict.fromkeys(query_results))
 
         discovery_build_targets = list(query_results)
@@ -764,34 +795,17 @@ class RegressionConfig():
             discovery_build_targets.extend(sorted(self.all_vcomp))
         discovery_build_targets = list(dict.fromkeys(discovery_build_targets))
 
-        text = []
         for target_chunk in self._chunk_arguments(discovery_build_targets):
             dtp.reset()
-            returncode, stdout, stderr = self._run_command([
-                "bazel",
-                "build",
-                *target_chunk,
-                "--aspects",
-                "@rules_verilog//verilog/private:dv.bzl%verilog_dv_test_cfg_info_aspect",
-            ])
+            returncode, stdout, stderr = self._run_command(["bazel", "build", *target_chunk])
             dtp.stop_and_print()
             if returncode:
                 self.log.critical("bazel test discovery failed:\n%s", stderr)
                 raise RuntimeError("bazel test discovery failed: {}".format(stderr))
-            text.extend(stdout.split('\n') + stderr.split('\n'))
         self.discovery_prebuilt_targets = set(discovery_build_targets)
 
-        # Parse test information from output
-        ttv = [
-            re.search(
-                r'verilog_dv_test_cfg_info\(@(?:@)?(?P<test>[^,]+), @(?:@)?(?P<vcomp>[^,]+), (?P<tags>\[.*\]), (?P<simulator>[A-Z0-9_]+)\)',
-                line,
-            ) for line in text
-        ]
-        ttv = [match for match in ttv if match]
-
-        matching_tests = [(mt.group('test'), mt.group('vcomp'), ast.literal_eval(mt.group('tags')),
-                           mt.group('simulator')) for mt in ttv]
+        # cquery emits providers on every invocation, including no-op builds.
+        # Aspect print() output is not replayed from Bazel's analysis cache.
         self.tests_to_tags = {test_name: tags for test_name, _, tags, _ in matching_tests}
         self.tests_to_simulator = {test_name: simulator for test_name, _, _, simulator in matching_tests}
         for test_name, vcomp, _, _ in matching_tests:

@@ -1,10 +1,9 @@
 """Real Bazel discovery and cfg-rebuild contract; no simulator or license needed.
 
 Run directly from the checkout (not inside a Bazel sandbox). The small Starlark
-rules model discovery's marker/aspect/output interface, not simulator behavior.
+rules model discovery's marker/provider/output interface, not simulator behavior.
 """
 
-import logging
 import os
 from pathlib import Path
 import shlex
@@ -15,15 +14,20 @@ from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from lib.job_lib import BazelTBJob, BazelTestCfgJob
+from lib.cmn_logging import CmnLogger
 from lib.regression import RegressionConfig
 
 RULES = '''
+DVTestInfo = provider(fields = ["tb", "tags", "simulator"])
 def _tb(ctx):
     return []
 
 dv_tb = rule(implementation = _tb)
 
 def _cfg(ctx):
+    tb = ctx.attr.vcomp
+    if tb == None and ctx.attr.inherits:
+        tb = ctx.attr.inherits[0][DVTestInfo].tb
     output = ctx.actions.declare_file(ctx.label.name + "_dynamic_args.py")
     ctx.actions.run_shell(
         inputs = [ctx.file.data],
@@ -31,23 +35,17 @@ def _cfg(ctx):
         arguments = [ctx.file.data.path, output.path],
         command = "cp \\"$1\\" \\"$2\\"",
     )
-    return [DefaultInfo(files = depset([output]))]
+    return [DefaultInfo(files = depset([output])), DVTestInfo(tb = tb, tags = ctx.attr.tags, simulator = "VCS")]
 
 cfg = rule(implementation = _cfg, attrs = {
     "verilog_dv_test_cfg_marker": attr.int(default = 1),
     "abstract": attr.int(default = 0),
     "no_run": attr.int(default = 0),
     "vcomp": attr.label(),
+    "inherits": attr.label_list(providers = [DVTestInfo]),
     "data": attr.label(allow_single_file = True),
 })
 
-def _info(target, ctx):
-    if hasattr(ctx.rule.attr, "verilog_dv_test_cfg_marker"):
-        print("verilog_dv_test_cfg_info({}, {}, {}, VCS)".format(
-            target.label, ctx.rule.attr.vcomp.label, ctx.rule.attr.tags))
-    return []
-
-verilog_dv_test_cfg_info_aspect = aspect(implementation = _info)
 '''
 
 CASES_MACRO = '''
@@ -60,18 +58,6 @@ def cases():
 '''
 
 
-class Log:
-
-    def __getattr__(self, name):
-        if name == "critical":
-
-            def fail(message, *args):
-                raise AssertionError(message % args if args else message)
-
-            return fail
-        return getattr(logging.getLogger("discovery-smoke"), name if name != "summary" else "info")
-
-
 def write(path, content):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
@@ -80,7 +66,7 @@ def write(path, content):
 def config(project):
     result = RegressionConfig.__new__(RegressionConfig)
     result.proj_dir = str(project)
-    result.log = Log()
+    result.log = CmnLogger("discovery-smoke")
     result.options = SimpleNamespace(
         tests=[SimpleNamespace(btiglob="soc_tb:*", tag=set(), ntag=set())],
         allow_no_run=False,
@@ -156,9 +142,57 @@ def main():
             write(definitions, CASES_MACRO + '\nCASES = [("third", 0, ["after_clean"])]\n')
             after_clean = config(project)
             assert not after_clean._should_use_cached_discovery()
+            print("Checking discovery after clean and external macro change", flush=True)
             after_clean.test_discovery_all()
             assert after_clean.tests_to_tags == {"//benches/soc_tb/tests:third": ["after_clean"]}
-            print("PASS: external macro freshness, selected cfg rebuild, and post-clean discovery")
+
+            # Match a dynamic BUILD/glob checkout: cache reuse must stay disabled
+            # and real Bazel queries must discover added/removed test files.
+            write(project / "BUILD", 'filegroup(name="rtl", srcs=glob(["*.sv"]))\n')
+            test_dir = project / "benches/soc_tb/tests"
+            write(
+                test_dir / "BUILD", '''
+load("@rules_verilog//verilog/private:dv.bzl", "cfg")
+[cfg(name=path[:-5], vcomp="//benches/soc_tb:soc_tb", data=":runtime.txt")
+ for path in glob(["*.case"])]
+''')
+
+            def check_glob_discovery(expected):
+                print("Checking real glob discovery: {}".format(sorted(expected)), flush=True)
+                current = config(project)
+                assert not current._should_use_cached_discovery()
+                current.test_discovery_all()
+                assert set(current.tests_to_tags) == {"//benches/soc_tb/tests:" + name for name in expected}, \
+                    "Expected {}, discovered {}".format(sorted(expected), current.tests_to_tags)
+                assert not current._should_use_cached_discovery(), "Dynamic membership cannot use a stale cache"
+                assert current.log.warn_count == current.log.error_count == 0
+                current.log.exit_if_warnings_or_errors("Previous errors")
+
+            write(test_dir / "first.case", "")
+            check_glob_discovery({"first"})
+            check_glob_discovery({"first"}) # A fresh query does not imply a compile-input change.
+            write(test_dir / "second.case", "")
+            check_glob_discovery({"first", "second"})
+            (test_dir / "first.case").unlink()
+            check_glob_discovery({"second"})
+
+            # The resolved provider, not just a direct TB attribute or any
+            # transitive path, determines the test's bench. No clean/restart.
+            write(
+                project / "benches/other_tb/BUILD", 'load("@rules_verilog//verilog/private:dv.bzl", "dv_tb")\n'
+                'dv_tb(name="other_tb", visibility=["//visibility:public"])\n')
+            write(
+                test_dir / "BUILD", '''
+load("@rules_verilog//verilog/private:dv.bzl", "cfg")
+cfg(name="base", abstract=1, vcomp="//benches/soc_tb:soc_tb", data=":runtime.txt")
+cfg(name="inherited", inherits=[":base"], data=":runtime.txt")
+cfg(name="disabled", no_run=1, inherits=[":base"], data=":runtime.txt")
+cfg(name="overridden", inherits=[":base"], vcomp="//benches/other_tb:other_tb", data=":runtime.txt")
+''')
+            check_glob_discovery({"inherited"})
+            assert not (project / "bazel-bin/benches/soc_tb/tests/overridden_dynamic_args.py").exists(), \
+                "A cfg resolved to another bench must not be built"
+            print("PASS: external macro freshness, cfg rebuild, glob additions/removals, and nonfatal cache notice")
         finally:
             subprocess.run(["bazel", "shutdown"], check=False)
             os.chdir(initial_directory)
