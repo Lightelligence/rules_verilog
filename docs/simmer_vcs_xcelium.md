@@ -195,6 +195,12 @@ dynamic repository or `glob` inputs cannot be safely tracked, simmer reports
 on normal runs. This notice does not fail an otherwise successful simulation or
 mark its history as failed. Explicit `--no-bazel` still rejects an unusable cache.
 
+Discovery reads each configured test's resolved `DVTestInfo.tb` provider, so
+inherited and overridden testbench assignments are respected before building
+the selected cfg outputs. It does not use `allpaths` reverse-dependency traversal,
+which can crash Bazel 7.7.1 after test membership changes. Query or build failures
+still stop discovery; they never authorize stale-cache reuse.
+
 Fresh discovery does not itself force recompilation. With automatic compile
 reuse enabled, unchanged compile inputs, options, tool identity and valid build
 artifacts reuse the existing build, including after a timestamp-only touch.

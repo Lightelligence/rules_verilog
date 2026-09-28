@@ -43,6 +43,12 @@ DISCOVERY_ROOT_FILES = {
 }
 DISCOVERY_MAX_ARG_CHARS = 100000
 DISCOVERY_MAX_SOURCE_RETRIES = 2
+# Use the same resolved provider as the metadata aspect, including inherited TBs.
+# Avoid allpaths/rdeps: Bazel 7.7.1 can crash on invalidated reverse-dependency
+# nodes after test removal, even with --noinclude_aspects.
+DISCOVERY_CFG_STARLARK = ('"\\n".join([str(target.label) + "\\t" + str(info.tb.label) '
+                          'for name, info in providers(target).items() '
+                          'if name.endswith("//verilog/private:dv.bzl%DVTestInfo") and info.tb != None])')
 DISCOVERY_GIT_METADATA_PATHS = (
     "BUILD",
     "BUILD.bazel",
@@ -413,7 +419,7 @@ class RegressionConfig():
                 digest = "missing"
             files.append({"path": relative_path, "sha256": digest})
         manifest = {
-            "schema_version": 6,
+            "schema_version": 7,
             "cacheable": self._discovery_input_error is None,
             "allow_no_run": bool(self.options.allow_no_run),
             "discovery_query": self._build_vcomp_discovery_query(),
@@ -638,13 +644,10 @@ class RegressionConfig():
 
     def _build_test_cfg_query(self, vcomp):
         vcomp_path, _ = vcomp.split(':')
-        test_wildcard = os.path.join(vcomp_path, "tests", "...")
+        test_wildcard = vcomp_path + "/tests/..."
         # generator_function names the outermost macro, while this rule marker
         # survives consumer wrappers around verilog_dv_test_cfg.
-        test_cfgs = 'attr(verilog_dv_test_cfg_marker, 1, {test_wildcard} intersect allpaths({test_wildcard}, {vcomp}))'.format(
-            test_wildcard=test_wildcard,
-            vcomp=vcomp,
-        )
+        test_cfgs = 'attr(verilog_dv_test_cfg_marker, 1, {})'.format(test_wildcard)
         if self.options.allow_no_run:
             return 'attr(abstract, 0, {})'.format(test_cfgs)
         return 'attr(no_run, 0, attr(abstract, 0, {}))'.format(test_cfgs)
@@ -747,18 +750,32 @@ class RegressionConfig():
         for query_chunk in self._chunk_arguments(test_queries):
             combined_test_query = " union ".join(query_chunk)
             dtp.reset()
-            # Test cfgs point to their TB through ordinary rule attributes.
-            # Discovery does not need aspect-added edges. Traversing stale
-            # aspect nodes after an external macro edit crashes Bazel 7.7.1's
-            # reverse-dependency walk; the metadata build below still applies
-            # the cfg-info aspect normally.
-            returncode, stdout, stderr = self._run_command(
-                ["bazel", "cquery", combined_test_query, "--noinclude_aspects"], )
+            returncode, stdout, stderr = self._run_command([
+                "bazel",
+                "cquery",
+                combined_test_query,
+                "--noinclude_aspects",
+                "--output=starlark",
+                "--starlark:expr=" + DISCOVERY_CFG_STARLARK,
+            ])
             dtp.stop_and_print()
             if returncode:
                 self.log.critical("bazel test discovery failed:\n%s", stderr)
                 raise RuntimeError("bazel test discovery failed: {}".format(stderr))
-            query_results.extend(re.sub(r"\([a-z0-9]{7,64}\) *", "", stdout.replace('\n', ' ')).split())
+            for line in stdout.splitlines():
+                if not line.strip():
+                    continue
+                labels = line.split("\t")
+                if len(labels) != 2:
+                    self.log.critical("Invalid Bazel discovery metadata: %s", line)
+                    raise RuntimeError("Invalid Bazel discovery metadata: {}".format(line))
+                test, vcomp = [re.sub(r"^@@?//", "//", label) for label in labels]
+                if vcomp not in self.all_vcomp:
+                    continue
+                test_package = test.rsplit(":", 1)[0]
+                expected_package = vcomp.rsplit(":", 1)[0] + "/tests"
+                if test_package == expected_package or test_package.startswith(expected_package + "/"):
+                    query_results.append(test)
         query_results = list(dict.fromkeys(query_results))
 
         discovery_build_targets = list(query_results)

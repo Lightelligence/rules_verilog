@@ -753,6 +753,7 @@ class RegressionDiscoveryTest(unittest.TestCase):
 
         self.assertIn("attr(verilog_dv_test_cfg_marker, 1,", query)
         self.assertNotIn("generator_function", query)
+        self.assertNotIn("allpaths", query)
 
     def test_discovery_batches_cquery_and_build(self):
         proj_dir = Path(tempfile.mkdtemp())
@@ -767,7 +768,7 @@ class RegressionDiscoveryTest(unittest.TestCase):
             if cmd[:2] == ["bazel", "query"]:
                 return 0, "//benches/soc_tb:soc_tb\n", ""
             if cmd[:2] == ["bazel", "cquery"]:
-                return 0, "//benches/soc_tb/tests:dma_single_transfer (abc1234)\n", ""
+                return 0, "@@//benches/soc_tb/tests:dma_single_transfer\t@@//benches/soc_tb:soc_tb\n", ""
             if cmd[:2] == ["bazel", "build"]:
                 return 0, "", ("verilog_dv_test_cfg_info(@//benches/soc_tb/tests:dma_single_transfer, "
                                "@//benches/soc_tb:soc_tb, ['smoke'], VCS)\n")
@@ -789,6 +790,7 @@ class RegressionDiscoveryTest(unittest.TestCase):
         self.assertEqual(["bazel", "query"], commands[0][:2])
         self.assertEqual(["bazel", "cquery"], commands[1][:2])
         self.assertIn("--noinclude_aspects", commands[1])
+        self.assertIn("--output=starlark", commands[1])
         self.assertEqual(["bazel", "build"], commands[2][:2])
         self.assertIn("//benches/soc_tb:soc_tb", commands[2])
         self.assertEqual(
@@ -813,6 +815,58 @@ class RegressionDiscoveryTest(unittest.TestCase):
             config.all_vcomp,
         )
 
+    def test_discovery_builds_only_cfgs_resolved_to_the_selected_bench(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config = self._config(Path(directory))
+            target = "//benches/soc_tb/tests/sub:inherited"
+            config._run_command = mock.Mock(side_effect=[
+                (0, "//benches/soc_tb:soc_tb\n", ""),
+                (0, "@{}\t@//benches/soc_tb:soc_tb\n"
+                 "//benches/soc_tb/tests:wrong_tb\t//benches/other_tb:other_tb\n"
+                 "//benches/other_tb/tests:wrong_directory\t//benches/soc_tb:soc_tb\n"
+                 "//benches/soc_tb/tests:external_tb\t@@ip//benches/soc_tb:soc_tb\n".format(target), ""),
+                (0, "", "verilog_dv_test_cfg_info(@{}, @//benches/soc_tb:soc_tb, [], VCS)".format(target)),
+            ])
+            with mock.patch("lib.regression.rv_utils.DatetimePrinter", _Timer):
+                config.test_discovery_all()
+            self.assertEqual({target: []}, config.tests_to_tags)
+            self.assertEqual({target, "//benches/soc_tb:soc_tb"}, config.discovery_prebuilt_targets)
+            build = config._run_command.call_args.args[0]
+            self.assertEqual([
+                "bazel", "build", target, "//benches/soc_tb:soc_tb", "--aspects",
+                "@rules_verilog//verilog/private:dv.bzl%verilog_dv_test_cfg_info_aspect"
+            ], build)
+
+    def test_cquery_failures_are_not_ignored_or_retried(self):
+        for code, stderr in ((1, "BUILD file error"), (37, "unrelated internal error"),
+                             (1, "java.lang.NullPointerException\n"
+                              "PostAnalysisQueryEnvironment.unwindReverseDependencyDelegationLayers")):
+            with self.subTest(code=code, stderr=stderr), tempfile.TemporaryDirectory() as directory:
+                config = self._config(Path(directory))
+                config.log = mock.Mock()
+                config._publish_discovery_cache = mock.Mock()
+                config._run_command = mock.Mock(side_effect=[(0, "//benches/soc_tb:soc_tb\n", ""), (code, "", stderr)])
+                with mock.patch("lib.regression.rv_utils.DatetimePrinter", _Timer), self.assertRaises(RuntimeError):
+                    config.test_discovery_all()
+                self.assertEqual(2, config._run_command.call_count)
+                self.assertEqual(set(), config.discovery_prebuilt_targets)
+                config._publish_discovery_cache.assert_not_called()
+
+    def test_malformed_configured_metadata_cannot_publish_cache(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config = self._config(Path(directory))
+            config.log = mock.Mock()
+            config._publish_discovery_cache = mock.Mock()
+            config._run_command = mock.Mock(side_effect=[
+                (0, "//benches/soc_tb:soc_tb\n", ""),
+                (0, "//benches/soc_tb/tests:missing_tb\n", ""),
+            ])
+            with mock.patch("lib.regression.rv_utils.DatetimePrinter", _Timer), self.assertRaises(RuntimeError):
+                config.test_discovery_all()
+            self.assertEqual(2, config._run_command.call_count)
+            self.assertEqual(set(), config.discovery_prebuilt_targets)
+            config._publish_discovery_cache.assert_not_called()
+
     def test_failed_discovery_never_marks_targets_prebuilt_or_publishes_cache(self):
         for fatal_logger in (False, True):
             for failed_phase in range(3):
@@ -827,7 +881,7 @@ class RegressionDiscoveryTest(unittest.TestCase):
                         config.log = mock.Mock()
                     results = [
                         (0, "//benches/soc_tb:soc_tb\n", ""),
-                        (0, "//benches/soc_tb/tests:dma_single_transfer (abc1234)\n", ""),
+                        (0, "//benches/soc_tb/tests:dma_single_transfer\t//benches/soc_tb:soc_tb\n", ""),
                         (0, "", "verilog_dv_test_cfg_info(@//benches/soc_tb/tests:dma_single_transfer, "
                          "@//benches/soc_tb:soc_tb, ['smoke'], VCS)\n"),
                     ]
