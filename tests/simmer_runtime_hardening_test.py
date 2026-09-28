@@ -24,7 +24,9 @@ if str(REPO_ROOT) not in sys.path:
 from args_parser import parse_args
 import simmer
 from lib import compile_cache
+from lib.cmn_logging import CmnLogger
 from lib.job_lib import JobCancelledError, JobStatus
+from lib.regression import RegressionConfig
 from lib.runtime_options import normalize_test_runtime_options
 from verilog.private import compile_input_digest
 
@@ -49,14 +51,14 @@ class _FatalLog:
 
 class SimmerRuntimeHardeningTest(unittest.TestCase):
 
-    def test_skipping_bazel_rehashes_sources_before_compile_reuse(self):
+    def test_compile_reuse_tracks_content_with_and_without_bazel(self):
         for shared in (False, True):
             with self.subTest(shared=shared):
-                self._check_skipping_bazel_compile_reuse(shared)
+                self._check_compile_reuse(shared)
 
-    def _check_skipping_bazel_compile_reuse(self, shared):
-        for strict in (False, True):
-            with self.subTest(strict=strict), tempfile.TemporaryDirectory() as temporary_dir:
+    def _check_compile_reuse(self, shared):
+        for mode in ("normal", "no_bazel", "strict"):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as temporary_dir:
                 root = Path(temporary_dir)
                 runfiles = root / "runfiles"
                 bench = runfiles / "bench"
@@ -69,14 +71,18 @@ class SimmerRuntimeHardeningTest(unittest.TestCase):
                 digest = bench / "inputs.sha256"
                 manifest = root / "manifest.txt"
                 manifest.write_text("source\tbench/top.sv\t{}\n".format(source), encoding="utf-8")
-                if shared:
-                    index = root / "index.json"
-                    indices = root / "indices.txt"
-                    compile_input_digest.generate_index(manifest, index)
-                    indices.write_text(str(index) + "\n", encoding="utf-8")
-                    compile_input_digest.merge_digest(manifest, digest, inventory, indices)
-                else:
-                    compile_input_digest.generate_digest(manifest, digest, inventory)
+
+                def refresh_digest():
+                    if shared:
+                        index = root / "index.json"
+                        indices = root / "indices.txt"
+                        compile_input_digest.generate_index(manifest, index)
+                        indices.write_text(str(index) + "\n", encoding="utf-8")
+                        compile_input_digest.merge_digest(manifest, digest, inventory, indices)
+                    else:
+                        compile_input_digest.generate_digest(manifest, digest, inventory)
+
+                refresh_digest()
                 (bench / "tb_tb_options.py").write_text(
                     repr({
                         "compile_inputs": "bench/inputs.txt",
@@ -86,7 +92,10 @@ class SimmerRuntimeHardeningTest(unittest.TestCase):
                 )
                 common_args = ["--simulator", "VCS", "--no-vcs-partcomp"]
                 options = parse_args(common_args)
-                rcfg = SimpleNamespace(options=options, proj_dir=str(root), regression_dir=str(root), log=mock.Mock())
+                rcfg = SimpleNamespace(options=options,
+                                       proj_dir=str(root),
+                                       regression_dir=str(root),
+                                       log=CmnLogger("compile-reuse-test"))
                 simulator = simmer.VcsSimulator(options, rcfg, simmer.jinja2_env)
                 simulator._vcs_tool_identity = "test compiler"
                 with mock.patch.dict(simmer.VCompJob.all_names, clear=True), mock.patch("simmer.log", rcfg.log):
@@ -99,19 +108,47 @@ class SimmerRuntimeHardeningTest(unittest.TestCase):
                         executable.write_text("fixture executable", encoding="utf-8")
                         executable.chmod(0o755)
                         compile_cache.write_compile_fingerprint(job.job_dir, job.compile_fingerprint)
-                        options = parse_args(common_args + ["--no-compile" if strict else "--no-bazel"])
+                        extra_args = {"normal": [], "no_bazel": ["--no-bazel"], "strict": ["--no-compile"]}[mode]
+                        options = parse_args(common_args + extra_args)
                         rcfg.options = options
                         simulator.options = options
                         job.pre_run()
                         self.assertIn("Bypassing", job.main_cmdline)
+                        # A discovery notice, mtime-only touch and unrelated
+                        # runtime output must not force simulator compilation.
+                        RegressionConfig._report_discovery_cache_disabled(rcfg, {
+                            "cacheable": False,
+                            "uncacheable_reason": {
+                                "detail": "dynamic glob",
+                                "path": "BUILD"
+                            }
+                        })
+                        before_touch = source.stat()
+                        os.utime(source, ns=(before_touch.st_atime_ns, before_touch.st_mtime_ns + 1000000000))
+                        (root / "unrelated.log").write_text("simulation output", encoding="utf-8")
+                        if mode == "normal":
+                            refresh_digest()
+                        job.pre_run()
+                        self.assertIn("Bypassing", job.main_cmdline)
+                        rcfg.log.exit_if_warnings_or_errors("Previous errors")
+                        before_change = source.stat()
                         source.write_text("module top; logic changed; endmodule\n", encoding="utf-8")
-                        if strict:
+                        os.utime(source, ns=(before_change.st_atime_ns, before_change.st_mtime_ns))
+                        if mode == "normal":
+                            refresh_digest()
+                        if mode == "strict":
                             with self.assertRaisesRegex(RuntimeError, "compile_inputs_sha256"):
                                 job.pre_run()
                         else:
                             job.pre_run()
                             self.assertFalse(job.compile_cache_hit)
                             self.assertTrue(job.main_cmdline.startswith("bash "))
+                            # Once a successful compile records the new inputs,
+                            # the next identical run can reuse it again.
+                            compile_cache.write_compile_fingerprint(job.job_dir, job.compile_fingerprint)
+                            job.pre_run()
+                            self.assertTrue(job.compile_cache_hit)
+                            self.assertIn("Bypassing", job.main_cmdline)
                         self.assertTrue(all(call.args[0] == ["hostname"] for call in host_probe.call_args_list))
 
     def _check_relative_coverage_config(self, backend):

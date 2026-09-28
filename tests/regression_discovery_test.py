@@ -9,7 +9,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from lib import discovery_inputs
+from lib import discovery_inputs, simmer_results
 from lib.regression import RegressionConfig
 from lib.cmn_logging import CmnLogger
 
@@ -542,6 +542,56 @@ class RegressionDiscoveryTest(unittest.TestCase):
         config.options.no_bazel = True
 
         self.assertFalse(config._should_use_cached_discovery())
+
+    def test_dynamic_glob_notice_preserves_success_and_does_not_enable_cache(self):
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            (project / "BUILD").write_text('filegroup(name="rtl", srcs=glob(["*.sv"]))\n', encoding="utf-8")
+            config = self._config(project)
+            config.log = CmnLogger("discovery-notice")
+            manifest = config._discovery_dependency_manifest()
+            self.assertFalse(manifest["cacheable"])
+            self.assertIn("glob", manifest["uncacheable_reason"]["detail"])
+            with self.assertLogs(config.log, level="INFO") as messages:
+                config._report_discovery_cache_disabled(manifest)
+                config._report_discovery_cache_disabled(manifest)
+            self.assertEqual(1, len(messages.records))
+            self.assertEqual("INFO", messages.records[0].levelname)
+            self.assertIn("BUILD", messages.output[0])
+            self.assertEqual((0, 0), (config.log.warn_count, config.log.error_count))
+            config.log.exit_if_warnings_or_errors("Previous errors")
+            run = {"tests": [{"status": "PASSED"}], "planned_tests": 1}
+            simmer_results.finalize_run(run,
+                                        backend_finalize_failed=bool(config.log.warn_count or config.log.error_count))
+            self.assertEqual("PASSED", run["status"])
+
+    def test_cache_notice_does_not_clear_real_warning_or_error(self):
+        for severity in ("warning", "error"):
+            with self.subTest(severity=severity), tempfile.TemporaryDirectory() as directory:
+                config = self._config(Path(directory))
+                config.log = CmnLogger("discovery-notice-existing-failure")
+                manifest = {"cacheable": False, "uncacheable_reason": {"detail": "dynamic inputs", "path": "BUILD"}}
+                with self.assertLogs(config.log, level="INFO"):
+                    getattr(config.log, severity)("real diagnostic")
+                    config._report_discovery_cache_disabled(manifest)
+                    with self.assertRaises(SystemExit) as raised:
+                        config.log.exit_if_warnings_or_errors("Previous errors")
+                self.assertEqual(1, raised.exception.code)
+                self.assertEqual(1, config.log.warn_count + config.log.error_count)
+
+    def test_explicit_no_bazel_still_fails_with_real_logger_and_no_discovery(self):
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            options = self._options(project)
+            options.no_bazel = True
+            options.no_bazel_was_explicit = True
+            log = CmnLogger("discovery-notice-strict-no-bazel")
+            with mock.patch("lib.regression.rv_utils.calc_simresults_location", return_value=directory), \
+                 mock.patch.object(RegressionConfig, "test_discovery_all") as discover, \
+                 self.assertLogs(log, level="CRITICAL"), self.assertRaises(SystemExit) as raised:
+                RegressionConfig(options, log)
+            self.assertEqual(1, raised.exception.code)
+            discover.assert_not_called()
 
     def test_implicit_no_bazel_refreshes_missing_discovery_for_no_compile(self):
         project_dir = Path(tempfile.mkdtemp())

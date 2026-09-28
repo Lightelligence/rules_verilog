@@ -136,6 +136,7 @@ py_test(
         "//lib:cmn_logging",
         "//lib:discovery_inputs",
         "//lib:regression",
+        "//lib:simmer_results",
     ],
 )
 

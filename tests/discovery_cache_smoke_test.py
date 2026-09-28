@@ -4,7 +4,6 @@ Run directly from the checkout (not inside a Bazel sandbox). The small Starlark
 rules model discovery's marker/aspect/output interface, not simulator behavior.
 """
 
-import logging
 import os
 from pathlib import Path
 import shlex
@@ -15,6 +14,7 @@ from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from lib.job_lib import BazelTBJob, BazelTestCfgJob
+from lib.cmn_logging import CmnLogger
 from lib.regression import RegressionConfig
 
 RULES = '''
@@ -60,18 +60,6 @@ def cases():
 '''
 
 
-class Log:
-
-    def __getattr__(self, name):
-        if name == "critical":
-
-            def fail(message, *args):
-                raise AssertionError(message % args if args else message)
-
-            return fail
-        return getattr(logging.getLogger("discovery-smoke"), name if name != "summary" else "info")
-
-
 def write(path, content):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
@@ -80,7 +68,7 @@ def write(path, content):
 def config(project):
     result = RegressionConfig.__new__(RegressionConfig)
     result.proj_dir = str(project)
-    result.log = Log()
+    result.log = CmnLogger("discovery-smoke")
     result.options = SimpleNamespace(
         tests=[SimpleNamespace(btiglob="soc_tb:*", tag=set(), ntag=set())],
         allow_no_run=False,
@@ -158,7 +146,35 @@ def main():
             assert not after_clean._should_use_cached_discovery()
             after_clean.test_discovery_all()
             assert after_clean.tests_to_tags == {"//benches/soc_tb/tests:third": ["after_clean"]}
-            print("PASS: external macro freshness, selected cfg rebuild, and post-clean discovery")
+
+            # Match a dynamic BUILD/glob checkout: cache reuse must stay disabled
+            # and real Bazel queries must discover added/removed test files.
+            write(project / "BUILD", 'filegroup(name="rtl", srcs=glob(["*.sv"]))\n')
+            test_dir = project / "benches/soc_tb/tests"
+            write(
+                test_dir / "BUILD", '''
+load("@rules_verilog//verilog/private:dv.bzl", "cfg")
+[cfg(name=path[:-5], vcomp="//benches/soc_tb:soc_tb", data=":runtime.txt")
+ for path in glob(["*.case"])]
+''')
+
+            def check_glob_discovery(expected):
+                current = config(project)
+                assert not current._should_use_cached_discovery()
+                current.test_discovery_all()
+                assert set(current.tests_to_tags) == {"//benches/soc_tb/tests:" + name for name in expected}
+                assert not current._should_use_cached_discovery(), "Dynamic membership cannot use a stale cache"
+                assert current.log.warn_count == current.log.error_count == 0
+                current.log.exit_if_warnings_or_errors("Previous errors")
+
+            write(test_dir / "first.case", "")
+            check_glob_discovery({"first"})
+            check_glob_discovery({"first"}) # A fresh query does not imply a compile-input change.
+            write(test_dir / "second.case", "")
+            check_glob_discovery({"first", "second"})
+            (test_dir / "first.case").unlink()
+            check_glob_discovery({"second"})
+            print("PASS: external macro freshness, cfg rebuild, glob additions/removals, and nonfatal cache notice")
         finally:
             subprocess.run(["bazel", "shutdown"], check=False)
             os.chdir(initial_directory)
