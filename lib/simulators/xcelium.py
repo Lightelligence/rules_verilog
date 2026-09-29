@@ -177,6 +177,10 @@ class XceliumSimulator(SimulatorInterface):
 
     def get_compile_fingerprint_inputs(self, vcomp_job):
         inputs = super().get_compile_fingerprint_inputs(vcomp_job)
+        profile = getattr(vcomp_job, "analog_profile", None)
+        if profile:
+            inputs["extra_input_paths"].extend(profile["inputs"])
+            inputs["environment"]["ANALOG_FILE_KEY"] = profile["key"]
         if self.options.coverage and self.options.covfile_was_explicit:
             inputs["extra_input_paths"].append(self.options.covfile)
         inputs["environment"]["XCELIUMHOME"] = os.environ.get("XCELIUMHOME", "")
