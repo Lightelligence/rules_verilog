@@ -362,8 +362,13 @@ def _analog_profile(config, execution_root):
         digest.update((path + "\0" + content_digest + "\0").encode("utf-8"))
         resolved[path] = absolute
     digest.update(config["entry"].encode("utf-8"))
-    return {"key": digest.hexdigest(), "entry": resolved[config["entry"]],
-            "inputs": list(resolved.values()), "config": config, "execution_root": execution_root}
+    return {
+        "key": digest.hexdigest(),
+        "entry": resolved[config["entry"]],
+        "inputs": list(resolved.values()),
+        "config": config,
+        "execution_root": execution_root
+    }
 
 
 def _load_analog_profiles(rcfg, options):
@@ -390,8 +395,11 @@ def _load_analog_profiles(rcfg, options):
                 getattr(options, name, False) for name in ("msie_prim", "msie_incr", "msie_href")):
             raise ValueError("analog_file currently requires standard XRUN simulation (no MSIE/emulator)")
         if execution_root is None:
-            result = subprocess.run(["bazel", "info", "execution_root"], cwd=rcfg.proj_dir,
-                                    capture_output=True, text=True, check=True)
+            result = subprocess.run(["bazel", "info", "execution_root"],
+                                    cwd=rcfg.proj_dir,
+                                    capture_output=True,
+                                    text=True,
+                                    check=True)
             execution_root = result.stdout.strip()
         profiles[target] = _analog_profile(config, execution_root)
     return profiles

@@ -4,12 +4,14 @@ import os
 def validate_xcelium_runtime_options(options, parser):
     if (getattr(options, 'xrun_parallel', True)
             and '--xrun-parallel' in getattr(options, 'xcelium_explicit_switches', [])):
-        conflicts = [name for name in ('coverage', 'mce', 'msie', 'msie_href', 'msie_prim', 'msie_incr', 'emulator')
-                     if getattr(options, name, None)]
+        conflicts = [
+            name for name in ('coverage', 'mce', 'msie', 'msie_href', 'msie_prim', 'msie_incr', 'emulator')
+            if getattr(options, name, None)
+        ]
         if conflicts:
             parser.error('--xrun-parallel currently supports ordinary XRUN batch runs only; incompatible with {}. '
                          'Stopping before Bazel starts.'.format(', '.join('--' + name.replace('_', '-')
-                                                                        for name in conflicts)))
+                                                                          for name in conflicts)))
     if options.gui:
         parser.error("Xcelium supports batch mode only; --gui is allowed only with VCS. Stopping before Bazel starts.")
     if options.waves is not None:
