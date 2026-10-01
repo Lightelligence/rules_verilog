@@ -2625,11 +2625,14 @@ run_bounded_process([
         self.assertEqual(4, len(xrun_shared_compile_trace))
         self.assertEqual(sorted(xrun_shared_compile_trace), xrun_shared_compile_trace)
 
-    def test_xcelium_resource_serializes_only_same_database(self):
+    def test_xcelium_resource_parallel_default_and_serial_disable(self):
         simulator = XceliumSimulator(parse_args(["--simulator", "XRUN"]), DummyRegressionConfig(), None)
         first = SimpleNamespace(vcomper=SimpleNamespace(job_dir="one"))
         same = SimpleNamespace(vcomper=SimpleNamespace(job_dir="./one"))
         other = SimpleNamespace(vcomper=SimpleNamespace(job_dir="two"))
+        self.assertIsNone(simulator.get_test_exclusive_resource(first))
+        self.assertIsNone(simulator.get_test_exclusive_resource(same))
+        simulator.options.xrun_parallel = False
         self.assertEqual(simulator.get_test_exclusive_resource(first), simulator.get_test_exclusive_resource(same))
         self.assertNotEqual(simulator.get_test_exclusive_resource(first), simulator.get_test_exclusive_resource(other))
         vcs = VcsSimulator(parse_args(["--simulator", "VCS"]), DummyRegressionConfig(), None)
