@@ -124,7 +124,7 @@ overlapping closures can still repeat hashing. Xcelium fingerprints are unchange
 ## verilog_dv_test_cfg
 
 <pre>
-verilog_dv_test_cfg(<a href="#verilog_dv_test_cfg-name">name</a>, <a href="#verilog_dv_test_cfg-tags">tags</a>, <a href="#verilog_dv_test_cfg-abstract">abstract</a>, <a href="#verilog_dv_test_cfg-inherits">inherits</a>, <a href="#verilog_dv_test_cfg-uvm_testname">uvm_testname</a>, <a href="#verilog_dv_test_cfg-tb">tb</a>, <a href="#verilog_dv_test_cfg-simulator">simulator</a>, <a href="#verilog_dv_test_cfg-sim_opts">sim_opts</a>, <a href="#verilog_dv_test_cfg-no_run">no_run</a>, <a href="#verilog_dv_test_cfg-sockets">sockets</a>, <a href="#verilog_dv_test_cfg-pre_run">pre_run</a>, <a href="#verilog_dv_test_cfg-timeout">timeout</a>, <a href="#verilog_dv_test_cfg-description">description</a>, <a href="#verilog_dv_test_cfg-gls_tb">gls_tb</a>, <a href="#verilog_dv_test_cfg-pre_opts">pre_opts</a>, <a href="#verilog_dv_test_cfg-post_opts">post_opts</a>, <a href="#verilog_dv_test_cfg-gatesim_modes">gatesim_modes</a>)
+verilog_dv_test_cfg(<a href="#verilog_dv_test_cfg-name">name</a>, <a href="#verilog_dv_test_cfg-tags">tags</a>, <a href="#verilog_dv_test_cfg-abstract">abstract</a>, <a href="#verilog_dv_test_cfg-inherits">inherits</a>, <a href="#verilog_dv_test_cfg-uvm_testname">uvm_testname</a>, <a href="#verilog_dv_test_cfg-tb">tb</a>, <a href="#verilog_dv_test_cfg-simulator">simulator</a>, <a href="#verilog_dv_test_cfg-sim_opts">sim_opts</a>, <a href="#verilog_dv_test_cfg-no_run">no_run</a>, <a href="#verilog_dv_test_cfg-sockets">sockets</a>, <a href="#verilog_dv_test_cfg-pre_run">pre_run</a>, <a href="#verilog_dv_test_cfg-timeout">timeout</a>, <a href="#verilog_dv_test_cfg-description">description</a>, <a href="#verilog_dv_test_cfg-gls_tb">gls_tb</a>, <a href="#verilog_dv_test_cfg-pre_opts">pre_opts</a>, <a href="#verilog_dv_test_cfg-post_opts">post_opts</a>, <a href="#verilog_dv_test_cfg-gatesim_modes">gatesim_modes</a>, <a href="#verilog_dv_test_cfg-analog_file">analog_file</a>, <a href="#verilog_dv_test_cfg-analog_data">analog_data</a>)
 </pre>
 
 A DV test configuration.
@@ -155,6 +155,8 @@ A DV test configuration.
 | <a id="verilog_dv_test_cfg-pre_opts"></a>pre_opts | Runtime option overrides merged into `sim_opts` for the base, pre-layout configuration. | <a href="https://bazel.build/docs/skylark/lib/dict.html">Dictionary: String -> String</a> | optional | None |
 | <a id="verilog_dv_test_cfg-post_opts"></a>post_opts | Runtime option overrides merged into `sim_opts` for generated gate-simulation corner configurations. | <a href="https://bazel.build/docs/skylark/lib/dict.html">Dictionary: String -> String</a> | optional | None |
 | <a id="verilog_dv_test_cfg-gatesim_modes"></a>gatesim_modes | Suffixes used to generate gate-simulation configurations when `tags` includes `gatesim`. | List of strings | optional | `["nl", "sdf_wc", "sdf_lt", "tt_min", "tt_max"]` |
+| <a id="verilog_dv_test_cfg-analog_file"></a>analog_file | Optional XRUN test-specific analog SCS file. Inheritable; explicit selection replaces the parent file and data. | Label | optional | None |
+| <a id="verilog_dv_test_cfg-analog_data"></a>analog_data | Include, model, or waveform data files used by `analog_file`; inherited data is retained when the analog file is inherited. | List of labels | optional | None |
 
 
 <a id="verilog_dv_unit_test"></a>
