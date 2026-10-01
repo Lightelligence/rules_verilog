@@ -159,6 +159,8 @@ def parse_args(argv):
         ])
     options.xcelium_explicit_switches = [
         argument for argument in [
+            '--xrun-parallel',
+            '--no-xrun-parallel',
             '--wave-delta',
             '--wave-msv-debug-tcl-call',
             '--ams-runfiles-link',
