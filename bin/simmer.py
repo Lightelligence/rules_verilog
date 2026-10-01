@@ -4,6 +4,8 @@
 # standard lib imports
 from copy import deepcopy
 import ast
+import json
+import hashlib
 import datetime
 from hashlib import sha1
 import os
@@ -342,13 +344,80 @@ def describe_compile_reuse_miss(miss_reason, simulator_name):
 
 
 # The jobs of the verification compilation and elaboration stages
+def _analog_profile(config, execution_root):
+    """Resolve Bazel execution paths and hash all declared analog inputs."""
+    if not config.get("entry"):
+        return None
+    if config.get("schema_version") != 1:
+        raise ValueError("Unsupported analog_file metadata schema")
+    paths = sorted(set(config["inputs"] + [config["entry"]]))
+    digest = hashlib.sha256()
+    resolved = {}
+    for path in paths:
+        if os.path.isabs(path) or ".." in path.replace("\\", "/").split("/"):
+            raise ValueError("analog_file inputs must be Bazel execution-root-relative paths: " + path)
+        absolute = os.path.join(execution_root, path)
+        with open(absolute, "rb") as stream:
+            content_digest = hashlib.file_digest(stream, "sha256").hexdigest()
+        digest.update((path + "\0" + content_digest + "\0").encode("utf-8"))
+        resolved[path] = absolute
+    digest.update(config["entry"].encode("utf-8"))
+    return {"key": digest.hexdigest(), "entry": resolved[config["entry"]],
+            "inputs": list(resolved.values()), "config": config, "execution_root": execution_root}
+
+
+def _load_analog_profiles(rcfg, options):
+    """Materialize test metadata before constructing the compile dependency graph."""
+    targets = sorted({test for tests in rcfg.all_vcomp.values() for test in tests})
+    prebuilt = set(getattr(rcfg, "discovery_prebuilt_targets", ()))
+    missing = [target for target in targets if target not in prebuilt]
+    if missing and not (options.no_bazel or options.no_compile):
+        subprocess.run(["bazel", "build"] + missing, cwd=rcfg.proj_dir, check=True)
+    bazel_bin = get_bazel_bin(rcfg.proj_dir)
+    profiles = {}
+    execution_root = None
+    for target in targets:
+        package, name = target.split(":", 1)
+        path = os.path.join(bazel_bin, package[2:], name + "_analog_config.json")
+        # Compatibility with configurations built using older rules.
+        if not os.path.isfile(path):
+            continue
+        with open(path, encoding="utf-8") as stream:
+            config = json.load(stream)
+        if not config.get("entry"):
+            continue
+        if options.simulator != "XRUN" or options.emulator or any(
+                getattr(options, name, False) for name in ("msie_prim", "msie_incr", "msie_href")):
+            raise ValueError("analog_file currently requires standard XRUN simulation (no MSIE/emulator)")
+        if execution_root is None:
+            result = subprocess.run(["bazel", "info", "execution_root"], cwd=rcfg.proj_dir,
+                                    capture_output=True, text=True, check=True)
+            execution_root = result.stdout.strip()
+        profiles[target] = _analog_profile(config, execution_root)
+    return profiles
+
+
+def _group_analog_tests(test_list, profiles):
+    groups = {}
+    for test, iterations in test_list.items():
+        profile = profiles.get(test)
+        key = profile["key"] if profile else ""
+        if key not in groups:
+            groups[key] = (profile, {})
+        groups[key][1][test] = iterations
+    return list(groups.values())
+
+
 class VCompJob(Job):
     # All found vcomp names to prevent collisions
     all_names = {}
 
-    def __init__(self, rcfg, bazel_vcomp_target, simulator: SimulatorInterface):
+    def __init__(self, rcfg, bazel_vcomp_target, simulator: SimulatorInterface, analog_profile=None):
         self.bazel_vcomp_target = bazel_vcomp_target
+        self.analog_profile = analog_profile
         name = os.path.basename(self.bazel_vcomp_target.split(":")[1])
+        if analog_profile:
+            name += "__analog_" + analog_profile["key"][:20]
         if name in self.__class__.all_names:
             log.critical("Found duplicate dv_tb name in %s and %s", self.bazel_vcomp_target,
                          self.__class__.all_names[name].bazel_vcomp_target)
@@ -490,6 +559,22 @@ class VCompJob(Job):
             log.info("Removing vcomp library %s due to --recompile flag", self.job_dir)
             shutil.rmtree(self.job_dir, ignore_errors=True)
             os.makedirs(self.job_dir, exist_ok=True)
+
+        if self.analog_profile:
+            profile = self.analog_profile
+            current = _analog_profile(profile["config"], profile["execution_root"])
+            if current["key"] != profile["key"]:
+                raise RuntimeError("analog_file inputs changed during build; restart the regression")
+            wrapper = os.path.join(self.job_dir, "analog_compile_args.f")
+            # Preserve the common filelist and append exactly one selected SCS.
+            # JSON quoting supplies double-quoted paths without shell evaluation.
+            with open(wrapper, "w", encoding="utf-8") as stream:
+                stream.write("-f " + json.dumps(self.bazel_compile_args, ensure_ascii=False) + "\n")
+                stream.write(json.dumps(profile["entry"], ensure_ascii=False) + "\n")
+            self.bazel_compile_args = wrapper
+            with open(os.path.join(self.job_dir, "analog_config.json"), "w", encoding="utf-8") as stream:
+                json.dump(profile, stream, indent=2, sort_keys=True)
+            log.info("%s selects analog_file %s", self.name, profile["entry"])
 
         # --- Template Rendering ---
         vcomp_sh_path = os.path.join(self.job_dir, "vcomp.sh")
@@ -864,6 +949,10 @@ class TestJob(Job):
 
     def pre_run(self):
         log.debug("Preparing test: %s:%s (Simulator: %s)", self.vcomper.name, self.name, self.simulator.get_name())
+
+        profile = getattr(self.vcomper, "analog_profile", None)
+        if profile and _analog_profile(profile["config"], profile["execution_root"])["key"] != profile["key"]:
+            raise RuntimeError("analog_file inputs changed after scheduling; restart the regression")
 
         options = self.rcfg.options
 
@@ -1499,44 +1588,57 @@ def main(rcfg, options, active_run=None):
     if options.python_seed is not None:
         log.info("Set python random seed to %s", options.python_seed)
 
+    analog_profiles = _load_analog_profiles(rcfg, options)
+    runtime_vcomp = {}
     for vcomp, test_list in rcfg.all_vcomp.items():
-        vcomper = VCompJob(rcfg, vcomp, simulator)
-        vcomp_jobs[vcomp] = vcomper
+        btbj = None
+        for profile, group_tests in _group_analog_tests(test_list, analog_profiles):
+            tests = []
+            icfgs = []
+            vcomper = VCompJob(rcfg, vcomp, simulator, analog_profile=profile)
+            variant_key = vcomp + ("__analog_" + profile["key"][:20] if profile else "")
+            vcomp_jobs[variant_key] = vcomper
 
-        btbj = job_lib.BazelTBJob(
-            rcfg,
-            vcomp,
-            vcomper,
-            additional_targets=test_list.keys(),
-            prebuilt_targets=getattr(rcfg, "discovery_prebuilt_targets", ()),
-        )
-        btbj_jobs.append(btbj)
+            if btbj is None:
+                btbj = job_lib.BazelTBJob(
+                    rcfg,
+                    vcomp,
+                    vcomper,
+                    additional_targets=test_list.keys(),
+                    prebuilt_targets=getattr(rcfg, "discovery_prebuilt_targets", ()),
+                )
+                btbj_jobs.append(btbj)
+            else:
+                vcomper.add_dependency(btbj)
 
-        tests = []
-        icfgs = []
-        btcj = job_lib.BazelTestCfgJob(rcfg, test_list.keys(), vcomper, prebuilt=True)
-        btcj_jobs.append(btcj)
-        for test, iterations in test_list.items():
-            icfg = rv_utils.IterationCfg(iterations)
-            icfgs.append(icfg)
+            btcj = job_lib.BazelTestCfgJob(rcfg, group_tests.keys(), vcomper, prebuilt=True)
+            btcj_jobs.append(btcj)
+            for test, iterations in group_tests.items():
+                icfg = rv_utils.IterationCfg(iterations)
+                icfgs.append(icfg)
 
-            planned_iterations = [None] if dynamic_test_plan else range(1, iterations + 1)
-            for iteration in planned_iterations:
-                planned_seed = None
-                if not dynamic_test_plan and options.seed is None:
-                    planned_seed = planned_seeds[(vcomp, test, iteration)]
-                t = TestJob(rcfg,
-                            test,
-                            vcomper=vcomper,
-                            icfg=icfg,
-                            btcj=btcj,
-                            simulator=simulator,
-                            iteration=iteration,
-                            planned_seed=planned_seed)
-                tests.append(t)
-                t.add_dependency(btcj)
+                planned_iterations = [None] if dynamic_test_plan else range(1, iterations + 1)
+                for iteration in planned_iterations:
+                    planned_seed = None
+                    if not dynamic_test_plan and options.seed is None:
+                        planned_seed = planned_seeds[(vcomp, test, iteration)]
+                    t = TestJob(rcfg,
+                                test,
+                                vcomper=vcomper,
+                                icfg=icfg,
+                                btcj=btcj,
+                                simulator=simulator,
+                                iteration=iteration,
+                                planned_seed=planned_seed)
+                    tests.append(t)
+                    t.add_dependency(btcj)
 
-        rcfg.all_vcomp[vcomp] = (icfgs, tests)
+            runtime_vcomp[variant_key] = (icfgs, tests)
+
+    # Downstream summary/report/coverage consumers index vcomp_jobs using these
+    # keys. Keep one result group per actual compile job, including failed jobs.
+    # Discovery labels, Bazel targets and planned seed keys above remain public.
+    rcfg.all_vcomp = runtime_vcomp
 
     workflow_jobs = simulator.create_regression_jobs(vcomp_jobs)
 

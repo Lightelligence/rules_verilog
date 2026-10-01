@@ -7,6 +7,18 @@ from bin.args_parser import parse_args
 
 class ArgsParserValidationTest(unittest.TestCase):
 
+    def test_xrun_parallel_defaults_on_and_can_be_disabled(self):
+        self.assertTrue(parse_args([]).xrun_parallel)
+        options = parse_args(["--xrun-parallel", "--jobs", "2"])
+        self.assertTrue(options.xrun_parallel)
+        self.assertEqual(2, options.jobs)
+        self.assertIn("--xrun-parallel", options.xcelium_explicit_switches)
+        self.assertIn("--xrun-parallel", options.reproduce_args)
+        serial = parse_args(["--no-xrun-parallel"])
+        self.assertFalse(serial.xrun_parallel)
+        self.assertIn("--no-xrun-parallel", serial.xcelium_explicit_switches)
+        self.assertIn("--no-xrun-parallel", serial.reproduce_args)
+
     def assert_parse_error(self, argv):
         with contextlib.redirect_stderr(io.StringIO()):
             with self.assertRaises(SystemExit) as raised:
