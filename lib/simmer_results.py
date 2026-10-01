@@ -245,6 +245,82 @@ def _upsert_by_key(items, key, value):
     items.append(value)
 
 
+class _TestRecords(list):
+    """Ordered, JSON-compatible records with an in-memory lookup index."""
+
+    def __init__(self, records=()):
+        super().__init__(records)
+        self._index = None
+
+    @staticmethod
+    def _key(record):
+        return record.get("target"), record.get("iteration"), record.get("seed")
+
+    def upsert(self, record):
+        if self._index is None:
+            self._index = {}
+            for position, existing in enumerate(self):
+                # Keep first-match behavior for pre-existing duplicate keys.
+                self._index.setdefault(self._key(existing), position)
+        key = self._key(record)
+        position = self._index.get(key)
+        if position is None:
+            self._index[key] = len(self)
+            super().append(record)
+        else:
+            super().__setitem__(position, record)
+
+    # Ordinary list edits invalidate positions. Upsert maintains the index
+    # directly; JSON serialization still sees only the ordered records.
+    def __setitem__(self, key, value):
+        self._index = None
+        return super().__setitem__(key, value)
+
+    def __delitem__(self, key):
+        self._index = None
+        return super().__delitem__(key)
+
+    def append(self, value):
+        self._index = None
+        return super().append(value)
+
+    def extend(self, values):
+        self._index = None
+        return super().extend(values)
+
+    def insert(self, position, value):
+        self._index = None
+        return super().insert(position, value)
+
+    def pop(self, position=-1):
+        self._index = None
+        return super().pop(position)
+
+    def remove(self, value):
+        self._index = None
+        return super().remove(value)
+
+    def clear(self):
+        self._index = None
+        return super().clear()
+
+    def reverse(self):
+        self._index = None
+        return super().reverse()
+
+    def sort(self, *args, **kwargs):
+        self._index = None
+        return super().sort(*args, **kwargs)
+
+    def __iadd__(self, values):
+        self._index = None
+        return super().__iadd__(values)
+
+    def __imul__(self, count):
+        self._index = None
+        return super().__imul__(count)
+
+
 def record_compile_job(run, vcomp_job, status=None):
     if run is None:
         return
@@ -311,11 +387,10 @@ def record_test_job(run, test_job, waves_script=None, waves_path=None, status=No
         "error_message": getattr(test_job, "error_message", None),
     }
     _record_job_interval(test_record, test_job, stopped_at=stopped_at)
-    for index, existing in enumerate(run["tests"]):
-        if all(existing.get(key) == test_record.get(key) for key in ("target", "iteration", "seed")):
-            run["tests"][index] = test_record
-            return
-    run["tests"].append(test_record)
+    records = run["tests"]
+    if not isinstance(records, _TestRecords):
+        records = run["tests"] = _TestRecords(records)
+    records.upsert(test_record)
 
 
 def finalize_run(run, regression_log_path=None, backend_finalize_failed=False):
