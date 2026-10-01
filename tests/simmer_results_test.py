@@ -839,19 +839,18 @@ class SimmerResultsTest(unittest.TestCase):
         stored = simmer_results.load_store(self.project_dir)["last_run"]
         self.assertEqual("interrupted.log", stored["tests"][0]["stdout_log"])
 
-    def test_record_test_job_updates_existing_iteration(self):
-        run = simmer_results.create_run(["simmer"], self.rcfg, 1)
-        test_job = SimpleNamespace(
+    def _test_job(self, iteration=2, seed=17, target="//tests:smoke"):
+        return SimpleNamespace(
             duration_s=1,
             error_message=None,
-            iteration=2,
+            iteration=iteration,
             job_dir="sim",
             jobstatus=SimpleNamespace(name="PASSED"),
             name="smoke",
             rcfg=SimpleNamespace(options=SimpleNamespace(waves=None)),
-            seed=17,
+            seed=seed,
             simulation_duration_s=1,
-            target="//tests:smoke",
+            target=target,
             vcomper=SimpleNamespace(
                 bazel_vcomp_target="//tb:top",
                 job_dir="compile",
@@ -860,6 +859,10 @@ class SimmerResultsTest(unittest.TestCase):
             ),
             _log_path="stdout.log",
         )
+
+    def test_record_test_job_updates_existing_iteration(self):
+        run = simmer_results.create_run(["simmer"], self.rcfg, 1)
+        test_job = self._test_job()
         simmer_results.record_test_job(run, test_job)
         test_job.error_message = "post-processing failed"
         test_job.jobstatus = SimpleNamespace(name="FAILED")
@@ -868,6 +871,87 @@ class SimmerResultsTest(unittest.TestCase):
         self.assertEqual(1, len(run["tests"]))
         self.assertEqual("FAILED", run["tests"][0]["status"])
         self.assertEqual("post-processing failed", run["tests"][0]["error_message"])
+
+    def test_result_index_preserves_order_key_identity_and_run_isolation(self):
+        first = {"tests": [], "compile": []}
+        second = {"tests": [], "compile": []}
+        for iteration, seed, target in ((1, 17, "//tests:a"), (2, 17, "//tests:a"), (1, 18, "//tests:a"),
+                                        (1, 17, "//tests:b")):
+            simmer_results.record_test_job(first, self._test_job(iteration, seed, target))
+        job = self._test_job(1, 17, "//tests:a")
+        job.jobstatus = SimpleNamespace(name="INTERRUPTED")
+        simmer_results.record_test_job(first, job, simulation_started=True)
+        simmer_results.record_test_job(second, job)
+        self.assertEqual([("//tests:a", 1, 17), ("//tests:a", 2, 17), ("//tests:a", 1, 18), ("//tests:b", 1, 17)],
+                         [(record["target"], record["iteration"], record["seed"]) for record in first["tests"]])
+        self.assertEqual("INTERRUPTED", first["tests"][0]["status"])
+        self.assertEqual(1, len(second["tests"]))
+        # No tuple-key lookup index is included in the JSON-compatible result.
+        self.assertEqual(dict(first), json.loads(json.dumps(first)))
+        simmer_results.finalize_run(first)
+        simmer_results.save_run(self.project_dir, first)
+        stored = simmer_results.load_store(self.project_dir)["last_run"]
+        self.assertIs(type(stored["tests"]), list)
+        self.assertEqual(4, stored["summary"]["total"])
+
+    def test_existing_results_are_indexed_once_for_bulk_recording(self):
+        calls = []
+
+        class CountedRecord(dict):
+
+            def get(self, key, default=None):
+                calls.append(key)
+                return super().get(key, default)
+
+        run = {"tests": [CountedRecord(target="//tests:old", iteration=index, seed=17) for index in range(100)]}
+        for index in range(100):
+            simmer_results.record_test_job(run, self._test_job(index, target="//tests:new"))
+        self.assertEqual(200, len(run["tests"]))
+        # Bound accesses to the old records; repeatedly rescanning them would
+        # perform 10,000 or more accesses for these 100 new results.
+        self.assertLessEqual(len(calls), 3 * 100)
+
+    def test_result_index_rebuilds_after_list_edits_and_keeps_first_duplicate(self):
+        original = {"tests": [], "compile": []}
+        for index in (1, 2, 3):
+            simmer_results.record_test_job(original, self._test_job(index))
+        operations = (
+            lambda records: records.reverse(),
+            lambda records: records.sort(key=lambda record: -record["iteration"]),
+            lambda records: records.insert(0, dict(records[-1])),
+            lambda records: records.append(dict(records[0])),
+            lambda records: records.extend([dict(records[0])]),
+            lambda records: records.__iadd__([dict(records[0])]),
+            lambda records: records.__imul__(2),
+            lambda records: records.pop(0),
+            lambda records: records.remove(records[0]),
+            lambda records: records.__setitem__(0, dict(records[-1])),
+            lambda records: records.__setitem__(slice(None, 1), [dict(records[-1])]),
+            lambda records: records.__delitem__(0),
+            lambda records: records.__delitem__(slice(None, 1)),
+            lambda records: records.clear(),
+        )
+        for operation in operations:
+            with self.subTest(operation=operation):
+                # Convert the plain pre-existing list by recording once.
+                run = json.loads(json.dumps(original))
+                simmer_results.record_test_job(run, self._test_job(3))
+                operation(run["tests"])
+                before = json.loads(json.dumps(run["tests"]))
+                job = self._test_job(3)
+                job.jobstatus = SimpleNamespace(name="FAILED")
+                key = (job.target, job.iteration, job.seed)
+                position = next((index for index, record in enumerate(before)
+                                 if (record["target"], record["iteration"], record["seed"]) == key), None)
+                simmer_results.record_test_job(run, job)
+                self.assertEqual(len(before) + (position is None), len(run["tests"]))
+                if position is None:
+                    self.assertEqual(before, run["tests"][:-1])
+                    self.assertEqual("FAILED", run["tests"][-1]["status"])
+                else:
+                    self.assertEqual(before[:position], run["tests"][:position])
+                    self.assertEqual(before[position + 1:], run["tests"][position + 1:])
+                    self.assertEqual("FAILED", run["tests"][position]["status"])
 
 
 if __name__ == "__main__":

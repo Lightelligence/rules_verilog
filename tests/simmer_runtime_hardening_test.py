@@ -243,6 +243,39 @@ class SimmerRuntimeHardeningTest(unittest.TestCase):
             log_path.write_text("Average cycles/sec: 1,250\n", encoding="utf-8")
             self.assertEqual((None, "1,250"), test_job._get_stats_from_log_file())
 
+    def test_simulation_statistics_read_all_markers_once(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            log_path = Path(temporary_dir) / "stdout.log"
+            log_path.write_bytes(b"ordinary output\xff\r\n"
+                                 b"Test Duration: 00:00:01\r\nAverage cycles/sec: 1,234\r\n"
+                                 b"%I:sim: Simulation duration: 2 seconds\r\n"
+                                 b"prefix Test Duration: 01:02:03 Average cycles/sec: 2.5E+3\r\n"
+                                 b"  %I:sim: Simulation duration: 24 seconds  \r\n"
+                                 b"Test Duration: invalid\r\nAverage cycles/sec: invalid\r\n"
+                                 b"%I:sim: Simulation duration: -1 seconds\r\n")
+            test_job = simmer.TestJob.__new__(simmer.TestJob)
+            test_job._log_path = str(log_path)
+
+            with mock.patch("builtins.open", wraps=open) as read_log:
+                self.assertEqual(("01:02:03", "2.5E+3", 24), test_job._read_simulation_statistics())
+            read_log.assert_called_once()
+            self.assertEqual(3723, test_job.net_time)
+
+    def test_simulation_statistics_missing_markers_or_log(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            log_path = Path(temporary_dir) / "stdout.log"
+            test_job = simmer.TestJob.__new__(simmer.TestJob)
+            test_job._log_path = str(log_path)
+            self.assertEqual((None, None, None), test_job._read_simulation_statistics())
+            for content, expected in (
+                ("ordinary output\n", (None, None, None)),
+                ("%I:sim: Simulation duration: 0 seconds\n", (None, None, 0)),
+                ("Average cycles/sec: 1,250\n", (None, "1,250", None)),
+            ):
+                with self.subTest(content=content):
+                    log_path.write_text(content, encoding="utf-8")
+                    self.assertEqual(expected, test_job._read_simulation_statistics())
+
     def test_missing_simulator_statistics_are_omitted(self):
         self.assertEqual(
             "(00:00:31 sim_time / 00:00:30 total_time)",
@@ -937,9 +970,11 @@ class SimmerRuntimeHardeningTest(unittest.TestCase):
 
             with mock.patch("simmer.log", rcfg.log), \
                  mock.patch("simmer.simmer_results.record_test_job") as record_job, \
+                 mock.patch.object(test_job, "_read_simulation_statistics", wraps=test_job._read_simulation_statistics) as statistics, \
                  mock.patch("simmer.sim_artifacts.write_executable_script") as write_viewer:
                 test_job.post_run()
 
+            statistics.assert_called_once_with()
             self.assertEqual(simmer.JobStatus.FAILED, test_job.jobstatus)
             self.assertIn(str(missing_wave), test_job.error_message)
             simulator.cleanup_test_coverage.assert_called_once_with(test_job)

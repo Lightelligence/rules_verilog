@@ -1194,8 +1194,7 @@ class TestJob(Job):
         super(TestJob, self).post_run()
 
         # Parse simulator statistics and simmer's duration marker from stdout.log.
-        net_time_str, cps_str = self._get_stats_from_log_file()
-        self.simulation_duration_s = self._read_simulation_duration()
+        net_time_str, cps_str, self.simulation_duration_s = self._read_simulation_statistics()
         self.job_time = self.simulation_duration_s or 0
         sim_time_str = self._format_duration(self.job_time)
         total_time_str = self._get_total_time_str()
@@ -1319,38 +1318,42 @@ class TestJob(Job):
         return self._format_duration(self.job_time)
 
     def _read_simulation_duration(self):
-        duration_re = re.compile(r'^%I:sim: Simulation duration: (?P<duration>[0-9]+) seconds$')
-        duration = None
-        try:
-            with open(self._log_path, "r", encoding="utf-8", errors="ignore") as filep:
-                for line in filep:
-                    match = duration_re.match(line.strip())
-                    if match:
-                        duration = int(match.group('duration'))
-            return duration
-        except OSError:
-            return None
+        return self._read_simulation_statistics()[2]
 
     def _get_stats_from_log_file(self):
+        return self._read_simulation_statistics()[:2]
+
+    def _read_simulation_statistics(self):
+        """Collect all timing markers in one pass, retaining the last match."""
         duration_re = re.compile(r'Test Duration:\s*(?P<duration>[0-9]+:[0-9]{2}:[0-9]{2})')
         cps_re = re.compile(r'Average cycles/sec:\s*(?P<cps>[0-9][0-9,]*(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)')
+        simulation_re = re.compile(r'^%I:sim: Simulation duration: (?P<duration>[0-9]+) seconds$')
         duration = None
         cps = None
+        simulation_duration = None
         try:
             with open(self._log_path, 'r', encoding="utf8", errors='ignore') as log_file:
                 for line in log_file:
-                    duration_match = duration_re.search(line)
-                    if duration_match:
-                        duration = duration_match.group('duration')
-                    cps_match = cps_re.search(line)
-                    if cps_match:
-                        cps = cps_match.group('cps')
+                    # Most lines are ordinary simulator output. Skip regexes
+                    # when their required literal marker is absent.
+                    if 'Test Duration:' in line:
+                        duration_match = duration_re.search(line)
+                        if duration_match:
+                            duration = duration_match.group('duration')
+                    if 'Average cycles/sec:' in line:
+                        cps_match = cps_re.search(line)
+                        if cps_match:
+                            cps = cps_match.group('cps')
+                    if '%I:sim: Simulation duration:' in line:
+                        simulation_match = simulation_re.match(line.strip())
+                        if simulation_match:
+                            simulation_duration = int(simulation_match.group('duration'))
         except OSError:
-            return None, None
+            return None, None, None
         if duration is not None:
             hours, minutes, seconds = map(int, duration.split(':'))
             self.net_time = 3600 * hours + 60 * minutes + seconds
-        return duration, cps
+        return duration, cps, simulation_duration
 
     @property
     def log_path(self):
