@@ -15,14 +15,16 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock
 
-
 ROOT = Path(__file__).resolve().parents[1]
 TREE = ast.parse((ROOT / "bin/simmer.py").read_text(encoding="utf-8"))
-FUNCTIONS = [node for node in TREE.body if isinstance(node, ast.FunctionDef)
-             and node.name in {"_analog_profile", "_load_analog_profiles", "_group_analog_tests"}]
+FUNCTIONS = [
+    node for node in TREE.body if isinstance(node, ast.FunctionDef)
+    and node.name in {"_analog_profile", "_load_analog_profiles", "_group_analog_tests"}
+]
 
 
 class AnalogFileTest(unittest.TestCase):
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
@@ -34,14 +36,12 @@ class AnalogFileTest(unittest.TestCase):
         path = self.root / name
         if not path.exists():
             path.write_text("simulator lang=spectre\n", encoding="utf-8")
-        return self.ns["_analog_profile"](
-            dict(schema_version=1, entry=name, inputs=[name, *extra]), str(self.root))
+        return self.ns["_analog_profile"](dict(schema_version=1, entry=name, inputs=[name, *extra]), str(self.root))
 
     def test_same_input_reuses_group_different_file_splits_and_keeps_iterations(self):
         dc = self.profile()
         step = self.profile("step.scs")
-        groups = self.ns["_group_analog_tests"](
-            {"a": 2, "b": 3, "c": 1, "legacy": 4}, {"a": dc, "b": dc, "c": step})
+        groups = self.ns["_group_analog_tests"]({"a": 2, "b": 3, "c": 1, "legacy": 4}, {"a": dc, "b": dc, "c": step})
         self.assertEqual([g[1] for g in groups], [{"a": 2, "b": 3}, {"c": 1}, {"legacy": 4}])
 
     def test_data_content_invalidates_variant_and_order_does_not(self):
@@ -69,35 +69,50 @@ class AnalogFileTest(unittest.TestCase):
         package = self.root / "bench"
         package.mkdir()
         (package / "case_analog_config.json").write_text(json.dumps(
-            dict(schema_version=1, entry="dc.scs", inputs=["dc.scs"])), encoding="utf-8")
+            dict(schema_version=1, entry="dc.scs", inputs=["dc.scs"])),
+                                                         encoding="utf-8")
         self.ns["get_bazel_bin"] = lambda project: str(self.root)
         self.ns["subprocess"].run.return_value = SimpleNamespace(stdout=str(self.root))
         rcfg = SimpleNamespace(proj_dir=str(self.root), all_vcomp={"//bench:tb": {"//bench:case": 1}})
         opts = SimpleNamespace(no_bazel=False, no_compile=False, simulator="XRUN", emulator="")
         result = self.ns["_load_analog_profiles"](rcfg, opts)
         self.assertEqual(result["//bench:case"]["entry"], str(self.root / "dc.scs"))
-        self.assertEqual(self.ns["subprocess"].run.call_args_list[0].args[0],
-                         ["bazel", "build", "//bench:case"])
+        self.assertEqual(self.ns["subprocess"].run.call_args_list[0].args[0], ["bazel", "build", "//bench:case"])
         opts.simulator = "VCS"
         with self.assertRaisesRegex(ValueError, "standard XRUN"):
             self.ns["_load_analog_profiles"](rcfg, opts)
 
     def test_real_scheduler_routes_each_test_to_its_variant(self):
         main = next(n for n in TREE.body if isinstance(n, ast.FunctionDef) and n.name == "main")
-        loop = next(n for n in main.body if isinstance(n, ast.For) and isinstance(n.target, ast.Tuple)
-                    and any(isinstance(c, ast.For) and isinstance(c.target, ast.Tuple)
-                            and ast.unparse(c.target) == "(profile, group_tests)" for c in n.body))
+        loop = next(n for n in main.body if isinstance(n, ast.For) and isinstance(n.target, ast.Tuple) and any(
+            isinstance(c, ast.For) and isinstance(c.target, ast.Tuple)
+            and ast.unparse(c.target) == "(profile, group_tests)" for c in n.body))
         dc, step = self.profile(), self.profile("step.scs")
         rcfg = SimpleNamespace(all_vcomp={"//bench:tb": {"a": 1, "b": 2, "c": 1}})
+
         def compile_job(rcfg, target, simulator, analog_profile=None):
             return SimpleNamespace(target=target, profile=analog_profile, add_dependency=Mock())
+
         def test_job(rcfg, target, **kwargs):
             return SimpleNamespace(target=target, **kwargs, add_dependency=Mock())
-        ns = dict(self.ns, rcfg=rcfg, analog_profiles={"a": dc, "b": dc, "c": step},
-                  VCompJob=compile_job, TestJob=test_job, simulator=object(),
+
+        ns = dict(self.ns,
+                  rcfg=rcfg,
+                  analog_profiles={
+                      "a": dc,
+                      "b": dc,
+                      "c": step
+                  },
+                  VCompJob=compile_job,
+                  TestJob=test_job,
+                  simulator=object(),
                   job_lib=SimpleNamespace(BazelTBJob=Mock(), BazelTestCfgJob=Mock()),
                   rv_utils=SimpleNamespace(IterationCfg=lambda iterations: iterations),
-                  vcomp_jobs={}, runtime_vcomp={}, btbj_jobs=[], btcj_jobs=[], dynamic_test_plan=False,
+                  vcomp_jobs={},
+                  runtime_vcomp={},
+                  btbj_jobs=[],
+                  btcj_jobs=[],
+                  dynamic_test_plan=False,
                   options=SimpleNamespace(seed=7))
         exec(compile(ast.Module(body=[loop], type_ignores=[]), "simmer.py", "exec"), ns)
         tests = [test for _, group in ns["runtime_vcomp"].values() for test in group]
@@ -116,32 +131,44 @@ class AnalogFileTest(unittest.TestCase):
 
     def test_summary_keys_for_single_variant_legacy_and_mixed_runs(self):
         main = next(n for n in TREE.body if isinstance(n, ast.FunctionDef) and n.name == "main")
-        start = next(i for i, n in enumerate(main.body) if isinstance(n, ast.Assign)
-                     and ast.unparse(n.targets[0]) == "runtime_vcomp")
-        stop = next(i for i, n in enumerate(main.body[start:], start) if isinstance(n, ast.Assign)
-                    and ast.unparse(n.targets[0]) == "rcfg.all_vcomp")
+        start = next(i for i, n in enumerate(main.body)
+                     if isinstance(n, ast.Assign) and ast.unparse(n.targets[0]) == "runtime_vcomp")
+        stop = next(i for i, n in enumerate(main.body[start:], start)
+                    if isinstance(n, ast.Assign) and ast.unparse(n.targets[0]) == "rcfg.all_vcomp")
         scheduler = compile(ast.Module(body=main.body[start:stop + 1], type_ignores=[]), "simmer.py", "exec")
         dc, step = self.profile(), self.profile("step.scs")
-        scenarios = [({"a": 1}, {"a": dc}), ({"a": 1}, {}),
-                     ({"a": 2, "b": 1, "c": 1}, {"a": dc, "b": step})]
+        scenarios = [({"a": 1}, {"a": dc}), ({"a": 1}, {}), ({"a": 2, "b": 1, "c": 1}, {"a": dc, "b": step})]
         for selected, profiles in scenarios:
             with self.subTest(selected=selected, profiles=list(profiles)):
                 public_tb = "//bench:tb"
                 rcfg = SimpleNamespace(all_vcomp={public_tb: selected})
+
                 def compile_job(rcfg, target, simulator, analog_profile=None):
-                    return SimpleNamespace(bazel_vcomp_target=target, profile=analog_profile,
-                        jobstatus="FAILED" if analog_profile is step else "PASSED", add_dependency=Mock())
+                    return SimpleNamespace(bazel_vcomp_target=target,
+                                           profile=analog_profile,
+                                           jobstatus="FAILED" if analog_profile is step else "PASSED",
+                                           add_dependency=Mock())
+
                 def test_job(rcfg, target, **kwargs):
                     job = SimpleNamespace(target=target, **kwargs, add_dependency=Mock())
                     kwargs["icfg"].jobs.append(job)
                     return job
-                seeds = {(public_tb, test, i): 100 + i for test, count in selected.items()
-                         for i in range(1, count + 1)}
-                ns = dict(self.ns, rcfg=rcfg, analog_profiles=profiles, VCompJob=compile_job,
-                    TestJob=test_job, simulator=object(), vcomp_jobs={}, btbj_jobs=[], btcj_jobs=[],
-                    job_lib=SimpleNamespace(BazelTBJob=Mock(), BazelTestCfgJob=Mock()),
-                    rv_utils=SimpleNamespace(IterationCfg=lambda n: SimpleNamespace(target=n, jobs=[])),
-                    dynamic_test_plan=False, options=SimpleNamespace(seed=None), planned_seeds=seeds)
+
+                seeds = {(public_tb, test, i): 100 + i for test, count in selected.items() for i in range(1, count + 1)}
+                ns = dict(self.ns,
+                          rcfg=rcfg,
+                          analog_profiles=profiles,
+                          VCompJob=compile_job,
+                          TestJob=test_job,
+                          simulator=object(),
+                          vcomp_jobs={},
+                          btbj_jobs=[],
+                          btcj_jobs=[],
+                          job_lib=SimpleNamespace(BazelTBJob=Mock(), BazelTestCfgJob=Mock()),
+                          rv_utils=SimpleNamespace(IterationCfg=lambda n: SimpleNamespace(target=n, jobs=[])),
+                          dynamic_test_plan=False,
+                          options=SimpleNamespace(seed=None),
+                          planned_seeds=seeds)
                 exec(scheduler, ns)
                 self.assertEqual(set(rcfg.all_vcomp), set(ns["vcomp_jobs"]))
                 count = 0
@@ -169,10 +196,9 @@ class AnalogFileTest(unittest.TestCase):
         common.write_text("amscf.scs\n", encoding="utf-8")
         cls = next(n for n in TREE.body if isinstance(n, ast.ClassDef) and n.name == "VCompJob")
         pre_run = next(n for n in cls.body if isinstance(n, ast.FunctionDef) and n.name == "pre_run")
-        selected = next(n for n in pre_run.body if isinstance(n, ast.If)
-                        and ast.unparse(n.test) == "self.analog_profile")
-        job = SimpleNamespace(analog_profile=profile, job_dir=str(job_dir),
-                              bazel_compile_args=str(common), name="tb")
+        selected = next(n for n in pre_run.body
+                        if isinstance(n, ast.If) and ast.unparse(n.test) == "self.analog_profile")
+        job = SimpleNamespace(analog_profile=profile, job_dir=str(job_dir), bazel_compile_args=str(common), name="tb")
         ns = dict(self.ns, self=job, log=Mock())
         code = compile(ast.Module(body=[selected], type_ignores=[]), "simmer.py", "exec")
         exec(code, ns)
@@ -197,22 +223,42 @@ class AnalogFileTest(unittest.TestCase):
         # Evaluate the pure rule implementation with Bazel value/action doubles.
         # Actual Bazel attr/provider validation still requires the full workspace.
         rule_tree = ast.parse((ROOT / "verilog/private/dv.bzl").read_text(encoding="utf-8"))
-        selected = [n for n in rule_tree.body if isinstance(n, ast.FunctionDef)
-                    and n.name in {"_build_test_runtime_options", "_verilog_dv_test_cfg_impl"}]
+        selected = [
+            n for n in rule_tree.body if isinstance(n, ast.FunctionDef)
+            and n.name in {"_build_test_runtime_options", "_verilog_dv_test_cfg_impl"}
+        ]
+
         def depset(files):
             return SimpleNamespace(to_list=lambda: list({getattr(f, "path", str(f)): f for f in files}.values()))
-        ns = dict(json=SimpleNamespace(encode=json.dumps), depset=depset,
-                  DVTestInfo=SimpleNamespace, DefaultInfo=lambda **kw: kw, DVTBInfo=object(),
+
+        ns = dict(json=SimpleNamespace(encode=json.dumps),
+                  depset=depset,
+                  DVTestInfo=SimpleNamespace,
+                  DefaultInfo=lambda **kw: kw,
+                  DVTBInfo=object(),
                   fail=lambda message: (_ for _ in ()).throw(ValueError(message)))
         exec(compile(ast.Module(body=selected, type_ignores=[]), "dv.bzl", "exec"), ns)
+
         def configure(entry=None, data=(), parents=(), simulator="XRUN"):
             writes = []
             ctx = SimpleNamespace(
                 label="//test:case",
-                attr=SimpleNamespace(inherits=[{SimpleNamespace: p} for p in parents],
-                    uvm_testname="", tb=None, simulator=simulator, timeout=-1, pre_run="",
-                    description="", sim_opts={}, abstract=True, name="case", tags=[], sockets={}),
-                file=SimpleNamespace(analog_file=entry), files=SimpleNamespace(analog_data=list(data)),
+                attr=SimpleNamespace(inherits=[{
+                    SimpleNamespace: p
+                } for p in parents],
+                                     uvm_testname="",
+                                     tb=None,
+                                     simulator=simulator,
+                                     timeout=-1,
+                                     pre_run="",
+                                     description="",
+                                     sim_opts={},
+                                     abstract=True,
+                                     name="case",
+                                     tags=[],
+                                     sockets={}),
+                file=SimpleNamespace(analog_file=entry),
+                files=SimpleNamespace(analog_data=list(data)),
                 outputs=SimpleNamespace(dynamic_args="dynamic", analog_config="analog"),
                 actions=SimpleNamespace(write=lambda **kw: writes.append(kw)),
                 runfiles=lambda **kw: kw,
@@ -220,6 +266,7 @@ class AnalogFileTest(unittest.TestCase):
             result = ns["_verilog_dv_test_cfg_impl"](ctx)
             manifest = json.loads(next(w["content"] for w in writes if w["output"] == "analog"))
             return result[0], manifest
+
         dc = SimpleNamespace(path="analog/dc.scs")
         step = SimpleNamespace(path="analog/step.scs")
         wave = SimpleNamespace(path="analog/wave.txt")
