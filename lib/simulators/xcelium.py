@@ -177,6 +177,10 @@ class XceliumSimulator(SimulatorInterface):
 
     def get_compile_fingerprint_inputs(self, vcomp_job):
         inputs = super().get_compile_fingerprint_inputs(vcomp_job)
+        profile = getattr(vcomp_job, "analog_profile", None)
+        if profile:
+            inputs["extra_input_paths"].extend(profile["inputs"])
+            inputs["environment"]["ANALOG_FILE_KEY"] = profile["key"]
         if self.options.coverage and self.options.covfile_was_explicit:
             inputs["extra_input_paths"].append(self.options.covfile)
         inputs["environment"]["XCELIUMHOME"] = os.environ.get("XCELIUMHOME", "")
@@ -380,10 +384,24 @@ class XceliumSimulator(SimulatorInterface):
                 runtime_jobs.setdefault(os.path.normcase(os.path.realpath(path)), vcomp_job)
         for runtime_path, vcomp_job in sorted(runtime_jobs.items()):
             vcomp_job.acquire_shared_runtime_lock(runtime_path)
+        if self._parallel_test_runs_enabled():
+            log.info("XRUN same-database parallel simulation enabled; --jobs limits concurrency. "
+                     "Each test uses its own working directory; shared-directory locks remain held.")
+        else:
+            log.info("XRUN tests sharing a compile database are serialized. "
+                     "Parallel execution was disabled or this flow requires serialization.")
+
+    def _parallel_test_runs_enabled(self):
+        # Ordinary batch runs default to parallel. Special flows remain serial;
+        # validation rejects an explicit request to parallelize those flows.
+        return getattr(self.options, "xrun_parallel", True) and not any(
+            getattr(self.options, name, None)
+            for name in ("gui", "coverage", "mce", "msie", "msie_href", "msie_prim", "msie_incr", "emulator"))
 
     def get_test_exclusive_resource(self, test_job):
-        # Separate run directories do not establish that the shared XRUN DB is
-        # immutable. Serialize its users until licensed validation proves that.
+        # Keep an explicit serial fallback for flows with shared writable outputs.
+        if self._parallel_test_runs_enabled():
+            return None
         return ("XRUN", os.path.normcase(os.path.realpath(test_job.vcomper.job_dir)))
 
     def prepare_compile_execution(self, vcomp_job, reusing_compile):

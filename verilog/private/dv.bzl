@@ -10,6 +10,8 @@ load(":verilog.bzl", "VerilogInfo", "gather_shell_defines", "get_transitive_srcs
 
 DVTestInfo = provider("Runtime configuration for a DV test.", fields = {
     "sim_opts": "Simulation :options to carry forward.",
+    "analog_file": "Optional test-specific SCS entry file.",
+    "analog_data": "Files required by the test-specific SCS.",
     "uvm_testname": "UVM Test Name; passed to simulator via plusarg +UVM_TESTNAME.",
     "tb": "The verilog_dv_tb (verilog compile) associated with this test. Must be a Label of type verilog_dv_tb.",
     "simulator": "Simulator selected for this test configuration.",
@@ -152,6 +154,19 @@ def _verilog_dv_test_cfg_impl(ctx):
     elif len(parent_pre_run):
         pre_run = parent_pre_run[0]
 
+    parent_analog = [dep[DVTestInfo] for dep in reversed(ctx.attr.inherits) if dep[DVTestInfo].analog_file != None]
+    analog_file = ctx.file.analog_file
+    analog_data = ctx.files.analog_data
+    if analog_file == None and parent_analog:
+        analog_file = parent_analog[0].analog_file
+        analog_data = parent_analog[0].analog_data + analog_data
+    if analog_file != None and simulator not in [None, "XRUN"]:
+        fail("analog_file is supported only by XRUN")
+    if analog_file == None and analog_data:
+        fail("analog_data requires analog_file directly or through inherits")
+    provider_args["analog_file"] = analog_file
+    provider_args["analog_data"] = analog_data
+
     description = None
     if ctx.attr.description:
         description = ctx.attr.description
@@ -189,7 +204,22 @@ def _verilog_dv_test_cfg_impl(ctx):
         output = out,
         content = str(dynamic_args),
     )
-    return [DVTestInfo(**provider_args)]
+    analog_inputs = depset(([analog_file] if analog_file else []) + analog_data).to_list()
+    ctx.actions.write(
+        output = ctx.outputs.analog_config,
+        content = json.encode({
+            "schema_version": 1,
+            "entry": analog_file.path if analog_file else "",
+            "inputs": [file.path for file in analog_inputs],
+        }),
+    )
+    return [
+        DVTestInfo(**provider_args),
+        DefaultInfo(
+            files = depset([out, ctx.outputs.analog_config] + analog_inputs),
+            runfiles = ctx.runfiles(files = analog_inputs),
+        ),
+    ]
 
 _verilog_dv_test_cfg_rule = rule(
     doc = """A DV test configuration.
@@ -202,6 +232,14 @@ _verilog_dv_test_cfg_rule = rule(
     """,
     implementation = _verilog_dv_test_cfg_impl,
     attrs = {
+        "analog_file": attr.label(
+            allow_single_file = [".scs"],
+            doc = "Optional XRUN test-specific analog SCS file. Inheritable; explicit selection replaces the parent's file and data. This is a compile input, not a sim_opts flag.",
+        ),
+        "analog_data": attr.label_list(
+            allow_files = True,
+            doc = "Declare every include, model or waveform data file used by analog_file. Added to inherited data when analog_file is inherited.",
+        ),
         "abstract": attr.bool(
             default = False,
             doc = "When True, this configuration is abstract and does not represent a complete configuration.\n" +
@@ -278,6 +316,7 @@ _verilog_dv_test_cfg_rule = rule(
     },
     outputs = {
         "dynamic_args": "%{name}_dynamic_args.py",
+        "analog_config": "%{name}_analog_config.json",
     },
 )
 
@@ -288,12 +327,16 @@ def _gatesim_target(label, corner):
     target = value.rsplit("/", 1)[-1]
     return "{}:{}_{}".format(value, target, corner)
 
-def verilog_dv_test_cfg(name = None, tags = None, abstract = None, inherits = None, uvm_testname = None, tb = None, simulator = None, sim_opts = None, no_run = None, sockets = None, pre_run = None, timeout = None, description = None, gls_tb = None, pre_opts = None, post_opts = None, gatesim_modes = GATESIM_MODES):
+def verilog_dv_test_cfg(name = None, tags = None, abstract = None, inherits = None, uvm_testname = None, tb = None, simulator = None, sim_opts = None, no_run = None, sockets = None, pre_run = None, timeout = None, description = None, gls_tb = None, pre_opts = None, post_opts = None, gatesim_modes = GATESIM_MODES, analog_file = None, analog_data = None):
     sim_opts = dict(sim_opts) if sim_opts != None else {}
     pre_opts = dict(pre_opts) if pre_opts != None else {}
     post_opts = dict(post_opts) if post_opts != None else {}
 
     rule_args = {}
+    if analog_file != None:
+        rule_args["analog_file"] = analog_file
+    if analog_data != None:
+        rule_args["analog_data"] = analog_data
     if name != None:
         rule_args["name"] = name
     if abstract != None:
