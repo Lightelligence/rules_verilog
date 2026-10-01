@@ -374,6 +374,8 @@ def _analog_profile(config, execution_root):
 def _load_analog_profiles(rcfg, options):
     """Materialize test metadata before constructing the compile dependency graph."""
     targets = sorted({test for tests in rcfg.all_vcomp.values() for test in tests})
+    if not targets:
+        return {}
     prebuilt = set(getattr(rcfg, "discovery_prebuilt_targets", ()))
     missing = [target for target in targets if target not in prebuilt]
     if missing and not (options.no_bazel or options.no_compile):
