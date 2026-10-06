@@ -24,13 +24,16 @@ SOCKET_SIDECAR_GROUPS_FILE={{ job.sidecar_process_groups_path|shell_quote }}
 : > "$SOCKET_SIDECAR_GROUPS_FILE"
 function read_socket_process_stat {
     local stat_line
+    local IFS=$' \t\n'
     local -a stat_lines
     # Buffer procfs reads before splitting the identity fields.
     mapfile -t stat_lines 2>/dev/null < "$1" || return 1
     stat_line="${stat_lines[*]:-}"
     # comm may contain whitespace or parentheses; fields follow the final ') '.
     [[ "$stat_line" == *') '* ]] || return 1
-    read -r -a SOCKET_PROCESS_STAT_FIELDS <<< "${stat_line##*) }"
+    # Kernel fields after comm are status/numeric tokens. Split them directly,
+    # avoiding a here-string for every process on older Bash versions.
+    SOCKET_PROCESS_STAT_FIELDS=(${stat_line##*) })
     [ -n "${SOCKET_PROCESS_STAT_FIELDS[19]:-}" ]
 }
 declare -a SOCKET_PROCESS_STAT_FIELDS
