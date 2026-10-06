@@ -24,7 +24,11 @@ SOCKET_SIDECAR_GROUPS_FILE={{ job.sidecar_process_groups_path|shell_quote }}
 : > "$SOCKET_SIDECAR_GROUPS_FILE"
 function read_socket_process_stat {
     local stat_line
-    IFS= read -r stat_line 2>/dev/null < "$1" || return 1
+    local -a stat_lines
+    # mapfile buffers procfs reads; read consumes these non-seekable files one
+    # character at a time on the supported Bash versions.
+    mapfile -t stat_lines 2>/dev/null < "$1" || return 1
+    stat_line="${stat_lines[*]}"
     # comm may contain whitespace or parentheses; fields follow the final ') '.
     [[ "$stat_line" == *') '* ]] || return 1
     read -r -a SOCKET_PROCESS_STAT_FIELDS <<< "${stat_line##*) }"
