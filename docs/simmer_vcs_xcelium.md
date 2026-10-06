@@ -275,6 +275,35 @@ or packages in a VCS optconfig file as described below. A `makelib` string is
 not sufficient to generate that config because one library may contain several
 cells and packages.
 
+### Two-step cache preparation and input processing
+
+The normal VCS flow continues to use one `vcs` build command with `-Mupdate`
+and the selected Partition Compile settings. These optimizations do not enable
+three-step analysis or split legacy macro compilation units.
+
+- VCS cache preparation uses a single background control slot while simulations
+  or another build are running. A cache hit bypasses the compiler without
+  waiting for the simulation CPU allocation; a miss still waits for exclusive
+  compile admission. Input fingerprints are refreshed after an admission wait.
+  Compile-directory locks remain held through validation and execution, and
+  cancellation releases prepared resources.
+- Repeated custom-filelist include/library directories are listed once within
+  one discovery call. Directory contents remain conservatively tracked; no
+  extension filter or persistent timestamp-only shortcut is used.
+- Shared VCS content indices reuse child hashes along `deps`/`shells`, including
+  diamond dependency graphs. Source edits still invalidate the relevant Bazel
+  actions; parent inventories remain complete and canonical.
+- External compile-input hashes use bounded chunked reads. The fingerprint
+  format and content identities remain unchanged.
+- Discovery retains complete metadata for the requested bench scope, but builds
+  only the test configs and testbenches selected by test globs and tags. Cached
+  discovery also refreshes those selected outputs unless `--no-bazel` applies.
+
+Two-step source analysis remains a single compiler invocation. Fine-grained
+analysis groups and independent frozen analysis options require a different
+staging model and are not provided by these optimizations. Use stable
+`--dir-suffix` values when preserving separate coverage/debug build profiles.
+
 ### VCS three-step incremental analysis
 
 Partition Compile reuses elaborated partitions, but the default VCS two-step

@@ -112,7 +112,7 @@ class RegressionConfig():
                 self.log.debug("Matching discovery cache unavailable; refreshing Bazel metadata once")
             self._profile_step(
                 "test_discovery_all",
-                "bazel query/cquery/build test cfg metadata",
+                "bazel query/cquery metadata and selected artifacts",
                 self.test_discovery_all,
             )
         self._profile_step(
@@ -746,7 +746,6 @@ class RegressionConfig():
             return
 
         test_queries = ["({})".format(self._build_test_cfg_query(vcomp)) for vcomp in sorted(self.all_vcomp)]
-        query_results = []
         matching_tests = []
         for query_chunk in self._chunk_arguments(test_queries):
             combined_test_query = " union ".join(query_chunk)
@@ -786,24 +785,7 @@ class RegressionConfig():
                     test_package = test.rsplit(":", 1)[0]
                     expected_package = vcomp.rsplit(":", 1)[0] + "/tests"
                     if test_package == expected_package or test_package.startswith(expected_package + "/"):
-                        query_results.append(test)
                         matching_tests.append((test, vcomp, tags, simulator))
-        query_results = list(dict.fromkeys(query_results))
-
-        discovery_build_targets = list(query_results)
-        if not self.options.no_compile:
-            discovery_build_targets.extend(sorted(self.all_vcomp))
-        discovery_build_targets = list(dict.fromkeys(discovery_build_targets))
-
-        for target_chunk in self._chunk_arguments(discovery_build_targets):
-            dtp.reset()
-            returncode, stdout, stderr = self._run_command(["bazel", "build", *target_chunk])
-            dtp.stop_and_print()
-            if returncode:
-                self.log.critical("bazel test discovery failed:\n%s", stderr)
-                raise RuntimeError("bazel test discovery failed: {}".format(stderr))
-        self.discovery_prebuilt_targets = set(discovery_build_targets)
-
         # cquery emits providers on every invocation, including no-op builds.
         # Aspect print() output is not replayed from Bazel's analysis cache.
         self.tests_to_tags = {test_name: tags for test_name, _, tags, _ in matching_tests}
@@ -811,6 +793,10 @@ class RegressionConfig():
         for test_name, vcomp, _, _ in matching_tests:
             if vcomp in self.all_vcomp:
                 self.all_vcomp[vcomp][test_name] = 0
+
+        # Keep complete metadata in the scoped cache, but materialize only
+        # requested artifacts while still inside the source-consistency check.
+        self._build_selected_discovery_targets(self._select_requested_tests())
 
         # Log discovered tests in table format
         table_output = []
@@ -827,31 +813,39 @@ class RegressionConfig():
 
         self.log.debug("Tests available:\n%s", "\n".join(table_output))
 
-    def test_discovery_match(self):
-        """
-        Match tests based on command line arguments and tags
-        Filters the discovered tests to those that should be run
-        """
-        # Load test information from JSON files if using no_compile or no_bazel
-        if self.use_cached_discovery:
-            cached_discovery = getattr(self, "_cached_discovery", None)
-            if cached_discovery is None:
-                cached_discovery = self._load_discovery_cache_generation()[:3]
-            self.all_vcomp, self.tests_to_tags, self.tests_to_simulator = cached_discovery
+    def _build_selected_discovery_targets(self, selected):
+        """Build selected artifacts without narrowing the complete metadata cache."""
+        targets = list(dict.fromkeys(test for tests in selected.values() for test in tests))
+        if not self.options.no_compile:
+            targets.extend(sorted(selected))
+        targets = list(dict.fromkeys(targets))
+        self.discovery_prebuilt_targets = set()
+        dtp = rv_utils.DatetimePrinter(self.log)
+        for target_chunk in self._chunk_arguments(targets):
+            dtp.reset()
+            returncode, _stdout, stderr = self._run_command(["bazel", "build", *target_chunk])
+            dtp.stop_and_print()
+            if returncode:
+                self.log.critical("bazel test discovery failed:\n%s", stderr)
+                raise RuntimeError("bazel test discovery failed: {}".format(stderr))
+        self.discovery_prebuilt_targets = set(targets)
 
+    def _select_requested_tests(self):
+        """Select into a fresh mapping so cache metadata and counts stay independent."""
+        selected = {vcomp: dict.fromkeys(tests, 0) for vcomp, tests in self.all_vcomp.items()}
         # Process each test specification from command line
         for ta in self.options.tests:
             bglob, tglob, iterations = self._split_btglob(ta.btiglob)
 
             # Find matching vcomponents
             query = "*:{}".format(bglob)
-            vcomp_match = fnmatch.filter(self.all_vcomp.keys(), query)
+            vcomp_match = fnmatch.filter(selected.keys(), query)
 
             self.log.debug("Looking for tests matching %s", ta)
 
             # Process each matching vcomponent
             for vcomp in vcomp_match:
-                tests = self.all_vcomp[vcomp]
+                tests = selected[vcomp]
                 query = "*:{}".format(tglob)
                 test_match = fnmatch.filter(tests, query)
                 for test in test_match:
@@ -881,9 +875,27 @@ class RegressionConfig():
                     tests[test] = new_max
 
         # Remove inactive tests and vcomponents
-        for vcomp, tests in self.all_vcomp.items():
-            self.all_vcomp[vcomp] = dict([(t, i) for t, i in tests.items() if i])
-        self.all_vcomp = dict([(vcomp, tests) for vcomp, tests in self.all_vcomp.items() if len(tests)])
+        for vcomp, tests in selected.items():
+            selected[vcomp] = dict([(t, i) for t, i in tests.items() if i])
+        return {vcomp: tests for vcomp, tests in selected.items() if tests}
+
+    def test_discovery_match(self):
+        """
+        Match tests based on command line arguments and tags
+        Filters the discovered tests to those that should be run
+        """
+        # Load test information from JSON files if using no_compile or no_bazel
+        if self.use_cached_discovery:
+            cached_discovery = getattr(self, "_cached_discovery", None)
+            if cached_discovery is None:
+                cached_discovery = self._load_discovery_cache_generation()[:3]
+            self.all_vcomp, self.tests_to_tags, self.tests_to_simulator = cached_discovery
+
+        self.all_vcomp = self._select_requested_tests()
+        # Cached metadata says which tests exist, not whether their current
+        # source/runfiles outputs have been built. Refresh selected artifacts.
+        if self.use_cached_discovery and not self.options.no_bazel:
+            self._build_selected_discovery_targets(self.all_vcomp)
 
         # Log final list of tests to run
         table_output = []

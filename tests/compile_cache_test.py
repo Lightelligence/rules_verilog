@@ -1,3 +1,4 @@
+import hashlib
 import os
 import subprocess
 import sys
@@ -13,6 +14,60 @@ from lib.compile_cache import (CompileDirectoryLock, can_reuse_compile, compile_
 
 
 class CompileCacheTest(unittest.TestCase):
+
+    def test_extra_input_streaming_preserves_identity_and_duplicate_paths(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            large = root / "large.cfg"
+            large.write_bytes(b"\x00\xffx" * (1024 * 1024 + 17))
+            empty = root / "empty.cfg"
+            empty.write_bytes(b"")
+            paths = [large, None, root / "missing.cfg", empty, large]
+            expected = hashlib.sha256()
+            content_hashes = []
+            for path in sorted(os.path.abspath(os.fspath(path)) for path in paths if path):
+                content = Path(path).read_bytes() if Path(path).exists() else b"<missing>"
+                expected.update(path.encode("utf-8") + b"\0" + content + b"\0")
+                content_hashes.append(hashlib.sha256(content + b"\0").hexdigest())
+            content = hashlib.sha256(b"".join(value.encode("ascii") + b"\0" for value in sorted(content_hashes)))
+            self.assertEqual((expected.hexdigest(), content.hexdigest()), compile_cache._extra_input_digests(paths))
+
+    def test_extra_input_read_failure_discards_partial_bytes(self):
+        path = os.path.abspath("unreadable.cfg")
+        stream = mock.MagicMock()
+        stream.__enter__.return_value.read.side_effect = [b"partial data", OSError("read failure")]
+        expected_path = hashlib.sha256(path.encode("utf-8") + b"\0<missing>\0").hexdigest()
+        expected_content = hashlib.sha256(hashlib.sha256(b"<missing>\0").hexdigest().encode("ascii") +
+                                          b"\0").hexdigest()
+        with mock.patch("lib.compile_cache.open", return_value=stream):
+            self.assertEqual((expected_path, expected_content), compile_cache._extra_input_digests([path]))
+
+    def test_repeated_directory_inputs_walk_once_but_refresh_between_calls(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            includes = root / "inc"
+            includes.mkdir()
+            header = includes / "arbitrary.header_name"
+            header.write_text("`define VALUE 1\n", encoding="utf-8")
+            source = includes / "top.sv"
+            source.write_text('`include "arbitrary.header_name"\n', encoding="utf-8")
+            nested = root / "nested.f"
+            nested.write_text("+incdir+inc\n", encoding="utf-8")
+            filelist = root / "compile.f"
+            filelist.write_text("+incdir+inc\n-incdir ./inc\n-y inc\n-f nested.f\n", encoding="utf-8")
+            with mock.patch.object(compile_cache, "_directory_inputs", wraps=compile_cache._directory_inputs) as walk:
+                inputs = discover_filelist_inputs(filelist, root)
+                self.assertEqual(1, walk.call_count)
+            self.assertEqual(sorted(map(str, (filelist, nested, source, header))), inputs)
+            original = compile_fingerprint(root, "vcs", filelist, extra_input_paths=inputs)
+            added = includes / "new.extension"
+            added.write_text("new header\n", encoding="utf-8")
+            header.write_text("`define VALUE 2\n", encoding="utf-8")
+            with mock.patch.object(compile_cache, "_directory_inputs", wraps=compile_cache._directory_inputs) as walk:
+                refreshed = discover_filelist_inputs(filelist, root)
+                self.assertEqual(1, walk.call_count)
+            self.assertIn(str(added), refreshed)
+            self.assertNotEqual(original, compile_fingerprint(root, "vcs", filelist, extra_input_paths=refreshed))
 
     def _project(self):
         path = Path(tempfile.mkdtemp())
@@ -283,7 +338,7 @@ class CompileCacheTest(unittest.TestCase):
 
         self.assertEqual(sorted(map(str, (root, nested, source, header))), inputs)
 
-        with mock.patch("lib.compile_cache._file_bytes", wraps=compile_cache._file_bytes) as read_file:
+        with mock.patch("lib.compile_cache.open", wraps=open) as read_file:
             compile_fingerprint(
                 external,
                 "vcs -f {}".format(root),
@@ -291,7 +346,10 @@ class CompileCacheTest(unittest.TestCase):
                 extra_input_paths=inputs,
             )
 
-        read_paths = [os.path.abspath(os.fspath(call.args[0])) for call in read_file.call_args_list]
+        read_paths = [
+            os.path.abspath(os.fspath(call.args[0])) for call in read_file.call_args_list
+            if len(call.args) > 1 and call.args[1] == "rb"
+        ]
         self.assertEqual(2, read_paths.count(str(root))) # Compile args plus one external-input read.
         for path in (nested, source, header):
             self.assertEqual(1, read_paths.count(str(path)))

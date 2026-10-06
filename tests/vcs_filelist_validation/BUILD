@@ -65,6 +65,27 @@ verilog_dv_tb(
     deps = [":dv_in_flist_only"],
 )
 
+verilog_dv_library(
+    name = "digest_diamond_left",
+    srcs = [],
+    deps = [":dv_in_flist_only"],
+)
+
+verilog_dv_library(
+    name = "digest_diamond_right",
+    srcs = ["unit_test_top.sv"],
+    deps = [":dv_in_flist_only"],
+)
+
+verilog_dv_tb(
+    name = "dv_tb_vcs_digest_diamond",
+    simulator = "VCS",
+    deps = [
+        ":digest_diamond_left",
+        ":digest_diamond_right",
+    ],
+)
+
 verilog_rtl_shell(
     name = "digest_shell",
     module_to_shell_name = "custom",
@@ -335,6 +356,7 @@ py_test(
         ":dv_makelib",
         ":dv_tb_vcs",
         ":dv_tb_vcs_compile_args.f",
+        ":dv_tb_vcs_digest_diamond",
         ":dv_tb_vcs_in_flist_only",
         ":dv_tb_vcs_runtime_args.f",
         ":dv_tb_vcs_runtime_only_runfile",

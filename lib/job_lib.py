@@ -213,6 +213,20 @@ class Job():
         """Optional mutable resource that otherwise parallel jobs must not share."""
         return None
 
+    def prepare_for_launch(self):
+        """Optional lightweight preparation before final resource admission."""
+
+    @property
+    def prepare_in_background(self):
+        """Whether preparation must leave scheduler polling responsive."""
+        return False
+
+    def discard_preparation(self):
+        """Release resources held by a prepared job that never launched."""
+
+    def defer_prepared_launch(self):
+        """Notify a job that inputs may need refreshing after an admission wait."""
+
     def __lt__(self, other):
         return self.priority < other.priority
 
@@ -745,6 +759,7 @@ class JobManager():
         # this condition. Hooks and subprocess operations always run outside it.
         self._condition = threading.Condition(threading.RLock())
         self._launching = []
+        self._preparation_threads = []
 
         self._run_jobs_thread = threading.Thread(name="_run_jobs", target=self._run_jobs, daemon=True)
         self._run_jobs_thread.daemon = True
@@ -857,18 +872,23 @@ class JobManager():
             self._todo.pop(i)
 
     def _can_launch_locked(self, job):
-        running_jobs = self._active + self._launching
-        if job.execution_mode == "exclusive":
-            return len(running_jobs) == 0
-        if job.execution_mode != "parallel":
-            raise ValueError("Unknown execution mode '{}'".format(job.execution_mode))
-        if any(active_job.execution_mode != "parallel" for active_job in running_jobs):
-            return False
+        running_jobs = [active for active in self._active + self._launching if active is not job]
         resource = job.exclusive_resource
         if resource is not None and any(active.exclusive_resource == resource
                                         for active in running_jobs + self._finalizing):
             return False
-        return len(running_jobs) < self.active_job_limit
+        # Preparation performs no simulator build. Its single control slot may
+        # overlap a build or simulations without taking their CPU allocation.
+        if job.execution_mode == "preparation":
+            return not any(active.execution_mode == "preparation" for active in running_jobs)
+        compute_jobs = [active for active in running_jobs if active.execution_mode != "preparation"]
+        if job.execution_mode == "exclusive":
+            return len(compute_jobs) == 0
+        if job.execution_mode != "parallel":
+            raise ValueError("Unknown execution mode '{}'".format(job.execution_mode))
+        if any(active_job.execution_mode != "parallel" for active_job in compute_jobs):
+            return False
+        return len(compute_jobs) < self.active_job_limit
 
     def _take_ready_job_locked(self):
         self._print_state_locked(self.log.debug)
@@ -881,9 +901,43 @@ class JobManager():
                 return job
         return None
 
-    def _launch_job(self, job):
+    def _launch_job(self, job, preparation_only=False):
         try:
             job.raise_if_cancelled()
+            if not preparation_only and job.prepare_in_background:
+                worker = threading.Thread(target=self._launch_job,
+                                          args=(job, True),
+                                          name="prepare_{}".format(job.name),
+                                          daemon=True)
+                with self._condition:
+                    self._preparation_threads.append(worker)
+                    try:
+                        worker.start()
+                    except BaseException:
+                        self._preparation_threads.remove(worker)
+                        raise
+                return
+            job.prepare_for_launch()
+            job.raise_if_cancelled()
+            # A cache miss can promote preparation to an exclusive compile.
+            # Requeue it until the actual build allocation becomes available.
+            with self._condition:
+                if not self._run_jobs_thread_active or self._done_grace_exit:
+                    job.discard_preparation()
+                    if not job.jobstatus.completed:
+                        job.jobstatus = JobStatus.SKIPPED
+                    self._launching.remove(job)
+                    self._skipped.append(job)
+                    self._condition.notify_all()
+                    return
+                admitted = not self._paused and self._can_launch_locked(job)
+                if preparation_only or not admitted:
+                    if not admitted:
+                        job.defer_prepared_launch()
+                    self._launching.remove(job)
+                    bisect.insort_right(self._ready, job)
+                    self._condition.notify_all()
+                    return
             job.pre_run()
             job.raise_if_cancelled()
             self.log.debug("%s priority: %d", job, job.priority)
@@ -912,7 +966,8 @@ class JobManager():
             except (Exception, SystemExit) as record_exc:
                 self.log.error("Could not record launch failure for %s: %s", job, record_exc)
             with self._condition:
-                self._launching.remove(job)
+                if job in self._launching:
+                    self._launching.remove(job)
                 self._error_count += 1
                 self._move_children_to_skipped_locked(job)
                 if self._error_count >= self._quit_count:
@@ -1014,7 +1069,11 @@ class JobManager():
         self.exited_prematurely = True
         self._done_grace_exit = True
         self.log.warn("Exceeded quit count. Graceful exit.")
+        for job in self._launching:
+            if job.prepare_in_background or job.execution_mode == "preparation":
+                job.request_cancel()
         for job in self._todo + self._ready:
+            job.discard_preparation()
             if not job.jobstatus.completed:
                 job.jobstatus = JobStatus.SKIPPED
         self._skipped.extend(self._todo)
@@ -1044,9 +1103,28 @@ class JobManager():
         """Stop and join the scheduler thread."""
         with self._condition:
             self._run_jobs_thread_active = False
+            queued = list(self._todo) + list(self._ready)
+            for job in self._launching:
+                if job.prepare_in_background or job.execution_mode == "preparation":
+                    job.request_cancel()
             self._condition.notify_all()
+        for job in queued:
+            job.discard_preparation()
         if threading.current_thread() is not self._run_jobs_thread:
             self._run_jobs_thread.join()
+        self._join_preparation_threads()
+
+    def _join_preparation_threads(self):
+        deadline = time.monotonic() + self.SHUTDOWN_JOIN_SECONDS
+        with self._condition:
+            workers = tuple(self._preparation_threads)
+        for worker in workers:
+            if worker is not threading.current_thread():
+                worker.join(timeout=max(0, deadline - time.monotonic()))
+        unfinished = [worker.name for worker in workers if worker.is_alive()]
+        if unfinished:
+            self._shutdown_incomplete = True
+            self.log.warning("Timed out waiting for compile preparation: %s", ", ".join(unfinished))
 
     @property
     def paused(self):
@@ -1144,6 +1222,9 @@ class JobManager():
             self._ready = []
             self._condition.notify_all()
 
+        for job in queued_jobs:
+            job.discard_preparation()
+
         errors = [None] * len(active_jobs)
         incomplete_shutdowns = [False] * len(active_jobs)
 
@@ -1181,6 +1262,7 @@ class JobManager():
             if self._run_jobs_thread.is_alive():
                 scheduler_finished = False
                 self.log.warning("Timed out waiting for scheduler launch hook to stop")
+        self._join_preparation_threads()
         first_error = next((error for error in errors if error is not None), None)
         if first_error is not None:
             raise first_error

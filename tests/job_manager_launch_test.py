@@ -16,6 +16,120 @@ from lib.job_lib import BazelTBJob, BazelTestCfgJob, Job, JobManager, JobStatus,
 
 class SchedulerResourceTest(unittest.TestCase):
 
+    def test_preparation_overlaps_test_but_cache_miss_waits_for_compute(self):
+        log = _Logger()
+        rcfg = SimpleNamespace(options=SimpleNamespace(timeout=1), log=log)
+        started = {name: threading.Event() for name in ("test", "miss", "hit")}
+        runners = {}
+
+        def launch(job, manager):
+            runner = _PausableRunner(job, manager)
+            runners[job.name] = runner
+            started[job.name].set()
+            return runner
+
+        test = _PreparingCompileJob(rcfg, "test", cache_hit=True)
+        test.prepared = True
+        test.mode = "parallel"
+        miss = _PreparingCompileJob(rcfg, "miss", cache_hit=False)
+        hit = _PreparingCompileJob(rcfg, "hit", cache_hit=True)
+        manager = JobManager({"idle_print_seconds": 60, "quit_count": 1, "active_job_limit": 1}, log)
+        manager.job_lib_type = launch
+        try:
+            manager.add_job(test)
+            self.assertTrue(started["test"].wait(1))
+            manager.add_job(miss)
+            self.assertTrue(miss.prepared_event.wait(1), "preparation waited for the running simulation")
+            self.assertFalse(started["miss"].is_set(), "actual compile overlapped simulation allocation")
+            manager.add_job(hit)
+            self.assertTrue(started["hit"].wait(1), "cache hit waited for the running simulation")
+            self.assertEqual(1, hit.prepare_count)
+            runners["hit"].finish.set()
+            self.assertFalse(started["miss"].is_set())
+            runners["test"].finish.set()
+            self.assertTrue(started["miss"].wait(2))
+            self.assertEqual(1, miss.prepare_count, "deferred build repeated its input scan")
+        finally:
+            for runner in runners.values():
+                runner.finish.set()
+            manager.stop()
+
+    def test_preparation_respects_mutable_resource_and_has_own_single_slot(self):
+        manager = JobManager.__new__(JobManager)
+        manager.active_job_limit = 1
+        manager._launching = []
+        manager._finalizing = []
+        active = SimpleNamespace(execution_mode="parallel", exclusive_resource="db")
+        prepare = SimpleNamespace(execution_mode="preparation", exclusive_resource=None)
+        same = SimpleNamespace(execution_mode="preparation", exclusive_resource="db")
+        manager._active = [active]
+        self.assertTrue(manager._can_launch_locked(prepare))
+        self.assertFalse(manager._can_launch_locked(same))
+        manager._active.append(prepare)
+        other = SimpleNamespace(execution_mode="preparation", exclusive_resource=None)
+        self.assertFalse(manager._can_launch_locked(other))
+
+    def test_blocked_background_preparation_does_not_block_completion_polling(self):
+        rcfg = SimpleNamespace(options=SimpleNamespace(timeout=1), log=_Logger())
+        release = threading.Event()
+
+        class BlockingPreparation(_PreparingCompileJob):
+
+            def prepare_for_launch(self):
+                self.prepared_event.set()
+                while not release.wait(0.01):
+                    self.raise_if_cancelled()
+                super().prepare_for_launch()
+
+        test = _PreparingCompileJob(rcfg, "running_test", cache_hit=True)
+        test.prepared = True
+        test.mode = "parallel"
+        blocked = BlockingPreparation(rcfg, "blocked", cache_hit=False)
+        runner_started = threading.Event()
+        runners = {}
+
+        def launch(job, manager):
+            runner = _PausableRunner(job, manager)
+            runners[job.name] = runner
+            runner_started.set()
+            return runner
+
+        manager = JobManager({"idle_print_seconds": 60, "quit_count": 1, "active_job_limit": 1}, rcfg.log)
+        manager.job_lib_type = launch
+        try:
+            manager.add_job(test)
+            self.assertTrue(runner_started.wait(1))
+            manager.add_job(blocked)
+            self.assertTrue(blocked.prepared_event.wait(1))
+            runners[test.name].finish.set()
+            deadline = time.monotonic() + 2
+            with manager._condition:
+                while test not in manager._done and time.monotonic() < deadline:
+                    manager._condition.wait(timeout=0.05)
+                self.assertIn(test, manager._done, "preparation blocked simulator finalization")
+            manager.stop()
+            self.assertEqual(JobStatus.SKIPPED, blocked.jobstatus)
+        finally:
+            release.set()
+            for runner in runners.values():
+                runner.finish.set()
+            manager.stop()
+
+    def test_graceful_exit_releases_prepared_build_resources(self):
+        rcfg = SimpleNamespace(options=SimpleNamespace(timeout=1), log=_Logger())
+        prepared = _PreparingCompileJob(rcfg, "prepared", cache_hit=False)
+        prepared.prepare_for_launch()
+        manager = JobManager.__new__(JobManager)
+        manager._done_grace_exit = False
+        manager.log = rcfg.log
+        manager._todo = []
+        manager._ready = [prepared]
+        manager._launching = []
+        manager._skipped = []
+        manager._graceful_exit_locked()
+        self.assertEqual(1, prepared.discard_count)
+        self.assertEqual(JobStatus.SKIPPED, prepared.jobstatus)
+
     def test_scheduler_runs_distinct_databases_while_same_database_waits(self):
 
         class ResourceJob(Job):
@@ -90,6 +204,44 @@ class _Logger:
 
     def __getattr__(self, _):
         return lambda *args, **kwargs: None
+
+
+class _PreparingCompileJob(Job):
+
+    def __init__(self, rcfg, name, cache_hit):
+        super().__init__(rcfg, name)
+        self.cache_hit = cache_hit
+        self.prepared = False
+        self.mode = "preparation"
+        self.prepare_count = 0
+        self.discard_count = 0
+        self.prepared_event = threading.Event()
+
+    @property
+    def execution_mode(self):
+        return self.mode
+
+    @property
+    def prepare_in_background(self):
+        return not self.prepared
+
+    def prepare_for_launch(self):
+        if not self.prepared:
+            self.prepare_count += 1
+            self.prepared = True
+            self.mode = "preparation" if self.cache_hit else "exclusive"
+            self.prepared_event.set()
+
+    def discard_preparation(self):
+        if self.prepared:
+            self.discard_count += 1
+
+    def pre_run(self):
+        if not self.prepared:
+            raise AssertionError("runner started before preparation")
+
+    def post_run(self):
+        return
 
 
 class _SummaryLogger(_Logger):

@@ -276,6 +276,21 @@ class VcsFilelistValidationTest(unittest.TestCase):
             expected.update(hashlib.sha256(find_runfile(relative).read_bytes()).digest() + b"\0")
         self.assertEqual(expected.hexdigest(), read_runfile(options["compile_inputs_digest"]).strip())
 
+    def test_recursive_diamond_indices_keep_complete_deduplicated_digest(self):
+        options = ast.literal_eval(read_runfile("tests/vcs_filelist_validation/dv_tb_vcs_digest_diamond_tb_options.py"))
+        entries = read_runfile(options["compile_inputs"]).splitlines()
+        self.assertEqual(entries, sorted(set(entries)))
+        for name in ("in_flist_only.sv", "in_flist_defs.svh", "unit_test_top.sv"):
+            self.assertEqual(1, entries.count("source\ttests/vcs_filelist_validation/" + name))
+        for name in ("dv_in_flist_only", "digest_diamond_left", "digest_diamond_right"):
+            self.assertIn("filelist\ttests/vcs_filelist_validation/" + name + ".f", entries)
+        expected = hashlib.sha256(b"rules_verilog.compile_inputs.v2\0")
+        for entry in entries:
+            _, relative = entry.split("\t", 1)
+            expected.update(entry.encode("utf-8") + b"\0")
+            expected.update(hashlib.sha256(find_runfile(relative).read_bytes()).digest() + b"\0")
+        self.assertEqual(expected.hexdigest(), read_runfile(options["compile_inputs_digest"]).strip())
+
     def test_runtime_only_runfiles_are_excluded_from_vcs_compile_inputs(self):
         options = ast.literal_eval(
             read_runfile("tests/vcs_filelist_validation/dv_tb_vcs_runtime_only_runfile_tb_options.py"))

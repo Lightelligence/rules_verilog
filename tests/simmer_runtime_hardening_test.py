@@ -51,6 +51,36 @@ class _FatalLog:
 
 class SimmerRuntimeHardeningTest(unittest.TestCase):
 
+    def test_vcs_scheduler_prepares_once_and_retains_exclusive_build_admission(self):
+        for cache_hit in (False, True):
+            with self.subTest(cache_hit=cache_hit), tempfile.TemporaryDirectory() as root:
+                options = parse_args(["--simulator", "VCS", "--no-vcs-partcomp"])
+                rcfg = SimpleNamespace(options=options,
+                                       proj_dir=root,
+                                       regression_dir=root,
+                                       log=CmnLogger("prepared-compile-test"))
+                simulator = simmer.VcsSimulator(options, rcfg, simmer.jinja2_env)
+                with mock.patch.dict(simmer.VCompJob.all_names, clear=True), mock.patch("simmer.log", rcfg.log):
+                    job = simmer.VCompJob(rcfg, "//bench:tb", simulator)
+
+                    def prepare():
+                        job.compile_cache_hit = cache_hit
+                        os.makedirs(job.job_dir)
+
+                    self.assertEqual("preparation", job.execution_mode)
+                    original_pre_run = job.pre_run
+                    with mock.patch.object(job, "pre_run", side_effect=prepare) as input_scan:
+                        job.prepare_for_launch()
+                        job.prepare_for_launch()
+                        input_scan.assert_called_once()
+                    self.assertEqual("preparation" if cache_hit else "exclusive", job.execution_mode)
+                    with mock.patch.object(job, "_acquire_compile_lock") as acquire:
+                        original_pre_run()
+                        acquire.assert_not_called()
+                    with mock.patch.object(job, "_release_compile_lock") as release:
+                        job.discard_preparation()
+                        release.assert_called_once()
+
     def test_compile_reuse_tracks_content_with_and_without_bazel(self):
         for shared in (False, True):
             with self.subTest(shared=shared):
@@ -149,6 +179,32 @@ class SimmerRuntimeHardeningTest(unittest.TestCase):
                             job.pre_run()
                             self.assertTrue(job.compile_cache_hit)
                             self.assertIn("Bypassing", job.main_cmdline)
+                            # A prepared cache decision must be refreshed after
+                            # an admission wait, including same-size/mtime edits.
+                            options.no_bazel = True
+                            job.prepare_for_launch()
+                            self.assertTrue(job.compile_cache_hit)
+                            prepared_stat = source.stat()
+                            source.write_text(source.read_text(encoding="utf-8").replace("changed", "updated"),
+                                              encoding="utf-8")
+                            os.utime(source, ns=(prepared_stat.st_atime_ns, prepared_stat.st_mtime_ns))
+                            job.defer_prepared_launch()
+                            job.prepare_for_launch()
+                            self.assertFalse(job.compile_cache_hit)
+                            self.assertEqual("exclusive", job.execution_mode)
+                            # A forced rebuild must bypass a matching warm
+                            # cache, but not remove artifacts during preparation.
+                            compile_cache.write_compile_fingerprint(job.job_dir, job.compile_fingerprint)
+                            options.recompile = True
+                            job.defer_prepared_launch()
+                            job.prepare_for_launch()
+                            self.assertFalse(job.compile_cache_hit)
+                            self.assertTrue(executable.is_file())
+                            self.assertTrue(job.main_cmdline.startswith("bash "))
+                            job.pre_run()
+                            self.assertFalse(executable.exists())
+                            self.assertTrue((Path(job.job_dir) / "vcomp.sh").is_file())
+                            self.assertTrue(job.main_cmdline.startswith("bash "))
                         self.assertTrue(all(call.args[0] == ["hostname"] for call in host_probe.call_args_list))
 
     def _check_relative_coverage_config(self, backend):

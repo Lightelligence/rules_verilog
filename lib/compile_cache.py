@@ -130,12 +130,24 @@ def _extra_input_digests(paths):
     path_digest = hashlib.sha256()
     content_digests = []
     for path in sorted(os.path.abspath(os.fspath(path)) for path in paths if path):
-        content = _file_bytes(path)
         path_digest.update(path.encode("utf-8"))
         path_digest.update(b"\0")
-        path_digest.update(content)
+        before_content = path_digest.copy()
+        content_digest = hashlib.sha256()
+        try:
+            with open(path, "rb") as filep:
+                for chunk in iter(lambda: filep.read(1024 * 1024), b""):
+                    path_digest.update(chunk)
+                    content_digest.update(chunk)
+        except OSError:
+            # Preserve the previous identity for absent/unreadable inputs.
+            path_digest = before_content
+            content_digest = hashlib.sha256()
+            path_digest.update(b"<missing>")
+            content_digest.update(b"<missing>")
         path_digest.update(b"\0")
-        content_digests.append(_digest_bytes(content))
+        content_digest.update(b"\0")
+        content_digests.append(content_digest.hexdigest())
     content_digest = _digest_bytes(*(digest.encode("ascii") for digest in sorted(content_digests)))
     return path_digest.hexdigest(), content_digest
 
@@ -159,6 +171,15 @@ def discover_filelist_inputs(filelist_path, working_directory):
     pending = [(root_filelist, working_directory)]
     source_paths = set()
     include_directories = set()
+    directory_contents = {}
+
+    def directory_inputs(path):
+        # Cache only this discovery: the next invocation must see edits and
+        # newly created headers, including files with arbitrary extensions.
+        key = os.path.abspath(path)
+        if key not in directory_contents:
+            directory_contents[key] = tuple(_directory_inputs(path))
+        return directory_contents[key]
 
     def unquote(value):
         value = value.strip()
@@ -175,7 +196,7 @@ def discover_filelist_inputs(filelist_path, working_directory):
         if os.path.isfile(resolved):
             discovered.add(resolved)
         elif include_directory and os.path.isdir(resolved):
-            discovered.update(_directory_inputs(resolved))
+            discovered.update(directory_inputs(resolved))
         return resolved
 
     while pending:
@@ -246,7 +267,7 @@ def discover_filelist_inputs(filelist_path, working_directory):
                 if token == "-v":
                     source_paths.add(path)
                 elif os.path.isdir(path):
-                    source_paths.update(_directory_inputs(path))
+                    source_paths.update(directory_inputs(path))
                 index += 2
                 continue
             if not token.startswith(("-", "+")):

@@ -55,10 +55,34 @@ def file_digest(path):
     return digest.hexdigest()
 
 
-def generate_index(manifest_path, output_path):
-    """Index a dependency closure once, independently of consuming testbenches."""
+def read_indices(index_list_path):
+    """Load reusable child hashes, rejecting disagreement rather than guessing."""
+    hashes = {}
+    if index_list_path is None:
+        return hashes
+    with open(index_list_path, encoding="utf-8") as indices:
+        index_paths = dict.fromkeys(path.rstrip("\n") for path in indices)
+    for index_path in index_paths:
+        with open(index_path, encoding="utf-8") as index:
+            entries = json.load(index)
+        for path, value in entries.items():
+            if not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{64}", value) is None:
+                raise RuntimeError("Malformed compile input index hash: {!r}".format(path))
+            if path in hashes and hashes[path] != value:
+                raise RuntimeError("Conflicting compile input index hashes: {!r}".format(path))
+            hashes[path] = value
+    return hashes
+
+
+def generate_index(manifest_path, output_path, index_list_path=None):
+    """Index owned inputs once and compose shared child hashes for the closure.
+
+    Only manifest paths are emitted: a foreign provider may expose fewer files
+    than its dependencies, or include extra outputs that must still be hashed.
+    """
     paths = sorted({path for _, path in read_records(manifest_path)})
-    hashes = {path: file_digest(path) for path in paths}
+    child_hashes = read_indices(index_list_path)
+    hashes = {path: child_hashes[path] if path in child_hashes else file_digest(path) for path in paths}
     with open(output_path, "w", encoding="utf-8", newline="\n") as output:
         json.dump(hashes, output, sort_keys=True)
         output.write("\n")
@@ -71,17 +95,7 @@ def merge_digest(manifest_path, output_path, inventory_path, index_list_path):
     Category/runfiles-path identity and last-record-wins semantics are retained.
     Only runfiles explicitly in the compile manifest may be read directly.
     """
-    hashes = {}
-    with open(index_list_path, encoding="utf-8") as indices:
-        for index_path in indices:
-            with open(index_path.rstrip("\n"), encoding="utf-8") as index:
-                entries = json.load(index)
-            for path, value in entries.items():
-                if not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{64}", value) is None:
-                    raise RuntimeError("Malformed compile input index hash: {!r}".format(path))
-                if path in hashes and hashes[path] != value:
-                    raise RuntimeError("Conflicting compile input index hashes: {!r}".format(path))
-                hashes[path] = value
+    hashes = read_indices(index_list_path)
     records = sorted(dict(read_records(manifest_path)).items())
     digest = hashlib.sha256(b"rules_verilog.compile_inputs.v2\0")
     for entry, path in records:
@@ -98,7 +112,7 @@ def merge_digest(manifest_path, output_path, inventory_path, index_list_path):
 
 
 def main():
-    if len(sys.argv) == 4 and sys.argv[1] == "--index":
+    if len(sys.argv) in (4, 5) and sys.argv[1] == "--index":
         generate_index(*sys.argv[2:])
         return
     if len(sys.argv) == 6 and sys.argv[1] == "--merge":
