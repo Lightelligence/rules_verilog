@@ -22,37 +22,46 @@ function record_simulation_duration {
 {%- if sockets %}
 SOCKET_SIDECAR_GROUPS_FILE={{ job.sidecar_process_groups_path|shell_quote }}
 : > "$SOCKET_SIDECAR_GROUPS_FILE"
-SIMMER_SELF_STAT_FIELDS="$(sed 's/.*) //' "/proc/$$/stat")"
-SIMMER_SESSION_ID="$(awk '{print $4}' <<< "$SIMMER_SELF_STAT_FIELDS")"
+function read_socket_process_stat {
+    local stat_line
+    stat_line="$(<"$1")" 2>/dev/null || return 1
+    # comm may contain whitespace or parentheses; fields follow the final ') '.
+    [[ "$stat_line" == *') '* ]] || return 1
+    read -r -a SOCKET_PROCESS_STAT_FIELDS <<< "${stat_line##*) }"
+    [ -n "${SOCKET_PROCESS_STAT_FIELDS[19]:-}" ]
+}
+declare -a SOCKET_PROCESS_STAT_FIELDS
+read_socket_process_stat "/proc/$$/stat"
+SIMMER_SESSION_ID="${SOCKET_PROCESS_STAT_FIELDS[3]}"
+ {%- for _, _, _ in sockets %}
+SOCKET_SIDECAR_STARTED_{{ loop.index }}="$SOCKET_SIDECAR_GROUPS_FILE.started.{{ loop.index }}"
+ {%- endfor %}
 
 function socket_sidecar_group_is_owned {
     local sidecar_pid=$1
     local expected_start_time=$2
-    if [ -r "/proc/$sidecar_pid/stat" ]; then
-        local stat_fields
-        stat_fields="$(sed 's/.*) //' "/proc/$sidecar_pid/stat")"
-        local process_group
-        local session_id
-        local start_time
-        process_group="$(awk '{print $3}' <<< "$stat_fields")"
-        session_id="$(awk '{print $4}' <<< "$stat_fields")"
-        start_time="$(awk '{print $20}' <<< "$stat_fields")"
+    [[ "$sidecar_pid" =~ ^[0-9]+$ && "$expected_start_time" =~ ^[0-9]+$ ]] || return 1
+    local -a SOCKET_PROCESS_STAT_FIELDS
+    if read_socket_process_stat "/proc/$sidecar_pid/stat"; then
+        local process_group="${SOCKET_PROCESS_STAT_FIELDS[2]}"
+        local session_id="${SOCKET_PROCESS_STAT_FIELDS[3]}"
+        local start_time="${SOCKET_PROCESS_STAT_FIELDS[19]}"
         if [ "$process_group" = "$sidecar_pid" ] && \
            [ "$session_id" = "$SIMMER_SESSION_ID" ] && \
            [ "$start_time" = "$expected_start_time" ]; then
-            return 0
+            if [ "${SOCKET_PROCESS_STAT_FIELDS[0]}" != Z ] && [ "${SOCKET_PROCESS_STAT_FIELDS[0]}" != X ]; then
+                return 0
+            fi
+        else
+            return 1
         fi
-        return 1
     fi
     local stat_path
     for stat_path in /proc/[0-9]*/stat; do
-        [ -r "$stat_path" ] || continue
-        local stat_fields
-        stat_fields="$(sed 's/.*) //' "$stat_path")"
-        local process_group
-        local session_id
-        process_group="$(awk '{print $3}' <<< "$stat_fields")"
-        session_id="$(awk '{print $4}' <<< "$stat_fields")"
+        read_socket_process_stat "$stat_path" || continue
+        [ "${SOCKET_PROCESS_STAT_FIELDS[0]}" != Z ] && [ "${SOCKET_PROCESS_STAT_FIELDS[0]}" != X ] || continue
+        local process_group="${SOCKET_PROCESS_STAT_FIELDS[2]}"
+        local session_id="${SOCKET_PROCESS_STAT_FIELDS[3]}"
         if [ "$process_group" = "$sidecar_pid" ] && [ "$session_id" = "$SIMMER_SESSION_ID" ]; then
             return 0
         fi
@@ -63,21 +72,19 @@ function socket_sidecar_group_is_owned {
 function socket_sidecar_process_is_running {
     local sidecar_pid=$1
     local expected_start_time=$2
-    [ -r "/proc/$sidecar_pid/stat" ] || return 1
-    local stat_fields
-    stat_fields="$(sed 's/.*) //' "/proc/$sidecar_pid/stat")"
-    local process_state
-    local start_time
-    process_state="$(awk '{print $1}' <<< "$stat_fields")"
-    start_time="$(awk '{print $20}' <<< "$stat_fields")"
-    [ "$process_state" != "Z" ] && [ "$start_time" = "$expected_start_time" ]
+    local -a SOCKET_PROCESS_STAT_FIELDS
+    read_socket_process_stat "/proc/$sidecar_pid/stat" || return 1
+    [ "${SOCKET_PROCESS_STAT_FIELDS[0]}" != Z ] && [ "${SOCKET_PROCESS_STAT_FIELDS[0]}" != X ] && \
+        [ "${SOCKET_PROCESS_STAT_FIELDS[19]}" = "$expected_start_time" ]
 }
 
 function terminate_socket_sidecars {
     local sidecar_pid
     local sidecar_start_time
+    local -a cleanup_registrations=()
     while read -r sidecar_pid sidecar_start_time; do
         if socket_sidecar_group_is_owned "$sidecar_pid" "$sidecar_start_time"; then
+            cleanup_registrations+=("$sidecar_pid $sidecar_start_time")
             kill -CONT -- "-$sidecar_pid" 2>/dev/null || true
             kill -TERM -- "-$sidecar_pid" 2>/dev/null || true
         fi
@@ -85,14 +92,18 @@ function terminate_socket_sidecars {
     if [ -s "$SOCKET_SIDECAR_GROUPS_FILE" ]; then
         sleep 1
     fi
-    while read -r sidecar_pid sidecar_start_time; do
+    local registration
+    for registration in "${cleanup_registrations[@]:-}"; do
+        [ -n "$registration" ] || continue
+        read -r sidecar_pid sidecar_start_time <<< "$registration"
         if socket_sidecar_group_is_owned "$sidecar_pid" "$sidecar_start_time"; then
             kill -KILL -- "-$sidecar_pid" 2>/dev/null || true
         fi
         wait "$sidecar_pid" 2>/dev/null || true
-    done < "$SOCKET_SIDECAR_GROUPS_FILE"
+    done
  {%- for _, _, socket_endpoint in sockets %}
     rm -f {{ socket_endpoint|shell_quote }}
+    rm -f "$SOCKET_SIDECAR_STARTED_{{ loop.index }}"
  {%- endfor %}
     local sidecars_alive=0
     while read -r sidecar_pid sidecar_start_time; do
@@ -117,26 +128,83 @@ function run_test {
  {%- for socket_name, sidecar_command, socket_endpoint in sockets %}
     echo "--- Handling Socket: {{ socket_name }} ---"
     rm -f {{ socket_endpoint|shell_quote }}
+    rm -f "$SOCKET_SIDECAR_STARTED_{{ loop.index }}"
     printf 'Spawning: %s\n' {{ sidecar_command|shell_quote }}
     # Job control gives each sidecar a process group, so cleanup also reaches
     # grandchildren launched by the configured command.
     set -m
-    # The wrapper registers and stops itself before executing user code. This
-    # closes the pause race between creating a process group and recording it.
-    bash -c 'registry=$1; command=$2; stat_fields=$(sed "s/.*) //" "/proc/$$/stat"); start_time=$(awk "{print \$20}" <<< "$stat_fields"); printf "%s %s\n" "$$" "$start_time" >> "$registry"; kill -STOP "$$"; exec bash -c "$command"' \
-        simmer-sidecar "$SOCKET_SIDECAR_GROUPS_FILE" {{ sidecar_command|shell_quote }} \
+    # Register before executing user code. The acknowledgement also permits a
+    # JobRunner resume to release the wrapper before this script observes STOP.
+    bash -c 'registry=$1; started_file=$2; command=$3; stat_fields=$(sed "s/.*) //" "/proc/$$/stat"); start_time=$(awk "{print \$20}" <<< "$stat_fields"); printf "%s %s\n" "$$" "$start_time" >> "$registry"; kill -STOP "$$"; printf "%s %s\n" "$$" "$start_time" > "$started_file"; exec bash -c "$command"' \
+        simmer-sidecar "$SOCKET_SIDECAR_GROUPS_FILE" "$SOCKET_SIDECAR_STARTED_{{ loop.index }}" {{ sidecar_command|shell_quote }} \
         > {{ (job.job_dir ~ '/' ~ socket_name ~ '.log')|shell_quote }} 2>&1 &
     declare SOCKET_SIDECAR_{{ loop.index }}_PID=$!
     set +m
+    local socket_registration_attempts=0
+    local socket_registration_max_attempts=3000
     while ! awk -v pid="$SOCKET_SIDECAR_{{ loop.index }}_PID" '$1 == pid { found = 1 } END { exit !found }' "$SOCKET_SIDECAR_GROUPS_FILE"; do
         if ! kill -0 "$SOCKET_SIDECAR_{{ loop.index }}_PID" 2>/dev/null; then
             printf '%%E- ERROR: Socket wrapper %s exited before registration.\n' {{ socket_name|shell_quote }}
-            overall_exit_code=1
-            break
+            return 1
+        fi
+        if [ "$socket_registration_attempts" -ge "$socket_registration_max_attempts" ]; then
+            # An alive but unregistered child must remain eligible for cleanup.
+            # Only record a direct child in this script's session/process group.
+            local -a SOCKET_PROCESS_STAT_FIELDS
+            if read_socket_process_stat "/proc/$SOCKET_SIDECAR_{{ loop.index }}_PID/stat" && \
+               [ "${SOCKET_PROCESS_STAT_FIELDS[1]}" = "$$" ] && \
+               [ "${SOCKET_PROCESS_STAT_FIELDS[2]}" = "$SOCKET_SIDECAR_{{ loop.index }}_PID" ] && \
+               [ "${SOCKET_PROCESS_STAT_FIELDS[3]}" = "$SIMMER_SESSION_ID" ]; then
+                printf '%s %s\n' "$SOCKET_SIDECAR_{{ loop.index }}_PID" "${SOCKET_PROCESS_STAT_FIELDS[19]}" >> "$SOCKET_SIDECAR_GROUPS_FILE"
+            fi
+            printf '%%E- ERROR: Timeout waiting for socket wrapper %s to register.\n' {{ socket_name|shell_quote }}
+            return 1
         fi
         sleep 0.01
+        socket_registration_attempts=$((socket_registration_attempts + 1))
     done
-    kill -CONT -- "-$SOCKET_SIDECAR_{{ loop.index }}_PID" 2>/dev/null || true
+    local sidecar_start_time
+    sidecar_start_time="$(awk -v pid="$SOCKET_SIDECAR_{{ loop.index }}_PID" '$1 == pid { print $2; exit }' "$SOCKET_SIDECAR_GROUPS_FILE")"
+    local started_pid
+    local started_time
+    local -a SOCKET_PROCESS_STAT_FIELDS
+    socket_registration_attempts=0
+    while :; do
+        if [ -r "$SOCKET_SIDECAR_STARTED_{{ loop.index }}" ] && \
+           read -r started_pid started_time < "$SOCKET_SIDECAR_STARTED_{{ loop.index }}" && \
+           [ "$started_pid" = "$SOCKET_SIDECAR_{{ loop.index }}_PID" ] && [ "$started_time" = "$sidecar_start_time" ]; then
+            break
+        fi
+        if ! read_socket_process_stat "/proc/$SOCKET_SIDECAR_{{ loop.index }}_PID/stat" || \
+           [ "${SOCKET_PROCESS_STAT_FIELDS[0]}" = Z ] || [ "${SOCKET_PROCESS_STAT_FIELDS[0]}" = X ]; then
+            # A short-lived command can acknowledge and exit between the first
+            # acknowledgement check and the process lookup.
+            if [ -r "$SOCKET_SIDECAR_STARTED_{{ loop.index }}" ] && \
+               read -r started_pid started_time < "$SOCKET_SIDECAR_STARTED_{{ loop.index }}" && \
+               [ "$started_pid" = "$SOCKET_SIDECAR_{{ loop.index }}_PID" ] && [ "$started_time" = "$sidecar_start_time" ]; then
+                break
+            fi
+            printf '%%E- ERROR: Socket wrapper %s exited before startup acknowledgement.\n' {{ socket_name|shell_quote }}
+            return 1
+        fi
+        if [ "${SOCKET_PROCESS_STAT_FIELDS[2]}" != "$SOCKET_SIDECAR_{{ loop.index }}_PID" ] || \
+           [ "${SOCKET_PROCESS_STAT_FIELDS[3]}" != "$SIMMER_SESSION_ID" ] || \
+           [ "${SOCKET_PROCESS_STAT_FIELDS[19]}" != "$sidecar_start_time" ]; then
+            printf '%%E- ERROR: Socket wrapper %s process identity changed before startup acknowledgement.\n' {{ socket_name|shell_quote }}
+            return 1
+        fi
+        # Sending CONT before the child actually stops loses the wakeup.
+        if [ "${SOCKET_PROCESS_STAT_FIELDS[0]}" = T ]; then
+            kill -CONT -- "-$SOCKET_SIDECAR_{{ loop.index }}_PID" 2>/dev/null || true
+        fi
+        if [ "$socket_registration_attempts" -ge "$socket_registration_max_attempts" ]; then
+            printf '%%E- ERROR: Timeout waiting for socket wrapper %s to start.\n' {{ socket_name|shell_quote }}
+            return 1
+        fi
+        sleep 0.01
+        socket_registration_attempts=$((socket_registration_attempts + 1))
+    done
+    rm -f "$SOCKET_SIDECAR_STARTED_{{ loop.index }}"
     printf 'Socket %s started with PID %s (Log: %s)\n' {{ socket_name|shell_quote }} "$SOCKET_SIDECAR_{{ loop.index }}_PID" {{ (job.job_dir ~ '/' ~ socket_name ~ '.log')|shell_quote }}
 
     local socket_start_wait_seconds=0

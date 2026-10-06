@@ -48,6 +48,15 @@ RV_VCS_RUNNER="runmod vcs --" simmer -t <bench>:<test> --simulator VCS
 simmer -t <bench>:<test> --simulator VCS --vcs-runner "runmod vcs --"
 ```
 
+Socket helper startup waits for a registered process identity and an
+acknowledgement before waiting for the endpoint. Both startup stages have bounded
+active polling, so a helper that remains alive without registering or starting
+fails the test instead of blocking indefinitely. Pausing a test does not consume
+this polling budget. Cleanup checks the process birth time, session, and process
+group before signalling a helper or its live descendants; stale registrations
+and processes from other sessions are skipped. These checks also apply when a
+simulation fails before its normal cleanup.
+
 ## Command cookbook
 
 Quote test selectors so the shell does not expand `*`. Start with discovery when
