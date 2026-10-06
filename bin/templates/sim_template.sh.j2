@@ -27,7 +27,7 @@ function read_socket_process_stat {
     local -a stat_lines
     # Buffer procfs reads before splitting the identity fields.
     mapfile -t stat_lines 2>/dev/null < "$1" || return 1
-    stat_line="${stat_lines[*]}"
+    stat_line="${stat_lines[*]:-}"
     # comm may contain whitespace or parentheses; fields follow the final ') '.
     [[ "$stat_line" == *') '* ]] || return 1
     read -r -a SOCKET_PROCESS_STAT_FIELDS <<< "${stat_line##*) }"

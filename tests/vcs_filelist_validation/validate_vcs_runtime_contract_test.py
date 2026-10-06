@@ -2054,6 +2054,23 @@ run_bounded_process([
         return script
 
     @unittest.skipUnless(os.name == "posix" and os.path.isdir("/proc"), "Linux process-group behavior")
+    def test_sim_template_proc_reader_rejects_missing_and_empty_records(self):
+        with tempfile.TemporaryDirectory(prefix="sidecar missing proc ") as temporary_dir:
+            root = Path(temporary_dir)
+            empty_record = root / "empty stat"
+            empty_record.touch()
+            body = """
+if read_socket_process_stat {missing}; then exit 21; fi
+if read_socket_process_stat {empty}; then exit 22; fi
+printf 'PROC_READER_REJECTION_PASS\\n'
+""".format(missing=shlex.quote(str(root / "missing stat")), empty=shlex.quote(str(empty_record)))
+            script = self._socket_ownership_function_script(root, body)
+            completed = self._run_socket_identity_fixture(script, root / "unused identity")
+            self.assertEqual(0, completed.returncode, completed.stdout + completed.stderr)
+            self.assertIn("PROC_READER_REJECTION_PASS", completed.stdout)
+            self.assertNotIn("No such file", completed.stderr)
+
+    @unittest.skipUnless(os.name == "posix" and os.path.isdir("/proc"), "Linux process-group behavior")
     def test_sim_template_stale_sidecar_birth_time_never_signals_live_group(self):
         with tempfile.TemporaryDirectory(prefix="sidecar stale identity ") as temporary_dir:
             root = Path(temporary_dir)
