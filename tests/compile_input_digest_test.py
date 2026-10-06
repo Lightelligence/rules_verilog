@@ -133,12 +133,73 @@ class CompileInputDigestTest(unittest.TestCase):
         compile_input_digest.merge_digest(self.manifest, self.output, self.inventory, index_list)
         return self.inventory.read_bytes(), self.output.read_text(encoding="ascii").strip()
 
-    def index(self, records, name="index"):
+    def index(self, records, name="index", children=None):
         manifest = self.root / (name + ".txt")
         manifest.write_text("".join("{}\t{}\n".format(entry, path) for entry, path in records), encoding="utf-8")
         index = self.root / (name + ".json")
-        compile_input_digest.generate_index(manifest, index)
+        index_list = None
+        if children is not None:
+            index_list = self.root / (name + "_children.txt")
+            index_list.write_text("".join(str(path) + "\n" for path in children), encoding="utf-8")
+        compile_input_digest.generate_index(manifest, index, index_list)
         return index
+
+    def test_recursive_diamond_indices_hash_each_source_once(self):
+        shared = [("source\tcommon.sv", self.source("common.sv", b"shared"))]
+        left = [("source\tleft.sv", self.source("left.sv", b"left"))]
+        right = [("source\tright.sv", self.source("right.sv", b"right"))]
+        extra = [("source\tforeign.out", self.source("foreign.out", b"custom provider output"))]
+        records = shared + left + right + extra
+        with mock.patch.object(compile_input_digest, "file_digest", wraps=compile_input_digest.file_digest) as reads:
+            base = self.index(shared, "base")
+            first = self.index(shared + left, "left", [base])
+            second = self.index(shared + right, "right", [base])
+            joined = self.index(records, "joined", [first, second, first])
+            self.assertEqual(4, reads.call_count)
+            self.assertEqual({str(path) for _, path in records}, {call.args[0] for call in reads.call_args_list})
+        expected = self.shared(records, [self.index(records, "flat")])
+        self.assertEqual(expected, self.shared(records, [joined]))
+        shared[0][1].write_bytes(b"changed shared source")
+        base = self.index(shared, "base")
+        first = self.index(shared + left, "left", [base])
+        second = self.index(shared + right, "right", [base])
+        joined = self.index(records, "joined", [first, second])
+        self.assertNotEqual(expected, self.shared(records, [joined]))
+
+    def test_child_indices_do_not_add_unexposed_provider_outputs(self):
+        visible = [("source\tvisible.sv", self.source("visible.sv"))]
+        hidden = [("source\thidden.sv", self.source("hidden.sv"))]
+        child = self.index(visible + hidden, "child")
+        with mock.patch.object(compile_input_digest, "file_digest", side_effect=AssertionError("unexpected read")):
+            parent = self.index(visible, "parent", [child])
+        self.assertEqual({str(visible[0][1]): hashlib.sha256(visible[0][1].read_bytes()).hexdigest()},
+                         json.loads(parent.read_text(encoding="utf-8")))
+
+    def test_recursive_index_cli_uses_child_hashes_without_reopening_sources(self):
+        records = [("source\ttop.sv", self.source("top.sv"))]
+        child = self.index(records, "child")
+        children = self.root / "cli_children.txt"
+        children.write_text(str(child) + "\n", encoding="utf-8")
+        records[0][1].unlink()
+        output = self.root / "cli_index.json"
+        subprocess.run([
+            sys.executable, compile_input_digest.__file__, "--index",
+            str(self.root / "child.txt"),
+            str(output),
+            str(children)
+        ],
+                       check=True)
+        self.assertEqual(child.read_bytes(), output.read_bytes())
+
+    def test_recursive_index_rejects_conflicting_or_corrupt_children(self):
+        records = [("source\ttop.sv", self.source("top.sv"))]
+        good = self.index(records, "good")
+        bad = self.root / "bad.json"
+        for value, reason in [("corrupt", "Malformed"), ("0" * 64, "Conflicting")]:
+            bad.write_text(json.dumps({str(records[0][1]): value}), encoding="utf-8")
+            with self.assertRaisesRegex(RuntimeError, reason):
+                self.index(records, "bad-parent", [good, bad])
+        self.assertFalse((self.root / "bad-parent.json").exists())
 
     def test_shared_digest_matches_independent_reference_without_source_reads(self):
         source = self.source("space 模块.sv", b"sv\x00\xff")

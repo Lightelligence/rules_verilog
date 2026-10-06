@@ -820,6 +820,7 @@ class RegressionDiscoveryTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             config = self._config(Path(directory))
             target = "//benches/soc_tb/tests/sub:inherited"
+            config.options.tests[0].btiglob = "soc_tb:inherited"
             config._run_command = mock.Mock(side_effect=[
                 (0, "//benches/soc_tb:soc_tb\n", ""),
                 (0,
@@ -837,6 +838,112 @@ class RegressionDiscoveryTest(unittest.TestCase):
             self.assertEqual({target, "//benches/soc_tb:soc_tb"}, config.discovery_prebuilt_targets)
             build = config._run_command.call_args.args[0]
             self.assertEqual(["bazel", "build", target, "//benches/soc_tb:soc_tb"], build)
+
+    def test_discovery_filters_wildcard_bench_and_tags_before_building_artifacts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config = self._config(Path(directory))
+            config.options.tests = [SimpleNamespace(btiglob="*:*@3", tag={"smoke"}, ntag={"disabled"})]
+            config.options.global_tag = {"ready"}
+            config.options.global_ntag = {"slow"}
+            benches = ["//benches/{}_tb:{}_tb".format(name, name) for name in ("soc", "other")]
+            records = [[bench.rsplit(":", 1)[0] + "/tests:case_{}".format(index), bench, ["bulk"], "XRUN"]
+                       for bench in benches for index in range(50)]
+            selected = "//benches/soc_tb/tests:chosen"
+            records.extend([
+                [selected, benches[0], ["smoke", "ready"], "VCS"],
+                ["//benches/other_tb/tests:missing_global_tag", benches[1], ["smoke"], "XRUN"],
+                ["//benches/other_tb/tests:disabled", benches[1], ["smoke", "ready", "disabled"], "XRUN"],
+                ["//benches/other_tb/tests:slow", benches[1], ["smoke", "ready", "slow"], "XRUN"],
+            ])
+            config._run_command = mock.Mock(side_effect=[
+                (0, "\n".join(benches), ""),
+                (0, repr(records), ""),
+                (0, "", ""),
+            ])
+            with mock.patch("lib.regression.rv_utils.DatetimePrinter", _Timer):
+                config.test_discovery_all()
+            self.assertEqual(["bazel", "build", selected, benches[0]], config._run_command.call_args.args[0])
+            self.assertEqual({selected, benches[0]}, config.discovery_prebuilt_targets)
+            # The cache retains every candidate so a later tag selection needs
+            # no discovery refresh, including the other simulator/bench.
+            cached = config._load_discovery_cache_generation()
+            self.assertEqual(104, sum(len(tests) for tests in cached[0].values()))
+            self.assertEqual(104, len(cached[1]))
+            self.assertEqual("XRUN", cached[2][records[0][0]])
+            config.use_cached_discovery = False
+            config.test_discovery_match()
+            self.assertEqual({benches[0]: {selected: 3}}, config.all_vcomp)
+            self.assertEqual(3, config._run_command.call_count)
+
+    def test_cached_discovery_refreshes_selected_source_outputs_and_keeps_full_cache(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config = self._config(Path(directory))
+            bench = "//benches/soc_tb:soc_tb"
+            selected = "//benches/soc_tb/tests:dma_single_transfer"
+            unselected = "//benches/soc_tb/tests:other"
+            config.all_vcomp = {bench: {selected: 0, unselected: 0}}
+            config.tests_to_tags = {selected: [], unselected: []}
+            config.tests_to_simulator = {selected: "VCS", unselected: "VCS"}
+            config._publish_discovery_cache()
+            original_cache = Path(config._discovery_cache_path()).read_bytes()
+            self.assertTrue(config._should_use_cached_discovery())
+            config.use_cached_discovery = True
+            config._run_command = mock.Mock(return_value=(0, "", ""))
+            with mock.patch("lib.regression.rv_utils.DatetimePrinter", _Timer):
+                config.test_discovery_match()
+                # A source edit leaves query metadata fresh, but must still ask
+                # Bazel to refresh the selected compile inventory/runfiles.
+                Path(directory, "selected.sv").write_text("module changed; endmodule\n", encoding="utf-8")
+                config.test_discovery_match()
+            self.assertEqual(2, config._run_command.call_count)
+            config._run_command.assert_called_with(["bazel", "build", selected, bench])
+            self.assertEqual({selected, bench}, config.discovery_prebuilt_targets)
+            self.assertEqual({bench: {selected: 1}}, config.all_vcomp)
+            self.assertEqual({selected: 0, unselected: 0}, config._cached_discovery[0][bench])
+            self.assertEqual(original_cache, Path(config._discovery_cache_path()).read_bytes())
+
+    def test_selected_materialization_preserves_no_bazel_no_compile_and_discovery_only(self):
+        for cached, no_bazel, no_compile, discovery_only in (
+            (False, False, True, False),
+            (False, True, True, False),
+            (True, True, False, False),
+            (True, True, True, False),
+            (True, False, True, False),
+            (True, False, False, True),
+        ):
+            with self.subTest(cached=cached, no_bazel=no_bazel, no_compile=no_compile,
+                              discovery_only=discovery_only), tempfile.TemporaryDirectory() as directory:
+                config = self._config(Path(directory))
+                bench = "//benches/soc_tb:soc_tb"
+                selected = "//benches/soc_tb/tests:dma_single_transfer"
+                config.all_vcomp = {bench: {selected: 0, "//benches/soc_tb/tests:other": 0}}
+                config.tests_to_tags = {test: [] for test in config.all_vcomp[bench]}
+                config.tests_to_simulator = {test: "XRUN" for test in config.all_vcomp[bench]}
+                config.options.no_bazel = no_bazel
+                config.options.no_compile = no_compile
+                config.options.discovery_only = discovery_only
+                config.use_cached_discovery = cached
+                config.discovery_prebuilt_targets = set()
+                config._cached_discovery = (config.all_vcomp, config.tests_to_tags, config.tests_to_simulator)
+                config._run_command = mock.Mock(return_value=(0, "", ""))
+                with mock.patch("lib.regression.rv_utils.DatetimePrinter", _Timer):
+                    if not cached:
+                        # Fresh metadata collection is permitted for implicit
+                        # no_bazel/no_compile fallback; only cfgs are built.
+                        config._build_selected_discovery_targets(config._select_requested_tests())
+                    if discovery_only:
+                        with self.assertRaises(SystemExit) as raised:
+                            config.test_discovery_match()
+                        self.assertEqual(0, raised.exception.code)
+                    else:
+                        config.test_discovery_match()
+                if cached and no_bazel:
+                    config._run_command.assert_not_called()
+                    self.assertEqual(set(), config.discovery_prebuilt_targets)
+                else:
+                    targets = [selected] + ([] if no_compile else [bench])
+                    config._run_command.assert_called_once_with(["bazel", "build", *targets])
+                    self.assertEqual(set(targets), config.discovery_prebuilt_targets)
 
     def test_cquery_failures_are_not_ignored_or_retried(self):
         for code, stderr in ((1, "BUILD file error"), (37, "unrelated internal error"),

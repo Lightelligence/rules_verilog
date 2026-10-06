@@ -1919,6 +1919,399 @@ run_bounded_process([
         self.assertEqual(["waves.shm"], viewer_args.read_text(encoding="utf-8").splitlines())
 
     @unittest.skipUnless(os.name == "posix" and os.path.isdir("/proc"), "Linux process-group behavior")
+    def test_sim_template_cleans_live_descendant_after_sidecar_leader_exits(self):
+        with tempfile.TemporaryDirectory(prefix="sidecar orphan contract ") as temporary_dir:
+            root = Path(temporary_dir)
+            project, job = root / "project", root / "job"
+            project.mkdir()
+            job.mkdir()
+            endpoint, child_pid_file = root / "socket", root / "child.pid"
+            sidecar = root / "fork_sidecar.py"
+            sidecar.write_text(
+                "import os, pathlib, sys, time\n"
+                "leader = os.getpid()\n"
+                "leader_start = pathlib.Path('/proc/self/stat').read_text().rsplit(')', 1)[1].split()[19]\n"
+                "pathlib.Path(sys.argv[1]).touch()\n"
+                "child = os.fork()\n"
+                "if child == 0:\n"
+                "    child_start = pathlib.Path('/proc/self/stat').read_text().rsplit(')', 1)[1].split()[19]\n"
+                "    pathlib.Path(sys.argv[2]).write_text(f'{os.getpid()} {child_start}\\n{leader} {leader_start}\\n')\n"
+                "    time.sleep(60)\n"
+                "else:\n"
+                "    time.sleep(0.2)\n"
+                "    os._exit(0)\n",
+                encoding="utf-8",
+            )
+            rendered = self._render_simulation_script(
+                project,
+                job,
+                "sleep 0.3",
+                socket_sidecars=[("bridge",
+                                  shlex.join([sys.executable,
+                                              str(sidecar),
+                                              str(endpoint),
+                                              str(child_pid_file)]), str(endpoint))],
+            )
+            script = job / "sim.sh"
+            script.write_text(rendered, encoding="utf-8")
+            process = subprocess.Popen(["bash", str(script)],
+                                       start_new_session=True,
+                                       stdout=subprocess.PIPE,
+                                       stderr=subprocess.PIPE,
+                                       text=True)
+            child_pid = None
+            try:
+                stdout, stderr = process.communicate(timeout=15)
+                self.assertTrue(child_pid_file.exists(), stdout + stderr)
+                child_pid = int(child_pid_file.read_text(encoding="utf-8").split()[0])
+                self.assertFalse(self._linux_process_is_live(child_pid), "leader exited but its descendant survived")
+                self.assertFalse(endpoint.exists())
+                self.assertFalse((job / ".socket_sidecar_pgids").exists(), "dead sidecar registry remained")
+            finally:
+                if process.poll() is None:
+                    os.killpg(process.pid, signal.SIGKILL)
+                    process.wait(timeout=5)
+                self._kill_linux_test_group_from_identity(job / ".socket_sidecar_pgids", process.pid)
+                self._kill_linux_test_group_from_identity(child_pid_file, process.pid)
+
+    @staticmethod
+    def _linux_process_is_live(pid):
+        try:
+            fields = Path("/proc/{}/stat".format(pid)).read_text(encoding="utf-8").rsplit(")", 1)[1].split()
+            return fields[0] != "Z"
+        except FileNotFoundError:
+            return False
+
+    @staticmethod
+    def _linux_test_process_stat(path):
+        try:
+            fields = path.read_text(encoding="utf-8").rsplit(")", 1)[1].split()
+            return fields if len(fields) >= 20 else None
+        except (OSError, IndexError):
+            return None
+
+    @classmethod
+    def _kill_linux_test_group_from_identity(cls, identity_path, expected_session):
+        if not identity_path.exists():
+            return
+        for line in identity_path.read_text(encoding="utf-8").splitlines():
+            identity = line.split()
+            if len(identity) != 2 or not all(value.isdigit() for value in identity):
+                continue
+            pid, expected_start = identity
+            fields = cls._linux_test_process_stat(Path("/proc/{}/stat".format(pid)))
+            if fields is not None:
+                # A recycled leader must never authorize its former group.
+                if fields[19] != expected_start or fields[2] != pid or fields[3] != str(expected_session):
+                    continue
+                live_owned_member = fields[0] not in ("Z", "X")
+            else:
+                live_owned_member = False
+            if not live_owned_member:
+                for stat_path in Path("/proc").glob("[0-9]*/stat"):
+                    member = cls._linux_test_process_stat(stat_path)
+                    if member and member[0] not in ("Z",
+                                                    "X") and member[2] == pid and member[3] == str(expected_session):
+                        live_owned_member = True
+                        break
+            if live_owned_member:
+                # Recheck a newly reused leader after the member scan before
+                # issuing any group signal on the shared execution host.
+                latest = cls._linux_test_process_stat(Path("/proc/{}/stat".format(pid)))
+                if latest and (latest[19] != expected_start or latest[2] != pid or latest[3] != str(expected_session)):
+                    continue
+                try:
+                    os.killpg(int(pid), signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+
+    def _run_socket_identity_fixture(self, script, identity):
+        process = subprocess.Popen(["bash", str(script)],
+                                   start_new_session=True,
+                                   stdout=subprocess.PIPE,
+                                   stderr=subprocess.PIPE,
+                                   text=True)
+        try:
+            stdout, stderr = process.communicate(timeout=10)
+            return subprocess.CompletedProcess(process.args, process.returncode, stdout, stderr)
+        finally:
+            self._kill_linux_test_group_from_identity(identity, process.pid)
+            if process.poll() is None:
+                process.kill()
+                process.wait(timeout=5)
+
+    def _socket_ownership_function_script(self, root, body):
+        project, job = root / "project", root / "job"
+        project.mkdir()
+        job.mkdir()
+        rendered = self._render_simulation_script(project,
+                                                  job,
+                                                  "true",
+                                                  socket_sidecars=[("bridge", "true", str(root / "endpoint"))])
+        prefix = rendered.split("\nfunction run_test {", 1)[0]
+        script = root / "ownership.sh"
+        script.write_text(prefix + "\n" + body + "\n", encoding="utf-8")
+        return script
+
+    @unittest.skipUnless(os.name == "posix" and os.path.isdir("/proc"), "Linux process-group behavior")
+    def test_sim_template_proc_reader_rejects_missing_and_empty_records(self):
+        with tempfile.TemporaryDirectory(prefix="sidecar missing proc ") as temporary_dir:
+            root = Path(temporary_dir)
+            empty_record = root / "empty stat"
+            empty_record.touch()
+            body = """
+if read_socket_process_stat {missing}; then exit 21; fi
+if read_socket_process_stat {empty}; then exit 22; fi
+printf 'PROC_READER_REJECTION_PASS\\n'
+""".format(missing=shlex.quote(str(root / "missing stat")), empty=shlex.quote(str(empty_record)))
+            script = self._socket_ownership_function_script(root, body)
+            completed = self._run_socket_identity_fixture(script, root / "unused identity")
+            self.assertEqual(0, completed.returncode, completed.stdout + completed.stderr)
+            self.assertIn("PROC_READER_REJECTION_PASS", completed.stdout)
+            self.assertNotIn("No such file", completed.stderr)
+
+    @unittest.skipUnless(os.name == "posix" and os.path.isdir("/proc"), "Linux process-group behavior")
+    def test_sim_template_stale_sidecar_birth_time_never_signals_live_group(self):
+        with tempfile.TemporaryDirectory(prefix="sidecar stale identity ") as temporary_dir:
+            root = Path(temporary_dir)
+            identity = root / "identity"
+            child_code = ("import os,pathlib,time; "
+                          "fields=pathlib.Path('/proc/self/stat').read_text().rsplit(')',1)[1].split(); "
+                          "pathlib.Path({!r}).write_text(str(os.getpid())+' '+fields[19]); time.sleep(60)".format(
+                              str(identity)))
+            body = """
+set -m
+{command} &
+sidecar_pid=$!
+set +m
+trap 'kill -KILL -- "-$sidecar_pid" 2>/dev/null || true; wait "$sidecar_pid" 2>/dev/null || true' EXIT
+while [ ! -s {identity} ]; do sleep 0.01; done
+read -r recorded_pid expected_start_time < {identity} || true
+socket_sidecar_group_is_owned "$sidecar_pid" "$expected_start_time" || exit 21
+stale_start_time=$((expected_start_time + 1))
+printf '%s %s\\n' "$sidecar_pid" "$stale_start_time" > "$SOCKET_SIDECAR_GROUPS_FILE"
+terminate_socket_sidecars
+kill -0 "$sidecar_pid" || exit 22
+socket_sidecar_group_is_owned "$sidecar_pid" "$stale_start_time" && exit 23
+exit 0
+""".format(command=shlex.join([sys.executable, "-c", child_code]), identity=shlex.quote(str(identity)))
+            script = self._socket_ownership_function_script(root, body)
+            completed = self._run_socket_identity_fixture(script, identity)
+            self.assertEqual(0, completed.returncode, completed.stdout + completed.stderr)
+
+    @unittest.skipUnless(os.name == "posix" and os.path.isdir("/proc"), "Linux process-group behavior")
+    def test_sim_template_rejects_sidecar_group_from_another_session(self):
+        with tempfile.TemporaryDirectory(prefix="sidecar wrong session ") as temporary_dir:
+            root = Path(temporary_dir)
+            foreign = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"], start_new_session=True)
+            try:
+                fields = Path("/proc/{}/stat".format(foreign.pid)).read_text(encoding="utf-8").rsplit(")", 1)[1].split()
+                body = """
+printf '%s %s\\n' {pid} {start_time} > "$SOCKET_SIDECAR_GROUPS_FILE"
+socket_sidecar_group_is_owned {pid} {start_time} && exit 21
+terminate_socket_sidecars
+kill -0 {pid} || exit 22
+trap - EXIT
+exit 0
+""".format(pid=foreign.pid, start_time=fields[19])
+                script = self._socket_ownership_function_script(root, body)
+                completed = subprocess.run(["bash", str(script)],
+                                           start_new_session=True,
+                                           capture_output=True,
+                                           text=True,
+                                           timeout=10)
+                self.assertEqual(0, completed.returncode, completed.stdout + completed.stderr)
+                self.assertIsNone(foreign.poll(), "cleanup signalled a process in another session")
+            finally:
+                foreign.kill()
+                foreign.wait(timeout=5)
+
+    @unittest.skipUnless(os.name == "posix" and os.path.isdir("/proc"), "Linux process-group behavior")
+    def test_sim_template_proc_identity_handles_spaces_and_parentheses_in_comm(self):
+        with tempfile.TemporaryDirectory(prefix="sidecar comm identity ") as temporary_dir:
+            root = Path(temporary_dir)
+            identity = root / "identity"
+            child_code = ("import ctypes,os,pathlib,time; ctypes.CDLL(None).prctl(15,b'owner ) ( name',0,0,0); "
+                          "fields=pathlib.Path('/proc/self/stat').read_text().rsplit(')',1)[1].split(); "
+                          "pathlib.Path({!r}).write_text(str(os.getpid())+' '+fields[19]); time.sleep(60)".format(
+                              str(identity)))
+            body = """
+set -m
+{command} &
+sidecar_pid=$!
+set +m
+trap 'kill -KILL -- "-$sidecar_pid" 2>/dev/null || true; wait "$sidecar_pid" 2>/dev/null || true' EXIT
+while [ ! -s {identity} ]; do sleep 0.01; done
+read -r recorded_pid expected_start_time < {identity} || true
+socket_sidecar_group_is_owned "$sidecar_pid" "$expected_start_time" || exit 21
+socket_sidecar_process_is_running "$sidecar_pid" "$expected_start_time" || exit 22
+exit 0
+""".format(command=shlex.join([sys.executable, "-c", child_code]), identity=shlex.quote(str(identity)))
+            script = self._socket_ownership_function_script(root, body)
+            completed = self._run_socket_identity_fixture(script, identity)
+            self.assertEqual(0, completed.returncode, completed.stdout + completed.stderr)
+
+    @unittest.skipUnless(os.name == "posix" and os.path.isdir("/proc"), "Linux process-group behavior")
+    def test_sim_template_delayed_wrapper_stop_does_not_lose_continue(self):
+        with tempfile.TemporaryDirectory(prefix="sidecar delayed stop ") as temporary_dir:
+            root = Path(temporary_dir)
+            project, job = root / "project", root / "job"
+            project.mkdir()
+            job.mkdir()
+            endpoint, simulation_marker = root / "socket", root / "simulation-ran"
+            sidecar_command = ": > {}; while :; do :; done".format(shlex.quote(str(endpoint)))
+            rendered = self._render_simulation_script(project,
+                                                      job,
+                                                      "touch {}".format(shlex.quote(str(simulation_marker))),
+                                                      socket_sidecars=[("bridge", sidecar_command, str(endpoint))])
+            self.assertEqual(1, rendered.count('kill -STOP "$$"'), "startup injection anchor changed")
+            rendered = rendered.replace('kill -STOP "$$"', 'sleep 0.10; kill -STOP "$$"', 1)
+            rendered = rendered.replace('[ "$graceful_wait_seconds" -lt 5 ]', '[ "$graceful_wait_seconds" -lt 0 ]')
+            script = job / "sim.sh"
+            script.write_text(rendered, encoding="utf-8")
+            process = subprocess.Popen(["bash", str(script)],
+                                       start_new_session=True,
+                                       stdout=subprocess.PIPE,
+                                       stderr=subprocess.PIPE,
+                                       text=True)
+            try:
+                stdout, stderr = process.communicate(timeout=10)
+                self.assertEqual(0, process.returncode, stdout + stderr)
+                self.assertTrue(simulation_marker.exists(), "wrapper never executed its registered command")
+                self.assertFalse(endpoint.exists())
+                self.assertFalse((job / ".socket_sidecar_pgids").exists())
+                self.assertFalse(list(job.glob(".socket_sidecar_pgids.started.*")), "startup acknowledgement remained")
+            finally:
+                self._kill_linux_test_group_from_identity(job / ".socket_sidecar_pgids", process.pid)
+                if process.poll() is None:
+                    process.kill()
+                    process.wait(timeout=5)
+
+    @unittest.skipUnless(os.name == "posix" and os.path.isdir("/proc"), "Linux process-group behavior")
+    def test_sim_template_accepts_ack_written_after_first_check_when_wrapper_exits(self):
+        with tempfile.TemporaryDirectory(prefix="sidecar acknowledgement race ") as temporary_dir:
+            root = Path(temporary_dir)
+            project, job = root / "project", root / "job"
+            project.mkdir()
+            job.mkdir()
+            endpoint, simulation_marker, race_proof = root / "socket", root / "simulation-ran", root / "race-proof.json"
+            started_file = job / ".socket_sidecar_pgids.started.1"
+            race_helper = root / "resume_after_parent_ack_check.py"
+            race_helper.write_text(
+                "import json, os, pathlib, signal, sys, time\n"
+                "pid, start_time, session = sys.argv[1:]\n"
+                "started_file = pathlib.Path({started_file!r})\n"
+                "endpoint = pathlib.Path({endpoint!r})\n"
+                "proof_file = pathlib.Path({proof_file!r})\n"
+                "assert not started_file.exists(), 'first parent check must observe absent acknowledgement'\n"
+                "deadline = time.monotonic() + 3\n"
+                "while True:\n"
+                "    fields = pathlib.Path('/proc/' + pid + '/stat').read_text().rsplit(')', 1)[1].split()\n"
+                "    assert fields[2] == pid and fields[3] == session and fields[19] == start_time\n"
+                "    if fields[0] == 'T':\n"
+                "        break\n"
+                "    assert time.monotonic() < deadline, 'registered wrapper did not stop'\n"
+                "    time.sleep(0.005)\n"
+                "os.killpg(int(pid), signal.SIGCONT)\n"
+                "while True:\n"
+                "    try:\n"
+                "        fields = pathlib.Path('/proc/' + pid + '/stat').read_text().rsplit(')', 1)[1].split()\n"
+                "        exited = fields[0] in ('Z', 'X')\n"
+                "    except FileNotFoundError:\n"
+                "        exited = True\n"
+                "    if exited and started_file.exists() and endpoint.exists():\n"
+                "        break\n"
+                "    assert time.monotonic() < deadline, 'wrapper did not acknowledge, create endpoint and exit'\n"
+                "    time.sleep(0.005)\n"
+                "assert started_file.read_text().split() == [pid, start_time]\n"
+                "proof_file.write_text(json.dumps(dict(ack_absent_before_resume=True, stopped_before_resume=True,\n"
+                "                                     valid_ack_before_parent_stat=True, leader_exited_before_parent_stat=True)))\n"
+                .format(started_file=str(started_file), endpoint=str(endpoint), proof_file=str(race_proof)),
+                encoding="utf-8",
+            )
+            rendered = self._render_simulation_script(project,
+                                                      job,
+                                                      "touch {}".format(shlex.quote(str(simulation_marker))),
+                                                      socket_sidecars=[("bridge",
+                                                                        ": > {}".format(shlex.quote(str(endpoint))),
+                                                                        str(endpoint))])
+            stat_lookup = '        if ! read_socket_process_stat "/proc/$SOCKET_SIDECAR_1_PID/stat" || \\\n'
+            self.assertEqual(1, rendered.count(stat_lookup), "parent lookup injection anchor changed")
+            delayed_lookup = "        {} \"$SOCKET_SIDECAR_1_PID\" \"$sidecar_start_time\" \"$SIMMER_SESSION_ID\"\n".format(
+                shlex.join([sys.executable, str(race_helper)]))
+            rendered = rendered.replace(stat_lookup, delayed_lookup + stat_lookup, 1)
+            script = job / "sim.sh"
+            script.write_text(rendered, encoding="utf-8")
+            process = subprocess.Popen(["bash", str(script)],
+                                       start_new_session=True,
+                                       stdout=subprocess.PIPE,
+                                       stderr=subprocess.PIPE,
+                                       text=True)
+            try:
+                stdout, stderr = process.communicate(timeout=10)
+                self.assertTrue(race_proof.exists(), stdout + stderr)
+                self.assertTrue(all(json.loads(race_proof.read_text(encoding="utf-8")).values()))
+                self.assertEqual(0, process.returncode, stdout + stderr)
+                self.assertTrue(simulation_marker.exists(), "valid acknowledgement was rejected after wrapper exit")
+                self.assertFalse(endpoint.exists())
+                self.assertFalse((job / ".socket_sidecar_pgids").exists())
+                self.assertFalse(started_file.exists(), "startup acknowledgement remained")
+            finally:
+                self._kill_linux_test_group_from_identity(job / ".socket_sidecar_pgids", process.pid)
+                if process.poll() is None:
+                    process.kill()
+                    process.wait(timeout=5)
+
+    @unittest.skipUnless(os.name == "posix" and os.path.isdir("/proc"), "Linux process-group behavior")
+    def test_sim_template_missing_wrapper_registration_fails_with_bounded_cleanup(self):
+        with tempfile.TemporaryDirectory(prefix="sidecar missing registry ") as temporary_dir:
+            root = Path(temporary_dir)
+            project, job = root / "project", root / "job"
+            project.mkdir()
+            job.mkdir()
+            endpoint, simulation_marker, wrapper_identity = root / "socket", root / "simulation-ran", root / "wrapper.pid"
+            rendered = self._render_simulation_script(project,
+                                                      job,
+                                                      "touch {}".format(shlex.quote(str(simulation_marker))),
+                                                      socket_sidecars=[("bridge",
+                                                                        ": > {}".format(shlex.quote(str(endpoint))),
+                                                                        str(endpoint))])
+            self.assertEqual(1, rendered.count('>> "$registry"'), "registration injection anchor changed")
+            rendered = rendered.replace('>> "$registry"', '> /dev/null', 1)
+            self.assertIn("local socket_registration_max_attempts=3000", rendered,
+                          "bounded startup injection anchor changed")
+            rendered = rendered.replace("local socket_registration_max_attempts=3000",
+                                        "local socket_registration_max_attempts=20")
+            rendered = rendered.replace(
+                'kill -STOP "$$"',
+                'printf "%s %s\\n" "$$" "$start_time" > "{}"; kill -STOP "$$"'.format(str(wrapper_identity)), 1)
+            script = job / "sim.sh"
+            script.write_text(rendered, encoding="utf-8")
+            process = subprocess.Popen(["bash", str(script)],
+                                       start_new_session=True,
+                                       stdout=subprocess.PIPE,
+                                       stderr=subprocess.PIPE,
+                                       text=True)
+            try:
+                started = time.monotonic()
+                stdout, stderr = process.communicate(timeout=10)
+                self.assertLess(time.monotonic() - started, 8, "registration failure was not bounded")
+                self.assertNotEqual(0, process.returncode, stdout + stderr)
+                self.assertFalse(simulation_marker.exists(), "simulation ran without sidecar registration")
+                self.assertTrue(wrapper_identity.exists(), "the stalled wrapper never started")
+                wrapper_pid = int(wrapper_identity.read_text(encoding="utf-8").split()[0])
+                self.assertFalse(self._linux_process_is_live(wrapper_pid), "unregistered wrapper survived failure")
+                self.assertFalse(endpoint.exists())
+                self.assertFalse((job / ".socket_sidecar_pgids").exists())
+                self.assertFalse(list(job.glob(".socket_sidecar_pgids.started.*")), "startup acknowledgement remained")
+            finally:
+                self._kill_linux_test_group_from_identity(wrapper_identity, process.pid)
+                self._kill_linux_test_group_from_identity(job / ".socket_sidecar_pgids", process.pid)
+                if process.poll() is None:
+                    process.kill()
+                    process.wait(timeout=5)
+
+    @unittest.skipUnless(os.name == "posix" and os.path.isdir("/proc"), "Linux process-group behavior")
     def test_sim_template_cleans_socket_sidecar_after_unexpected_failure(self):
         # Given: a long-running socket sidecar and an invalid simulation work directory.
         temporary_root = Path(tempfile.mkdtemp(prefix="sim socket contract "))

@@ -130,12 +130,24 @@ def _extra_input_digests(paths):
     path_digest = hashlib.sha256()
     content_digests = []
     for path in sorted(os.path.abspath(os.fspath(path)) for path in paths if path):
-        content = _file_bytes(path)
         path_digest.update(path.encode("utf-8"))
         path_digest.update(b"\0")
-        path_digest.update(content)
+        before_content = path_digest.copy()
+        content_digest = hashlib.sha256()
+        try:
+            with open(path, "rb") as filep:
+                for chunk in iter(lambda: filep.read(1024 * 1024), b""):
+                    path_digest.update(chunk)
+                    content_digest.update(chunk)
+        except OSError:
+            # Preserve the previous identity for absent/unreadable inputs.
+            path_digest = before_content
+            content_digest = hashlib.sha256()
+            path_digest.update(b"<missing>")
+            content_digest.update(b"<missing>")
         path_digest.update(b"\0")
-        content_digests.append(_digest_bytes(content))
+        content_digest.update(b"\0")
+        content_digests.append(content_digest.hexdigest())
     content_digest = _digest_bytes(*(digest.encode("ascii") for digest in sorted(content_digests)))
     return path_digest.hexdigest(), content_digest
 
@@ -157,6 +169,17 @@ def discover_filelist_inputs(filelist_path, working_directory):
     discovered = set()
     parsed_filelists = set()
     pending = [(root_filelist, working_directory)]
+    source_paths = set()
+    include_directories = set()
+    directory_contents = {}
+
+    def directory_inputs(path):
+        # Cache only this discovery: the next invocation must see edits and
+        # newly created headers, including files with arbitrary extensions.
+        key = os.path.abspath(path)
+        if key not in directory_contents:
+            directory_contents[key] = tuple(_directory_inputs(path))
+        return directory_contents[key]
 
     def unquote(value):
         value = value.strip()
@@ -173,7 +196,7 @@ def discover_filelist_inputs(filelist_path, working_directory):
         if os.path.isfile(resolved):
             discovered.add(resolved)
         elif include_directory and os.path.isdir(resolved):
-            discovered.update(_directory_inputs(resolved))
+            discovered.update(directory_inputs(resolved))
         return resolved
 
     while pending:
@@ -188,46 +211,92 @@ def discover_filelist_inputs(filelist_path, working_directory):
             with open(current_filelist, "r", encoding="utf-8", errors="surrogateescape") as filep:
                 # Simulator filelists are usually POSIX shell syntax, but the
                 # library is also exercised on Windows where drive-letter
-                # paths contain backslashes.  ``posix=True`` treats those
-                # backslashes as escapes and silently turns e.g.
+                # paths contain backslashes. Default POSIX escaping turns e.g.
                 # ``C:\\work\\dut.sv`` into ``C:workdut.sv``.  Preserve
-                # native Windows paths while retaining the existing POSIX
-                # parsing rules on licensed Linux hosts.
-                tokens = [unquote(token) for token in shlex.split(filep.read(), comments=True, posix=os.name != "nt")]
+                # native Windows paths without losing quotes inside attached
+                # options; retain POSIX escaping on licensed Linux hosts.
+                lexer = shlex.shlex(filep.read(), posix=True)
+                lexer.whitespace_split = True
+                if os.name == "nt":
+                    lexer.escape = ""
+                tokens = list(lexer)
         except ValueError:
             continue
 
         index = 0
         while index < len(tokens):
             token = tokens[index]
+            if token in ("-o", "-l") and index + 1 < len(tokens):
+                index += 2
+                continue
             if token in ("-f", "-file", "-F") and index + 1 < len(tokens):
                 nested = add_path(tokens[index + 1], relative_base)
                 contents_base = os.path.dirname(nested) if token == "-F" else relative_base
                 pending.append((nested, contents_base))
                 index += 2
                 continue
-            if token.startswith("-file="):
-                nested = add_path(token.split("=", 1)[1], relative_base)
-                pending.append((nested, relative_base))
+            option, separator, value = token.partition("=")
+            if separator and option in ("-f", "-file", "-F"):
+                nested = add_path(value, relative_base)
+                contents_base = os.path.dirname(nested) if option == "-F" else relative_base
+                pending.append((nested, contents_base))
+                index += 1
+                continue
+            # Only input-file switches: output options such as -o=simv must
+            # never make the previous build part of its own fingerprint.
+            if separator and option in ("-xprop", "-gfile", "-cm_hier", "-libmap"):
+                add_path(value, relative_base)
+                index += 1
+                continue
+            if token.startswith("+optconfigfile+"):
+                add_path(token[len("+optconfigfile+"):], relative_base)
                 index += 1
                 continue
             if token.startswith("+incdir+"):
                 for directory in token[len("+incdir+"):].split("+"):
                     if directory:
-                        add_path(directory, relative_base, include_directory=True)
+                        include_directories.add(add_path(directory, relative_base, include_directory=True))
                 index += 1
                 continue
             if token == "-incdir" and index + 1 < len(tokens):
-                add_path(tokens[index + 1], relative_base, include_directory=True)
+                include_directories.add(add_path(tokens[index + 1], relative_base, include_directory=True))
                 index += 2
                 continue
             if token in ("-v", "-y") and index + 1 < len(tokens):
-                add_path(tokens[index + 1], relative_base, include_directory=(token == "-y"))
+                path = add_path(tokens[index + 1], relative_base, include_directory=(token == "-y"))
+                if token == "-v":
+                    source_paths.add(path)
+                elif os.path.isdir(path):
+                    source_paths.update(directory_inputs(path))
                 index += 2
                 continue
             if not token.startswith(("-", "+")):
-                add_path(token, relative_base)
+                source_paths.add(add_path(token, relative_base))
             index += 1
+
+    # Follow literal includes even when a custom source/header lives outside
+    # every +incdir. Keep all existing candidates conservatively: simulator
+    # search ordering may vary, but changing any candidate must not allow stale
+    # reuse. Macro-generated include names still require declared input files
+    # or explicit include-directory inventories.
+    include_tokens = re.compile(
+        r'//[^\r\n]*|/\*.*?\*/|"(?:\\.|[^"\\])*"|(?:`include|\#\s*include)(?:\s|/\*.*?\*/)*"([^"\r\n]+)"', re.DOTALL)
+    pending_sources = list(source_paths)
+    parsed_sources = set()
+    while pending_sources:
+        source_path = pending_sources.pop()
+        if source_path in parsed_sources or not os.path.isfile(source_path):
+            continue
+        parsed_sources.add(source_path)
+        with open(source_path, "r", encoding="utf-8", errors="surrogateescape") as source_file:
+            text = source_file.read()
+        for match in include_tokens.finditer(text):
+            if match.group(1) is None:
+                continue
+            for base in sorted(include_directories | {os.path.dirname(source_path), working_directory}):
+                header = add_path(match.group(1), base)
+                if os.path.isfile(header):
+                    pending_sources.append(header)
 
     return sorted(discovered)
 

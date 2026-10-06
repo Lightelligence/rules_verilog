@@ -456,8 +456,52 @@ class VCompJob(Job):
         self.compile_cache_hit = False
         self._compile_lock = None
         self._shared_runtime_locks = {}
+        self._scheduler_prepared = False
+        self._prepared_launch_pending = False
+        self._preparation_needs_refresh = False
+        self._in_compile_preparation = False
+
+    @property
+    def execution_mode(self):
+        # Cache verification is control work; a miss still reserves the full
+        # compile allocation. Other backends retain their existing scheduling.
+        if self.simulator.get_name().upper() == "VCS":
+            if (not self._scheduler_prepared or self.compile_cache_hit or self.rcfg.options.no_compile):
+                return "preparation"
+        return "exclusive"
+
+    def prepare_for_launch(self):
+        if self.simulator.get_name().upper() == "VCS" and (not self._scheduler_prepared
+                                                           or self._preparation_needs_refresh):
+            self._prepared_launch_pending = False
+            self._in_compile_preparation = True
+            try:
+                self.pre_run()
+            finally:
+                self._in_compile_preparation = False
+            self._scheduler_prepared = True
+            self._prepared_launch_pending = True
+            self._preparation_needs_refresh = False
+
+    @property
+    def prepare_in_background(self):
+        return self.simulator.get_name().upper() == "VCS" and (not self._scheduler_prepared
+                                                               or self._preparation_needs_refresh)
+
+    def defer_prepared_launch(self):
+        if self._scheduler_prepared:
+            # Check current bytes again after waiting: --no-bazel inputs and
+            # external config files can change while simulations are active.
+            self._preparation_needs_refresh = True
+
+    def discard_preparation(self):
+        if self._scheduler_prepared:
+            self.cancel()
 
     def _acquire_compile_lock(self):
+        if self._compile_lock is not None:
+            self.raise_if_cancelled()
+            return
         # Keep the lock outside the mutable compile directory so recompile cleanup cannot replace it.
         lock_path = self.job_dir + ".compile.lock"
         self._compile_lock = compile_cache.CompileDirectoryLock(lock_path)
@@ -514,8 +558,24 @@ class VCompJob(Job):
         return self.bazel_runfiles_main
 
     def pre_run(self):
+        if self._prepared_launch_pending:
+            self._prepared_launch_pending = False
+            self.raise_if_cancelled()
+            super(VCompJob, self).pre_run()
+            if self.rcfg.options.recompile:
+                shutil.rmtree(self.job_dir, ignore_errors=True)
+                os.makedirs(self.job_dir, exist_ok=True)
+                sim_artifacts.write_executable_script(os.path.join(self.job_dir, "vcomp.sh"),
+                                                      self._prepared_compile_script)
+            if not self.rcfg.options.no_compile and not self.compile_cache_hit:
+                compile_cache.invalidate_compile_fingerprint(self.job_dir)
+            self.simulator.prepare_compile_execution(self,
+                                                     reusing_compile=self.rcfg.options.no_compile
+                                                     or self.compile_cache_hit)
+            return
         self._acquire_compile_lock()
         super(VCompJob, self).pre_run()
+        self.compile_cache_hit = False
 
         options = self.rcfg.options
         if options.compile_args_file and not os.path.isabs(options.compile_args_file):
@@ -565,7 +625,7 @@ class VCompJob(Job):
             self.rcfg.log.critical(f"The specified compile arguments file does not exist: {options.compile_args_file}")
             sys.exit(1)
 
-        if options.recompile:
+        if options.recompile and not self._in_compile_preparation:
             log.info("Removing vcomp library %s due to --recompile flag", self.job_dir)
             shutil.rmtree(self.job_dir, ignore_errors=True)
             os.makedirs(self.job_dir, exist_ok=True)
@@ -615,6 +675,7 @@ class VCompJob(Job):
         template_context.update(self.simulator.get_compile_template_context(self))
 
         compile_script = compile_template.render(**template_context)
+        self._prepared_compile_script = compile_script
         sim_artifacts.write_executable_script(vcomp_sh_path, compile_script)
         fingerprint_inputs = self.simulator.get_compile_fingerprint_inputs(self)
         fingerprint_script = compile_cache.normalize_compile_script_paths(
@@ -646,7 +707,7 @@ class VCompJob(Job):
             self.simulator.validate_reusable_compile_artifacts(self)
             compile_cache.validate_compile_fingerprint(self.job_dir, self.compile_fingerprint)
             self.main_cmdline = "echo \"Bypassing {} due to --no-compile\"".format(self)
-        elif self.simulator.should_auto_reuse_compile():
+        elif self.simulator.should_auto_reuse_compile() and not options.recompile:
             self.compile_cache_hit, miss_reason = compile_cache.can_reuse_compile(
                 self.job_dir,
                 self.compile_fingerprint,
@@ -667,13 +728,14 @@ class VCompJob(Job):
         else:
             self.main_cmdline = shlex.join(["bash", vcomp_sh_path])
 
-        if not self.rcfg.options.no_compile and not self.compile_cache_hit:
+        if not self._in_compile_preparation and not self.rcfg.options.no_compile and not self.compile_cache_hit:
             compile_cache.invalidate_compile_fingerprint(self.job_dir)
 
-        self.simulator.prepare_compile_execution(
-            self,
-            reusing_compile=self.rcfg.options.no_compile or self.compile_cache_hit,
-        )
+        if not self._in_compile_preparation:
+            self.simulator.prepare_compile_execution(
+                self,
+                reusing_compile=self.rcfg.options.no_compile or self.compile_cache_hit,
+            )
 
         log.debug(" > %s", self.main_cmdline)
 
