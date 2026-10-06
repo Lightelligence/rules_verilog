@@ -340,6 +340,113 @@ class CompileCacheTest(unittest.TestCase):
         self.assertEqual(sorted(map(str, (root, header))), initial_inputs)
         self.assertNotEqual(initial, changed)
 
+    def test_filelist_attached_configuration_changes_reject_reuse(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = root / "configuration with spaces.cfg"
+            filelist = root / "compile.f"
+            for option in ("-xprop", "-gfile", "-cm_hier", "-libmap", "+optconfigfile+"):
+                with self.subTest(option=option):
+                    config.write_text("first configuration\n", encoding="utf-8")
+                    filelist.write_text('{}{}"{}"\n'.format(option, "" if option.startswith("+") else "=", config),
+                                        encoding="utf-8")
+                    initial = compile_fingerprint(root,
+                                                  "vcs",
+                                                  filelist,
+                                                  extra_input_paths=discover_filelist_inputs(filelist, root))
+                    write_compile_fingerprint(root / "build", initial)
+                    config.write_text("changed configuration\n", encoding="utf-8")
+                    changed = compile_fingerprint(root,
+                                                  "vcs",
+                                                  filelist,
+                                                  extra_input_paths=discover_filelist_inputs(filelist, root))
+                    self.assertFalse(can_reuse_compile(root / "build", changed, lambda: None)[0])
+                    with self.assertRaisesRegex(RuntimeError, "fingerprint mismatch"):
+                        validate_compile_fingerprint(root / "build", changed)
+
+    def test_external_source_transitive_includes_reject_reuse(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            sources = root / "sources"
+            sources.mkdir()
+            source = sources / "top.sv"
+            header = sources / "definitions.svh"
+            nested = root / "nested.svh"
+            filelist = root / "compile.f"
+            source.write_text('`include /* dependency */ "definitions.svh"\nmodule top; endmodule\n', encoding="utf-8")
+            header.write_text('`include "{}"\n'.format(nested.as_posix()), encoding="utf-8")
+            # A cycle must terminate without missing either header.
+            nested.write_text('`include "{}"\n`define VALUE 1\n'.format(header.as_posix()), encoding="utf-8")
+            filelist.write_text('{}\n'.format(source), encoding="utf-8")
+            inputs = discover_filelist_inputs(filelist, root)
+            self.assertEqual(sorted(map(str, (filelist, source, header, nested))), inputs)
+            initial = compile_fingerprint(root, "vcs", filelist, extra_input_paths=inputs)
+            write_compile_fingerprint(root / "build", initial)
+            nested.write_text('`define VALUE 2\n', encoding="utf-8")
+            changed = compile_fingerprint(root,
+                                          "vcs",
+                                          filelist,
+                                          extra_input_paths=discover_filelist_inputs(filelist, root))
+            self.assertFalse(can_reuse_compile(root / "build", changed, lambda: None)[0])
+
+    def test_statically_compiled_dpi_source_tracks_local_c_headers(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "dpi.c"
+            header = root / "dpi.h"
+            filelist = root / "compile.f"
+            source.write_text('#include "dpi.h"\nint dpi_fn(void) { return VALUE; }\n', encoding="utf-8")
+            header.write_text("#define VALUE 1\n", encoding="utf-8")
+            filelist.write_text("dpi.c\n", encoding="utf-8")
+            initial = compile_fingerprint(root,
+                                          "vcs",
+                                          filelist,
+                                          extra_input_paths=discover_filelist_inputs(filelist, root))
+            header.write_text("#define VALUE 2\n", encoding="utf-8")
+            changed = compile_fingerprint(root,
+                                          "vcs",
+                                          filelist,
+                                          extra_input_paths=discover_filelist_inputs(filelist, root))
+            self.assertNotEqual(initial, changed)
+
+    def test_source_runtime_data_and_output_files_do_not_invalidate_reuse(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "top.sv"
+            runtime = root / "memory.hex"
+            output = root / "simv"
+            filelist = root / "compile.f"
+            source.write_text(
+                '// `include "memory.hex"\n/* `include "memory.hex" */\nmodule top; initial $readmemh("memory.hex", memory); endmodule\n',
+                encoding="utf-8")
+            filelist.write_text('{}\n-o {}\n-l {}\n-o={}\n'.format(source, output, runtime, output), encoding="utf-8")
+            runtime.write_text("00\n", encoding="utf-8")
+            output.write_text("existing executable", encoding="utf-8")
+            initial = compile_fingerprint(root,
+                                          "vcs",
+                                          filelist,
+                                          extra_input_paths=discover_filelist_inputs(filelist, root))
+            runtime.write_text("ff\n", encoding="utf-8")
+            output.write_text("updated executable", encoding="utf-8")
+            changed = compile_fingerprint(root,
+                                          "vcs",
+                                          filelist,
+                                          extra_input_paths=discover_filelist_inputs(filelist, root))
+            self.assertEqual(initial, changed)
+
+    def test_attached_capital_f_retains_relative_nested_filelist_base(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            nested_dir = root / "nested"
+            nested_dir.mkdir()
+            source = nested_dir / "top.sv"
+            source.write_text("module top; endmodule\n", encoding="utf-8")
+            nested = nested_dir / "sources.f"
+            nested.write_text("top.sv\n", encoding="utf-8")
+            filelist = root / "compile.f"
+            filelist.write_text("-F=nested/sources.f\n", encoding="utf-8")
+            self.assertEqual(sorted(map(str, (filelist, nested, source))), discover_filelist_inputs(filelist, root))
+
 
 if __name__ == "__main__":
     unittest.main()

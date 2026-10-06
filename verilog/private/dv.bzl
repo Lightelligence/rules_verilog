@@ -446,7 +446,7 @@ def _verilog_dv_library_impl(ctx):
     # than transitive_sources so changing a C implementation does not
     # invalidate the SV compile-input fingerprint.
     trans_srcs = get_transitive_srcs(
-        ctx.files.srcs,
+        depset(ctx.files.srcs + ctx.files.in_flist).to_list(),
         ctx.attr.deps,
         VerilogInfo,
         "transitive_sources",

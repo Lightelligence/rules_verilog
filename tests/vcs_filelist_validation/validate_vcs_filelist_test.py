@@ -248,6 +248,20 @@ class VcsFilelistValidationTest(unittest.TestCase):
             expected_digest.update(b"\0")
         self.assertEqual(expected_digest.hexdigest(), compile_inputs_digest)
 
+    def test_in_flist_only_sources_are_runfiles_and_compile_digest_inputs(self):
+        options = ast.literal_eval(read_runfile("tests/vcs_filelist_validation/dv_tb_vcs_in_flist_only_tb_options.py"))
+        entries = read_runfile(options["compile_inputs"]).splitlines()
+        for name in ("in_flist_only.sv", "in_flist_defs.svh"):
+            path = "tests/vcs_filelist_validation/" + name
+            self.assertIn("source\t" + path, entries)
+            self.assertTrue(find_runfile(path).is_file())
+        expected = hashlib.sha256(b"rules_verilog.compile_inputs.v2\0")
+        for entry in entries:
+            _, path = entry.split("\t", 1)
+            expected.update(entry.encode("utf-8") + b"\0")
+            expected.update(hashlib.sha256(find_runfile(path).read_bytes()).digest() + b"\0")
+        self.assertEqual(expected.hexdigest(), read_runfile(options["compile_inputs_digest"]).strip())
+
     def test_shell_and_overlapping_dependency_indices_preserve_input_identity(self):
         options = ast.literal_eval(read_runfile("tests/vcs_filelist_validation/dv_tb_vcs_shell_tb_options.py"))
         entries = read_runfile(options["compile_inputs"]).splitlines()

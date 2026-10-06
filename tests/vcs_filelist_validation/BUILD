@@ -53,6 +53,18 @@ verilog_dv_library(
     makelib = "dv_unit_test_lib",
 )
 
+verilog_dv_library(
+    name = "dv_in_flist_only",
+    srcs = ["in_flist_defs.svh"],
+    in_flist = ["in_flist_only.sv"],
+)
+
+verilog_dv_tb(
+    name = "dv_tb_vcs_in_flist_only",
+    simulator = "VCS",
+    deps = [":dv_in_flist_only"],
+)
+
 verilog_rtl_shell(
     name = "digest_shell",
     module_to_shell_name = "custom",
@@ -323,6 +335,7 @@ py_test(
         ":dv_makelib",
         ":dv_tb_vcs",
         ":dv_tb_vcs_compile_args.f",
+        ":dv_tb_vcs_in_flist_only",
         ":dv_tb_vcs_runtime_args.f",
         ":dv_tb_vcs_runtime_only_runfile",
         ":dv_tb_vcs_runtime_only_runfile_compile_args.f",

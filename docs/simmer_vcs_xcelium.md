@@ -226,6 +226,39 @@ fails the compile and prevents fingerprint reuse.
 Use `--recompile` to force a clean VCS compile. It takes precedence over the
 default automatic cache for that invocation.
 
+### Changes that require a VCS build update
+
+Analysis (`vlogan`) parses HDL and included headers; elaboration (`vcs`) binds
+hierarchy, resolves parameters, generates native code and links `simv`.
+A changed build fingerprint invokes these stages with their existing incremental
+state. It does not mean a clean rebuild; `--recompile` explicitly requests that.
+
+| Change | Required action |
+| --- | --- |
+| RTL, interface, package, UVM class/sequence/test source, or included header | Reanalyze affected sources and update elaboration/native code |
+| Compile defines, source membership/order, include/library search paths, language mode | Reanalyze affected sources and update elaboration |
+| Elaboration top/configuration, parameter overrides, linked static DPI/PLI objects | Update elaboration/linking; unchanged analysis may be reused |
+| Compile-time coverage/debug/XPROP/partition settings or their config files, tool version | Update the affected build stages |
+| Seed, selection of an already compiled UVM test, runtime plusargs, timeout, stimulus files read during simulation | Reuse `simv` when compile inputs and instrumentation remain unchanged |
+| Wave Tcl/scope/depth changes with existing debug support | Reuse `simv`; enabling new compile-time debug support requires a build update |
+| Runtime-loaded DPI shared-library implementation with unchanged SV declarations/ABI | Reload at runtime; no SV recompilation required |
+| Timestamp-only source touch, unrelated logs/reports | Reuse the content-identical build |
+
+Changing a constraint or test body in SV is a source change even if it only
+changes stimulus. Creating a new test class also changes the build in the normal
+flow; selecting an existing compiled test does not. Dynamic Test Loading is a
+separate explicitly enabled flow.
+
+Declare all sources and headers through Bazel inputs. `in_flist`-only sources
+are tracked alongside `srcs`. For custom `--file` lists, simmer also follows
+nested filelists, literal HDL/local C header includes, attached XPROP/parameter/
+coverage/library-map config paths, and `+optconfigfile+` inputs. Include/library
+directories remain conservatively inventoried: unrelated data inside those
+directories can cause a cache miss, while VCS may still reuse its incremental
+objects. Keep runtime-only data in `extra_runtime_runfiles` and outside compile
+search directories. Macro-generated include names require declared inputs or
+explicit include-directory inventories; this scanner is not an SV preprocessor.
+
 ### `makelib` and VCS reuse
 
 `verilog_rtl_library.makelib` and `verilog_dv_library.makelib` create a named
