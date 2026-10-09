@@ -98,7 +98,7 @@ class VcsFilelistValidationTest(unittest.TestCase):
             "external/external_verilog_fixture/generated_external.cfg": "generated external config\n",
         }
         compile_paths = [
-            arg.removeprefix("+optconfigfile+") for arg in shlex.split(compile_args)
+            arg.removeprefix("+optconfigfile+") for arg in shlex.split(compile_args, comments=True)
             if arg.startswith("+optconfigfile+")
         ]
         self.assertEqual(set(expected_compile), set(compile_paths))
@@ -159,9 +159,10 @@ class VcsFilelistValidationTest(unittest.TestCase):
             root = Path(temporary_dir)
             bin_dir = root / "bin"
             bin_dir.mkdir()
-            runmod = bin_dir / "runmod"
-            runmod.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
-            runmod.chmod(0o755)
+            for command in ("runmod", "vcs", "xrun"):
+                tool = bin_dir / command
+                tool.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+                tool.chmod(0o755)
             parser = root / parser_relative
             parser.parent.mkdir(parents=True)
             parser.write_text(read_runfile(parser_relative), encoding="utf-8")
