@@ -74,6 +74,29 @@ py_test(
 )
 
 py_test(
+    name = "vcs_coverage_test",
+    timeout = "short",
+    srcs = ["vcs_coverage_test.py"],
+    data = ["//bin:simmer.py"],
+    deps = [
+        "//bin:args_parser_lib",
+        "//bin:check_test_lib",
+        "//lib:cmn_logging",
+        "//lib:compile_cache",
+        "//lib:job_lib",
+        "//lib:regression",
+        "//lib:regression_report",
+        "//lib:runtime_options",
+        "//lib:rv_utils",
+        "//lib:seed_plan",
+        "//lib:sim_artifacts",
+        "//lib:simmer_results",
+        "//lib:simmer_state",
+        "//lib/simulators",
+    ],
+)
+
+py_test(
     name = "docs_test",
     timeout = "short",
     srcs = ["docs_test.py"],

@@ -72,6 +72,14 @@ def add_vcs_arguments(parser):
                        help=('Pass an existing -cm_hier configuration file to VCS. Requires --vcs-cm; the path is '
                              'validated before Bazel starts and overrides the testbench vcs_cm_hier setting.'))
     add_child_argument(gvcs,
+                       '--vcs-coverage-profile',
+                       parent='--vcs-cm',
+                       default=False,
+                       action='store_true',
+                       help=('Record logical input/merged VDB bytes and scan durations for each coverage merge. '
+                             'URG elapsed time is always logged; byte inventories are opt-in to avoid extra '
+                             'filesystem scans in routine regressions. Requires --vcs-cm.'))
+    add_child_argument(gvcs,
                        '--vcs-urg-parallel',
                        parent='--vcs-cm',
                        default=False,

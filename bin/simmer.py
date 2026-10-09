@@ -1346,17 +1346,23 @@ class TestJob(Job):
             super().launch_failed(exc)
             self.error_message = str(exc)
             self.simulation_duration_s = None
-            simmer_results.record_test_job(getattr(self.rcfg, "simmer_results_run", None), self)
+            self.simulator.cleanup_test_coverage(self)
         finally:
-            self._release_run_directory_lock()
+            try:
+                simmer_results.record_test_job(getattr(self.rcfg, "simmer_results_run", None), self)
+            finally:
+                self._release_run_directory_lock()
 
     def post_run_failed(self, exc):
         try:
             super().post_run_failed(exc)
             self.simulation_duration_s = None
-            simmer_results.record_test_job(getattr(self.rcfg, "simmer_results_run", None), self)
+            self.simulator.cleanup_test_coverage(self)
         finally:
-            self._release_run_directory_lock()
+            try:
+                simmer_results.record_test_job(getattr(self.rcfg, "simmer_results_run", None), self)
+            finally:
+                self._release_run_directory_lock()
 
     def incomplete_shutdown(self, message):
         super().incomplete_shutdown(message)

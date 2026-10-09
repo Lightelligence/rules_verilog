@@ -1781,6 +1781,50 @@ run_bounded_process([
 
         self.assertFalse(marker.exists())
 
+    def test_vcs_coverage_merge_preserves_urg_arguments_and_explicit_formats(self):
+        with tempfile.TemporaryDirectory(prefix="vcs coverage argv ") as temporary_dir:
+            root = Path(temporary_dir)
+            recorded_args = root / "urg arguments.txt"
+            urg_stub = root / "urg stub.sh"
+            urg_stub.write_text(
+                "#!/usr/bin/env bash\nprintf '%s\\n' \"$@\" > {}\n".format(shlex.quote(str(recorded_args))),
+                encoding="utf-8",
+                newline="\n",
+            )
+            environment = jinja2.Environment(undefined=jinja2.StrictUndefined)
+            environment.filters["shell_quote"] = shlex.quote
+            template = environment.from_string(self._read_repo_file("bin/templates/vcs_cov_merge_template.sh.j2"))
+            command = ["bash", str(urg_stub), "urg", "--site-config", "site config with spaces"]
+            cov_db_path = str(root / "source database.vdb")
+            merged_db_path = str(root / "merged database.vdb")
+            report_dir = str(root / "coverage report")
+            for parallel, show_tests in ((False, False), (True, False), (False, True), (True, True)):
+                with self.subTest(parallel=parallel, show_tests=show_tests):
+                    rendered = template.render(
+                        cov_db_path=cov_db_path,
+                        merged_db_path=merged_db_path,
+                        report_dir=report_dir,
+                        urg_command=shlex.join(command),
+                        urg_parallel=parallel,
+                        urg_show_tests=show_tests,
+                        verdi_command="verdi",
+                    )
+                    expected = command[2:] + [
+                        "-full64", "-dir", cov_db_path, "-dbname", merged_db_path, "-flex_merge", "union"
+                    ]
+                    if parallel:
+                        expected.append("-parallel")
+                    if show_tests:
+                        expected.extend(["-show", "tests"])
+                    expected.extend(["-format", "both", "-report", report_dir])
+                    merge_command = rendered.split("# Merge", 1)[1].split("\n", 1)[1].split("# Launch", 1)[0]
+                    self.assertEqual(command[:2] + expected, shlex.split(merge_command.replace("\\\n", "")))
+                    if os.name == "posix":
+                        script = root / "merge coverage.sh"
+                        script.write_text(rendered, encoding="utf-8", newline="\n")
+                        subprocess.run(["bash", str(script)], check=True, capture_output=True, text=True)
+                        self.assertEqual(expected, recorded_args.read_text(encoding="utf-8").splitlines())
+
     def test_svunit_waves_and_launch_preserve_execution_argv(self):
         root = Path(tempfile.mkdtemp(prefix="svunit argv contract "))
         self.addCleanup(shutil.rmtree, root, ignore_errors=True)
@@ -3354,16 +3398,34 @@ exit 0
     def test_vcs_report_runs_generated_coverage_merge_script(self):
         options = parse_args(["-t", "unit:test", "--simulator", "VCS", "--cm", "line"])
         simulator = VcsSimulator(options, DummyRegressionConfig(), None)
-        vcomp = SimpleNamespace(coverage_merge_script="/tmp/unit_vcs_cov_merge.sh")
+        root = Path(tempfile.mkdtemp(prefix="vcs merge outputs "))
+        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+        vcomp = SimpleNamespace(
+            name="unit_vcomp",
+            coverage_merge_script=str(root / "unit_vcs_cov_merge.sh"),
+            cov_work_dir=str(root / "source.vdb"),
+            merged_coverage_dir=str(root / "merged.vdb"),
+            coverage_report_dir=str(root / "report"),
+        )
 
-        with mock.patch("lib.simulators.vcs.run_bounded_process", return_value=SimpleNamespace(returncode=0)) as run:
+        def write_merged_outputs(*args, **kwargs):
+            design = Path(vcomp.merged_coverage_dir) / "snps" / "coverage" / "db" / "design"
+            design.mkdir(parents=True)
+            (design / "model.xml").write_text("<coverage-model/>\n", encoding="utf-8")
+            report_dir = Path(vcomp.coverage_report_dir)
+            report_dir.mkdir()
+            (report_dir / "dashboard.txt").write_text("SCORE LINE\n85.00 90.00\n", encoding="utf-8")
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        with mock.patch("lib.simulators.vcs.run_bounded_process", side_effect=write_merged_outputs) as run:
             self.assertFalse(simulator.run_report_coverage_merge({"//unit:tb": vcomp}))
 
         run.assert_called_once_with(
-            ["bash", "/tmp/unit_vcs_cov_merge.sh"],
+            ["bash", vcomp.coverage_merge_script],
             capture_output=True,
             text=True,
         )
+        self.assertTrue(vcomp.coverage_merge_succeeded)
 
     def test_vcs_failed_coverage_merge_is_reported(self):
         options = parse_args(["-t", "unit:test", "--simulator", "VCS", "--cm", "line"])
@@ -3401,8 +3463,9 @@ exit 0
             compile_options = simulator.generate_compile_options(vcomp)
 
         self.assertTrue(vcomp.cov_work_dir.endswith(".vdb"))
-        self.assertIn("-cm_dir {}".format(vcomp.cov_work_dir), compile_options["cov_opts"])
-        self.assertIn("-cm_hier tests/coverage_hier.cfg", compile_options["cov_opts"])
+        arguments = shlex.split(compile_options["cov_opts"])
+        self.assertEqual(vcomp.cov_work_dir, arguments[arguments.index("-cm_dir") + 1])
+        self.assertEqual("tests/coverage_hier.cfg", arguments[arguments.index("-cm_hier") + 1])
 
         template = self._read_repo_file("bin/templates/vcs_cov_merge_template.sh.j2")
         self.assertIn("{{ urg_command }}", template)
@@ -3415,12 +3478,18 @@ exit 0
         test_job = SimpleNamespace(
             iteration=3,
             name="same_test",
+            target="//unit:same_test",
+            job_dir=os.path.join(coverage_root, "same_test_run"),
             vcomper=SimpleNamespace(cov_work_dir=coverage_root),
         )
 
         sim_args = shlex.split(simulator.generate_sim_options(test_job, 42))
 
-        self.assertEqual("same_test_sv42_i3", sim_args[sim_args.index("-cm_name") + 1])
+        coverage_name = sim_args[sim_args.index("-cm_name") + 1]
+        self.assertTrue(coverage_name.startswith("same_test_"), coverage_name)
+        self.assertTrue(coverage_name.endswith("_sv42_i3"), coverage_name)
+        self.assertNotEqual("same_test_sv42_i3", coverage_name)
+        self.assertEqual(coverage_name, test_job.test_name_seed)
         Path(test_job.coverage_db_path).mkdir(parents=True)
         simulator.cleanup_test_coverage(test_job)
         self.assertFalse(Path(test_job.coverage_db_path).exists())

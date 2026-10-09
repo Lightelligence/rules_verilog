@@ -1,5 +1,6 @@
 # lib/simulators/vcs.py
 import json
+import hashlib
 import os
 import stat
 import logging
@@ -10,6 +11,7 @@ import shutil
 import socket
 import subprocess
 import tempfile
+import time
 
 from lib.coverage_data import aggregate_coverage_metrics, parse_coverage_summary
 from lib import job_lib
@@ -519,6 +521,18 @@ class VcsSimulator(SimulatorInterface):
     def generate_sim_options(self, test_job, seed):
         sim_args = []
         coverage_name = "{}_sv{}_i{}".format(test_job.name, seed, test_job.iteration)
+        if self.options.cm:
+            # Basenames, seeds and iteration numbers can coincide across distinct
+            # configured tests (including VSO assignments). Bind the VDB entry to
+            # the complete test identity and the claimed simulation directory.
+            identity = [
+                getattr(test_job, "target", test_job.name),
+                os.path.basename(getattr(test_job, "job_dir", "")),
+                getattr(test_job, "vso_run_id", None),
+            ]
+            digest = hashlib.sha256(json.dumps(identity, ensure_ascii=True).encode("utf-8")).hexdigest()[:20]
+            stem = re.sub(r"[^A-Za-z0-9_.-]", "_", test_job.name)[:64] or "test"
+            coverage_name = "{}_{}_sv{}_i{}".format(stem, digest, seed, test_job.iteration)
         test_job.test_name_seed = coverage_name
         if self.options.vso:
             sim_args.extend(self.vso_workflow.sim_options(test_job))
@@ -657,6 +671,16 @@ class VcsSimulator(SimulatorInterface):
         failed = False
         for vcomp_job in vcomp_jobs.values():
             vcomp_job.coverage_merge_succeeded = False
+            vcomp_job.coverage_merge_metrics = {}
+            if getattr(vcomp_job, "coverage_cleanup_failed", False):
+                log.error("VCS coverage merge blocked after data cleanup failed for %s", vcomp_job)
+                failed = True
+                continue
+            status = getattr(vcomp_job, "jobstatus", None)
+            if status is not None and not status.successful:
+                log.error("VCS coverage merge skipped after unsuccessful compilation for %s", vcomp_job)
+                failed = True
+                continue
             merge_script = getattr(vcomp_job, "coverage_merge_script", None)
             if not merge_script:
                 log.error("VCS coverage merge script is unavailable for %s", vcomp_job)
@@ -669,9 +693,25 @@ class VcsSimulator(SimulatorInterface):
                     output_dir = getattr(vcomp_job, attribute, None)
                     if output_dir and os.path.isdir(output_dir):
                         shutil.rmtree(output_dir)
-                result = run_bounded_process(["bash", merge_script], capture_output=True, text=True)
+                if getattr(self.options, "vcs_coverage_profile", False):
+                    self._record_coverage_size(vcomp_job, "input_db_bytes", getattr(vcomp_job, "cov_work_dir", None))
+                log.info("Starting VCS coverage merge for %s", getattr(vcomp_job, "name", vcomp_job))
+                started = time.perf_counter()
+                try:
+                    result = run_bounded_process(["bash", merge_script], capture_output=True, text=True)
+                finally:
+                    vcomp_job.coverage_merge_metrics["urg_duration_s"] = time.perf_counter() - started
+                    log.info("VCS coverage merge for %s took %.3fs", getattr(vcomp_job, "name", vcomp_job),
+                             vcomp_job.coverage_merge_metrics["urg_duration_s"])
+                if result.returncode == 0:
+                    self._validate_coverage_model(getattr(vcomp_job, "merged_coverage_dir", None))
+                    report_dir = getattr(vcomp_job, "coverage_report_dir", None)
+                    if not report_dir or not parse_coverage_summary(os.path.join(report_dir, "dashboard.txt")):
+                        raise OSError("VCS coverage merge did not produce a complete dashboard.txt summary")
+                    if getattr(self.options, "vcs_coverage_profile", False):
+                        self._record_coverage_size(vcomp_job, "merged_db_bytes", vcomp_job.merged_coverage_dir)
             except (OSError, subprocess.TimeoutExpired) as exc:
-                log.error("VCS coverage merge could not start for %s: %s", vcomp_job, exc)
+                log.error("VCS coverage merge or output validation failed for %s: %s", vcomp_job, exc)
                 failed = True
                 continue
             if result.returncode != 0:
@@ -684,17 +724,79 @@ class VcsSimulator(SimulatorInterface):
     def cleanup_test_coverage(self, test_job):
         path = getattr(test_job, "coverage_db_path", None)
         if path:
-            shutil.rmtree(path, ignore_errors=True)
+            try:
+                self._remove_coverage_directory(path)
+            except OSError:
+                test_job.vcomper.coverage_cleanup_failed = True
+                raise
+
+    @staticmethod
+    def _remove_coverage_directory(path):
+        """Remove owned data and surface errors instead of merging stale entries."""
+        try:
+            mode = os.lstat(path).st_mode
+        except FileNotFoundError:
+            return
+        if not stat.S_ISDIR(mode):
+            raise OSError("Coverage cleanup requires an owned directory: {}".format(path))
+        shutil.rmtree(path)
+        try:
+            os.lstat(path)
+        except FileNotFoundError:
+            return
+        raise OSError("Coverage cleanup left data at '{}'".format(path))
+
+    @staticmethod
+    def _validate_coverage_model(vdb_path):
+        """Require the static design model, separately from per-test data."""
+        design_path = os.path.join(vdb_path, "snps", "coverage", "db", "design") if vdb_path else ""
+        if design_path and os.path.isdir(design_path):
+            for directory, _subdirs, files in os.walk(design_path):
+                if any(
+                        os.path.isfile(os.path.join(directory, filename))
+                        and os.path.getsize(os.path.join(directory, filename)) > 0 for filename in files):
+                    return
+        raise FileNotFoundError("VCS coverage requires a nonempty static design model at '{}'; "
+                                "recompile with coverage enabled.".format(design_path or vdb_path))
+
+    @staticmethod
+    def _record_coverage_size(vcomp_job, metric, path):
+        """Opt-in logical byte inventory; diagnostics must not invalidate a merge."""
+        started = time.perf_counter()
+        size = None
+        try:
+            if path and os.path.isdir(path):
+                size = 0
+
+                def scan_error(exc):
+                    raise exc
+
+                for directory, _subdirs, files in os.walk(path, onerror=scan_error):
+                    for filename in files:
+                        filename = os.path.join(directory, filename)
+                        if not os.path.islink(filename):
+                            size += os.path.getsize(filename)
+        except OSError as exc:
+            size = None
+            log.warning("Could not inventory VCS coverage %s at %s: %s", metric, path, exc)
+        vcomp_job.coverage_merge_metrics[metric] = size
+        vcomp_job.coverage_merge_metrics[metric + "_scan_s"] = time.perf_counter() - started
+        log.info("VCS coverage %s for %s: %s (scan %.3fs)", metric, getattr(vcomp_job, "name", vcomp_job),
+                 size if size is not None else "N/A", vcomp_job.coverage_merge_metrics[metric + "_scan_s"])
 
     def collect_coverage_data(self, vcomp_jobs):
         if not self.options.cm:
-            return {vcomp.split(":")[-1]: aggregate_coverage_metrics({}) for vcomp in vcomp_jobs}
+            return {
+                getattr(job, "name",
+                        vcomp.split(":")[-1]): aggregate_coverage_metrics({})
+                for vcomp, job in vcomp_jobs.items()
+            }
         coverage = {}
         for vcomp, job in vcomp_jobs.items():
             report_dir = getattr(job, "coverage_report_dir", None)
             metrics = (parse_coverage_summary(os.path.join(report_dir, "dashboard.txt"))
                        if report_dir and getattr(job, "coverage_merge_succeeded", True) else {})
-            coverage[vcomp.split(":")[-1]] = aggregate_coverage_metrics(metrics)
+            coverage[getattr(job, "name", vcomp.split(":")[-1])] = aggregate_coverage_metrics(metrics)
         return coverage
 
     def get_log_parsing_info(self):
@@ -806,17 +908,22 @@ class VcsSimulator(SimulatorInterface):
     def prepare_compile_execution(self, vcomp_job, reusing_compile):
         if not self.options.cm:
             return
-        if reusing_compile:
-            shutil.rmtree(os.path.join(vcomp_job.cov_work_dir, "snps", "coverage", "db", "testdata"),
-                          ignore_errors=True)
-        else:
-            shutil.rmtree(vcomp_job.cov_work_dir, ignore_errors=True)
+        path = (os.path.join(vcomp_job.cov_work_dir, "snps", "coverage", "db", "testdata")
+                if reusing_compile else vcomp_job.cov_work_dir)
+        try:
+            self._remove_coverage_directory(path)
+        except OSError:
+            vcomp_job.coverage_cleanup_failed = True
+            raise
+        vcomp_job.coverage_cleanup_failed = False
 
     def validate_reusable_compile_artifacts(self, vcomp_job):
         simv_path = os.path.join(vcomp_job.job_dir, "simv")
         if not os.path.isfile(simv_path) or not os.access(simv_path, os.X_OK):
             raise FileNotFoundError(
                 "VCS --no-compile requires an existing elaborated executable at '{}'".format(simv_path))
+        if self.options.cm:
+            self._validate_coverage_model(getattr(vcomp_job, "cov_work_dir", None))
         if getattr(vcomp_job, "vcs_three_step", False):
             setup_path = self.get_analysis_setup_file(vcomp_job)
             work_dir = self.get_analysis_work_dir(vcomp_job)
