@@ -32,6 +32,14 @@ genrule(
     cmd = "printf 'generated runtime config\\n' > $@",
 )
 
+filegroup(
+    name = "compile_location_files",
+    srcs = [
+        ":generated_compile_config",
+        ":vcs_partitions",
+    ],
+)
+
 genrule(
     name = "dpi_library_file",
     outs = ["libfixture.so"],
@@ -61,14 +69,18 @@ verilog_dv_tb(
     extra_compile_args = [
         "+optconfigfile+$(location :generated_compile_config)",
         "+optconfigfile+$(location @external_verilog_fixture//:generated_config)",
+        "-include $(locations :compile_location_files)",
+        "+USER_TEXT=../external_verilog_fixture/generated_external.cfg +USER_LOCATION=$(location @external_verilog_fixture//:generated_config)",
     ],
     extra_runfiles = [
+        ":compile_location_files",
         ":generated_compile_config",
         "@external_verilog_fixture//:generated_config",
     ],
     extra_runtime_args = [
         "-f bazel_runfiles_main/$(location :generated_runtime_config)",
         "-f bazel_runfiles_main/$(location @external_verilog_fixture//:generated_config)",
+        "+USER_TEXT=../external_verilog_fixture/generated_external.cfg +USER_LOCATION=$(location @external_verilog_fixture//:generated_config)",
     ],
     extra_runtime_runfiles = [":generated_runtime_config"],
     simulator = "VCS",
@@ -181,6 +193,17 @@ verilog_rtl_lint_test(
     tags = ["manual"],
     top = "unit_test_top",
     waiver_direct = "quotes:'\" dollars:$HOME $(touch waiver_dollar_executed) backticks:`touch waiver_backtick_executed` regex:\\d+\\s",
+    deps = [":unit_test_top"],
+)
+
+verilog_rtl_lint_test(
+    name = "rtl_lint_custom_raw_waiver_argv",
+    lint_parser = "waiver_argv_parser.py",
+    run_template = "custom_raw_waiver_lint.sh.template",
+    simulator = "VCS",
+    tags = ["manual"],
+    top = "unit_test_top",
+    waiver_direct = "foo",
     deps = [":unit_test_top"],
 )
 
@@ -453,6 +476,7 @@ py_test(
         ":dv_unit_vcs_custom_template",
         ":dv_unit_xrun",
         ":no_synth_compat",
+        ":rtl_lint_custom_raw_waiver_argv",
         ":rtl_lint_vcs",
         ":rtl_lint_vcs_cmds.tcl",
         ":rtl_lint_vcs_custom_rulefile",

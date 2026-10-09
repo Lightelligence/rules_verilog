@@ -775,7 +775,8 @@ def _verilog_rtl_lint_test_impl(ctx):
             "{INST_TOP}": ctx.attr.top,
             "{LINT_PARSER}": runfiles_relative_short_path(lint_parser),
             "{LINT_PARSER_LIB}": runfiles_relative_short_path(ctx.files._lint_parser_lib[0])[:-len(ctx.files._lint_parser_lib[0].basename) - 1],
-            "{WAIVER_DIRECT}": _shell_single_quote(ctx.attr.waiver_direct),
+            "{WAIVER_DIRECT}": ctx.attr.waiver_direct,
+            "{WAIVER_DIRECT_SHELL_QUOTED}": _shell_single_quote(ctx.attr.waiver_direct),
         },
     )
 
@@ -849,6 +850,7 @@ verilog_rtl_lint_test = rule(
             allow_single_file = True,
             default = Label("@rules_verilog//vendors/cadence:verilog_rtl_lint_test.sh.template"),
             doc = "The template to generate the script to run the lint test.\n" +
+                  "{WAIVER_DIRECT} substitutes the raw regex for custom templates. Use {WAIVER_DIRECT_SHELL_QUOTED} without surrounding quotes to insert one shell-safe argument.\n" +
                   "The command templates are located at " +
                   "@rules_verilog//vendors/<vendor name>/verilog_rtl_lint_test.tcl.template\n",
         ),

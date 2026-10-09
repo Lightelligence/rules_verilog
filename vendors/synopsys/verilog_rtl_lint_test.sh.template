@@ -27,4 +27,4 @@ mv lint.log lint.log.bak 2> /dev/null || true
   -file {COMMAND_SCRIPT}
 
 export PYTHONPATH="{LINT_PARSER_LIB}:${PYTHONPATH:-}"
-"${PYTHON:-python3}" ./{LINT_PARSER} "$@" --waiver-direct {WAIVER_DIRECT}
+"${PYTHON:-python3}" ./{LINT_PARSER} "$@" --waiver-direct {WAIVER_DIRECT_SHELL_QUOTED}

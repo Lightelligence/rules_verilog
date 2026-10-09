@@ -83,6 +83,50 @@ class SchedulerResourceTest(unittest.TestCase):
         manager._launching.remove(peer)
         self.assertIs(blocked, manager._take_ready_job_locked())
 
+    def test_large_ready_batch_preserves_existing_fifo_and_resource_admission(self):
+
+        class ResourceJob(Job):
+
+            @property
+            def execution_mode(self):
+                return "parallel"
+
+            @property
+            def exclusive_resource(self):
+                return self.resource
+
+        rcfg = SimpleNamespace(options=SimpleNamespace(timeout=1), log=_Logger())
+        existing = [ResourceJob(rcfg, "old_{}".format(index)) for index in range(32)]
+        incoming = [ResourceJob(rcfg, "new_{}".format(index)) for index in range(2048)]
+        for index, job in enumerate(existing + incoming):
+            job.priority = index % 7 - 3
+            job.resource = "busy" if index % 127 == 0 else None
+        manager = self._queued_manager(existing)
+        # Priorities may change after insertion into todo, so this batch is
+        # intentionally mixed while equal-priority arrival order remains stable.
+        manager._todo = incoming[:]
+        manager._move_todo_to_ready_locked()
+        expected = sorted(existing + incoming, key=lambda job: job.priority)
+        self.assertEqual(tuple(expected), manager.status_snapshot()["queued"])
+        manager.active_job_limit = 2
+        manager._active = [SimpleNamespace(execution_mode="parallel", exclusive_resource="busy")]
+
+        def drain_ready():
+            launched = []
+            while True:
+                job = manager._take_ready_job_locked()
+                if job is None:
+                    return launched
+                launched.append(job)
+                manager._launching.remove(job)
+
+        self.assertEqual([job for job in expected if job.resource is None], drain_ready())
+        blocked = [job for job in expected if job.resource == "busy"]
+        self.assertEqual(tuple(blocked), manager.status_snapshot()["queued"])
+        manager._active.clear()
+        self.assertEqual(blocked, drain_ready())
+        self.assertEqual((), manager.status_snapshot()["queued"])
+
     def test_graceful_exit_preserves_priority_fifo_for_skipped_jobs(self):
         rcfg = SimpleNamespace(options=SimpleNamespace(timeout=1), log=_Logger())
         jobs = [Job(rcfg, name) for name in ("first", "second", "urgent")]

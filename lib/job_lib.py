@@ -7,6 +7,7 @@ import bisect
 import ast
 import datetime
 import enum
+import heapq
 import logging
 import os
 import shlex
@@ -863,10 +864,11 @@ class JobManager():
     def _move_todo_to_ready_locked(self):
         self._print_debug_state_locked()
         jobs_that_advanced_state = []
+        newly_ready = []
         for i, job in enumerate(self._todo):
             if len(job._dependencies) == 0:
                 # There are no dependencies
-                self._queue_ready_job_locked(job)
+                newly_ready.append(job)
                 jobs_that_advanced_state.append(i)
             else:
                 all_dependencies_are_done = all([dep.jobstatus.completed for dep in job._dependencies])
@@ -874,13 +876,20 @@ class JobManager():
                     continue
                 all_dependencies_passed = all([dep.jobstatus.successful for dep in job._dependencies])
                 if all_dependencies_passed:
-                    self._queue_ready_job_locked(job)
+                    newly_ready.append(job)
                     jobs_that_advanced_state.append(i)
                 else:
                     self.log.error("Skipping job %s due dependency failure", job)
                     jobs_that_advanced_state.append(i)
                     self._skipped.append(job)
                     job.jobstatus = JobStatus.SKIPPED
+
+        if newly_ready:
+            # Merge once instead of shifting the ready list for every admission.
+            # New jobs precede existing equal-priority jobs in reverse storage,
+            # keeping older jobs first when admission reads from the tail.
+            incoming = sorted(reversed(newly_ready), key=lambda queued: -queued.priority)
+            self._ready = list(heapq.merge(incoming, self._ready, key=lambda queued: -queued.priority))
 
         # Can't iterate and remove in list at the same time easily
         for i in reversed(jobs_that_advanced_state):

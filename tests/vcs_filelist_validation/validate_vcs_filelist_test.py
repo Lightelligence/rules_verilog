@@ -113,9 +113,18 @@ class VcsFilelistValidationTest(unittest.TestCase):
         for path in runtime_paths:
             self.assertEqual(expected_runtime[path], read_runfile(path))
         self.assertNotIn("generated_runtime.data", compile_inputs)
+        includes = next(line for line in compile_args.splitlines() if line.startswith("-include "))
+        include_paths = includes.split()[1:]
+        self.assertEqual(
+            {"tests/vcs_filelist_validation/generated_compile.cfg", "tests/vcs_filelist_validation/vcs_partitions.cfg"},
+            set(include_paths))
+        for path in include_paths:
+            self.assertTrue(find_runfile(path).is_file())
         for arguments in (compile_args, runtime_args):
             self.assertNotIn("bazel-out/", arguments)
-            self.assertNotIn("../", arguments)
+            self.assertIn(
+                "+USER_TEXT=../external_verilog_fixture/generated_external.cfg +USER_LOCATION=external/external_verilog_fixture/generated_external.cfg",
+                arguments)
 
         # The sidecar is reachable only through TB -> RTL -> DV -> DPI.
         self.assertEqual("DPI runtime sidecar\n",
@@ -164,8 +173,9 @@ class VcsFilelistValidationTest(unittest.TestCase):
                 "PYTHON": sys.executable,
                 "WAIVER_ARGV_LOG": str(log_path),
             })
-            for simulator in ("vcs", "xrun"):
-                launcher = find_runfile("tests/vcs_filelist_validation/rtl_lint_{}_waiver_argv".format(simulator))
+            for name, expected_waiver in (("rtl_lint_vcs_waiver_argv", waiver), ("rtl_lint_xrun_waiver_argv", waiver),
+                                          ("rtl_lint_custom_raw_waiver_argv", "foo")):
+                launcher = find_runfile("tests/vcs_filelist_validation/" + name)
                 result = subprocess.run(
                     ["bash", str(launcher), "--caller-arg", "value with spaces"],
                     cwd=root,
@@ -175,7 +185,7 @@ class VcsFilelistValidationTest(unittest.TestCase):
                     text=True,
                 )
                 self.assertEqual(0, result.returncode, result.stderr)
-                self.assertEqual(["--caller-arg", "value with spaces", "--waiver-direct", waiver],
+                self.assertEqual(["--caller-arg", "value with spaces", "--waiver-direct", expected_waiver],
                                  json.loads(log_path.read_text(encoding="utf-8")))
                 self.assertFalse((root / "waiver_dollar_executed").exists())
                 self.assertFalse((root / "waiver_backtick_executed").exists())

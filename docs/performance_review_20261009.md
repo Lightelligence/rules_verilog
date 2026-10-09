@@ -42,13 +42,14 @@ compiler, simulation, coverage and full-regression runtime.
 | Fixture | Before | After | Reduction |
 | --- | ---: | ---: | ---: |
 | Report aggregation, 8,000 continuation paths of 206 characters, median of 3 | 1.325357 s | 0.002282 s | 99.83%, approximately 581× |
-| Scheduler helper, 4,000 jobs, default INFO console + DEBUG file logger, median of 3 | 6.108259 s | 1.069608 s | 82.49%, approximately 5.7× |
+| Scheduler helper, 4,000 jobs, default INFO console + DEBUG file logger, median of 3 | 6.282268 s | 1.072883 s | 82.92%, approximately 5.9× |
 | Scheduler log bytes for that fixture | 281,184,004 | 4,676,234 | 98.34% |
-| Scheduler helper, 4,000 jobs, DEBUG disabled, median of 9 | 106.624 ms | 8.620 ms | 91.92%, approximately 12.4× |
+| Scheduler helper, 4,000 jobs, DEBUG disabled, median of 9 | 92.127 ms | 5.876 ms | 93.62%, approximately 15.7× |
 
 Report aggregation collects paths and joins once per row. Scheduler logging
 records queue counts and at most 16 jobs per queue; full status snapshots remain
-available. Ready admission removes from the list tail while preserving priority,
+available. Bulk ready transfer sorts and merges once; admission removes from the
+list tail while preserving priority,
 FIFO, resource constraints, requeue, cancellation and snapshot order. Sorted
 insertion and scanning blocked resources remain linear operations.
 
@@ -61,7 +62,7 @@ copy is required.
 ## Verification and remaining investigation
 
 - Hash-pinned native Python 3.12 dependencies; local combined suite: 275 tests,
-  11 POSIX-related skips. Scheduler separately passed 32 focused mocked checks.
+  11 POSIX-related skips. Scheduler separately passed 33 focused mocked checks.
 - New backend regression cases fail against the pinned baseline and pass after
   revision; cache/discovery and monitoring negative reproductions also recorded.
 - Project YAPF 0.43.0 and Buildifier 6.4.0 checks; generated lint shell syntax.
