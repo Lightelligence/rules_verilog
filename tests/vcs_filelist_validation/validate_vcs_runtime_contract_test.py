@@ -2997,11 +2997,14 @@ exit 0
         vcs_config.regression_dir = str(root / "vcs")
         VcsSimulator(vcs_options, vcs_config, None).prepare_regression_runtime(jobs(vcs_trace))
         self.assertEqual(sorted(vcs_trace), vcs_trace)
+        self.assertEqual(4, len(vcs_trace))
 
         vcs_shared_compile_trace = []
         vcs_options = parse_args(["--simulator", "VCS"])
         VcsSimulator(vcs_options, vcs_config, None).prepare_regression_runtime(jobs(vcs_shared_compile_trace))
-        self.assertEqual([], vcs_shared_compile_trace)
+        self.assertEqual(sorted(vcs_shared_compile_trace), vcs_shared_compile_trace)
+        self.assertEqual(2, len(vcs_shared_compile_trace))
+        self.assertTrue(all(path.endswith("_VCOMP") or path.endswith("_vcomp") for path, _ in vcs_shared_compile_trace))
 
         xrun_trace = []
         xrun_options = parse_args(["--simulator", "XRUN", "--coverage", "A"])

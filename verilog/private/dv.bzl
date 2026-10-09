@@ -21,7 +21,7 @@ def _expand_runfiles_locations(ctx, value, targets):
     for segment in segments[1:]:
         closing = segment.find(")")
         expression = segment[:closing] if closing >= 0 else segment
-        words = expression.split()
+        words = expression.strip().replace("\t", " ").split(" ")
         if words and words[0] in ["location", "locations"]:
             macro = "$(" + expression + (")" if closing >= 0 else "")
             expanded = ctx.expand_location(macro, targets = targets)
