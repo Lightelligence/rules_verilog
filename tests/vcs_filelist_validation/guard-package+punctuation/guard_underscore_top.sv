@@ -1,0 +1,2 @@
+module guard_underscore_top;
+endmodule

@@ -7,6 +7,8 @@ import bisect
 import ast
 import datetime
 import enum
+import heapq
+import logging
 import os
 import shlex
 import signal
@@ -344,6 +346,7 @@ class SubprocessJobRunner(JobRunner):
         kwargs = {'shell': True, 'start_new_session': True}
         self._timed_out = False
         self._orphaned_process_group = False
+        self._monitoring_failed = False
         self._term_deadline = None
         self._kill_deadline = None
         self._kill_sent = False
@@ -537,6 +540,7 @@ class SubprocessJobRunner(JobRunner):
         try:
             result = self._check_for_done()
         except Exception as exc:
+            self._monitoring_failed = True
             self.log.error("Job failed %s:\n%s", self.job, exc)
             self._signal_process_group(signal.SIGKILL)
             self._signal_sidecar_process_groups(signal.SIGKILL)
@@ -625,6 +629,8 @@ class SubprocessJobRunner(JobRunner):
 
     @property
     def returncode(self):
+        if getattr(self, "_monitoring_failed", False) and self._p.returncode in (None, 0):
+            return -signal.SIGKILL
         if (self._timed_out or self._orphaned_process_group) and self._p.returncode in (None, 0):
             return -signal.SIGTERM
         return self._p.returncode
@@ -711,6 +717,7 @@ class SubprocessJobRunner(JobRunner):
 class JobManager():
     """Manages multiple concurrent jobs"""
     POLL_SLEEP_SECONDS = 0.25
+    STATE_SAMPLE_LIMIT = 16
     ACTIVE_KILL_JOIN_SECONDS = (SubprocessJobRunner.TERM_GRACE_SECONDS + 2 * SubprocessJobRunner.KILL_GRACE_SECONDS + 1)
     SHUTDOWN_JOIN_SECONDS = ACTIVE_KILL_JOIN_SECONDS
 
@@ -740,7 +747,8 @@ class JobManager():
         self._todo = []
 
         # Jobs ready to launch (all dependencies met)
-        # This list is maintained in sorted priority order
+        # Reverse priority order lets the first eligible job be removed from
+        # the tail without shifting every remaining ready job.
         self._ready = []
 
         # Jobs launched but not yet complete
@@ -775,9 +783,17 @@ class JobManager():
             self._print_state_locked(log_fn)
 
     def _print_state_locked(self, log_fn):
+        """Report queue counts and bounded samples in logical admission order."""
         job_queues = ["_todo", "_ready", "_launching", "_active", "_finalizing", "_done", "_skipped"]
         for jq in job_queues:
-            log_fn("%s: %s", jq, list(getattr(self, jq)))
+            jobs = getattr(self, jq)
+            sample = jobs[-self.STATE_SAMPLE_LIMIT:][::-1] if jq == "_ready" else jobs[:self.STATE_SAMPLE_LIMIT]
+            log_fn("%s (%d jobs): %s%s", jq, len(jobs), sample, " ..." if len(jobs) > len(sample) else "")
+
+    def _print_debug_state_locked(self):
+        is_enabled = getattr(self.log, "isEnabledFor", None)
+        if is_enabled is None or is_enabled(logging.DEBUG):
+            self._print_state_locked(self.log.debug)
 
     def _run_jobs(self):
         while True:
@@ -846,12 +862,13 @@ class JobManager():
             self._condition.notify_all()
 
     def _move_todo_to_ready_locked(self):
-        self._print_state_locked(self.log.debug)
+        self._print_debug_state_locked()
         jobs_that_advanced_state = []
+        newly_ready = []
         for i, job in enumerate(self._todo):
             if len(job._dependencies) == 0:
                 # There are no dependencies
-                bisect.insort_right(self._ready, job)
+                newly_ready.append(job)
                 jobs_that_advanced_state.append(i)
             else:
                 all_dependencies_are_done = all([dep.jobstatus.completed for dep in job._dependencies])
@@ -859,13 +876,20 @@ class JobManager():
                     continue
                 all_dependencies_passed = all([dep.jobstatus.successful for dep in job._dependencies])
                 if all_dependencies_passed:
-                    bisect.insort_right(self._ready, job)
+                    newly_ready.append(job)
                     jobs_that_advanced_state.append(i)
                 else:
                     self.log.error("Skipping job %s due dependency failure", job)
                     jobs_that_advanced_state.append(i)
                     self._skipped.append(job)
                     job.jobstatus = JobStatus.SKIPPED
+
+        if newly_ready:
+            # Merge once instead of shifting the ready list for every admission.
+            # New jobs precede existing equal-priority jobs in reverse storage,
+            # keeping older jobs first when admission reads from the tail.
+            incoming = sorted(reversed(newly_ready), key=lambda queued: -queued.priority)
+            self._ready = list(heapq.merge(incoming, self._ready, key=lambda queued: -queued.priority))
 
         # Can't iterate and remove in list at the same time easily
         for i in reversed(jobs_that_advanced_state):
@@ -891,15 +915,21 @@ class JobManager():
         return len(compute_jobs) < self.active_job_limit
 
     def _take_ready_job_locked(self):
-        self._print_state_locked(self.log.debug)
+        self._print_debug_state_locked()
         if self._paused:
             return None
-        for index, job in enumerate(self._ready):
+        for index in range(len(self._ready) - 1, -1, -1):
+            job = self._ready[index]
             if self._can_launch_locked(job):
                 self._ready.pop(index)
                 self._launching.append(job)
                 return job
         return None
+
+    def _queue_ready_job_locked(self, job):
+        # Equal priorities enter before older jobs in storage, so tail-first
+        # admission retains FIFO order, including jobs requeued after preparation.
+        bisect.insort_left(self._ready, job, key=lambda queued: -queued.priority)
 
     def _launch_job(self, job, preparation_only=False):
         try:
@@ -935,7 +965,7 @@ class JobManager():
                     if not admitted:
                         job.defer_prepared_launch()
                     self._launching.remove(job)
-                    bisect.insort_right(self._ready, job)
+                    self._queue_ready_job_locked(job)
                     self._condition.notify_all()
                     return
             job.pre_run()
@@ -1072,13 +1102,14 @@ class JobManager():
         for job in self._launching:
             if job.prepare_in_background or job.execution_mode == "preparation":
                 job.request_cancel()
-        for job in self._todo + self._ready:
+        ready_jobs = list(reversed(self._ready))
+        for job in self._todo + ready_jobs:
             job.discard_preparation()
             if not job.jobstatus.completed:
                 job.jobstatus = JobStatus.SKIPPED
         self._skipped.extend(self._todo)
         self._todo = []
-        self._skipped.extend(self._ready)
+        self._skipped.extend(ready_jobs)
         self._ready = []
 
     def add_job(self, job):
@@ -1103,7 +1134,7 @@ class JobManager():
         """Stop and join the scheduler thread."""
         with self._condition:
             self._run_jobs_thread_active = False
-            queued = list(self._todo) + list(self._ready)
+            queued = list(self._todo) + list(reversed(self._ready))
             for job in self._launching:
                 if job.prepare_in_background or job.execution_mode == "preparation":
                     job.request_cancel()
@@ -1141,7 +1172,7 @@ class JobManager():
         with self._condition:
             return {
                 "paused": self._paused,
-                "queued": tuple(self._todo) + tuple(self._ready),
+                "queued": tuple(self._todo) + tuple(reversed(self._ready)),
                 "launching": tuple(self._launching),
                 "active": tuple(self._active),
                 "finalizing": tuple(self._finalizing),
@@ -1206,7 +1237,8 @@ class JobManager():
             self.exited_prematurely = True
             self._run_jobs_thread_active = False
             self._paused = False
-            queued_jobs = list(self._todo) + list(self._ready)
+            ready_jobs = list(reversed(self._ready))
+            queued_jobs = list(self._todo) + ready_jobs
             launching_jobs = list(self._launching)
             active_jobs = list(self._active)
             finalizing_jobs = list(self._finalizing)
@@ -1218,7 +1250,7 @@ class JobManager():
                     job.jobstatus = JobStatus.SKIPPED
             self._skipped.extend(self._todo)
             self._todo = []
-            self._skipped.extend(self._ready)
+            self._skipped.extend(ready_jobs)
             self._ready = []
             self._condition.notify_all()
 

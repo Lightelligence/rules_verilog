@@ -22,4 +22,4 @@ mv xrun.log.xml xrun.log.xml.bak 2> /dev/null || true
   -logfile xrun.log
 
 export PYTHONPATH="{LINT_PARSER_LIB}:${PYTHONPATH:-}"
-./{LINT_PARSER} "$@" --waiver-direct "{WAIVER_DIRECT}"
+./{LINT_PARSER} "$@" --waiver-direct {WAIVER_DIRECT_SHELL_QUOTED}

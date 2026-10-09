@@ -36,6 +36,13 @@ def _resolve_label_default_file(simulator, selected_label, xrun_default_label, x
 def _shell_single_quote(value):
     return "'{}'".format(value.replace("'", "'\"'\"'"))
 
+def _gumi_guard(short_path):
+    # For one Java Starlark string element, hash(char) is its UTF-16 ordinal.
+    # Encode the escape marker too, and preserve case, to keep paths distinct.
+    valid_chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+    value = "".join([char if char in valid_chars else "_{}_".format(hash(char)) for char in short_path.elems()])
+    return "__{}__".format(value)
+
 def create_flist_content(ctx, gumi_path, allow_library_discovery, makelib = "", no_synth = False):
     """Create the content of a '.f' file.
 
@@ -139,8 +146,7 @@ def _verilog_rtl_library_impl(ctx):
 
         # Making this more unique than just gumi.basename.upper()
         # To avoid case where multiple directories define the same name for a verilog_rtl_library
-        gumi_guard_value = gumi.short_path.replace("/", "_").replace(".", "_")
-        gumi_guard = "__{}__".format(gumi_guard_value.upper())
+        gumi_guard = _gumi_guard(gumi.short_path)
         gumi_content.append("`ifndef {}".format(gumi_guard))
         gumi_content.append("  `define {}".format(gumi_guard))
         gumi_content.append("")
@@ -201,7 +207,12 @@ def _verilog_rtl_library_impl(ctx):
     )
     trans_dpi = get_transitive_srcs([], ctx.attr.deps, VerilogInfo, "transitive_dpi", allow_other_outputs = False)
 
-    runfiles = ctx.runfiles(transitive_files = depset(transitive = [trans_srcs, trans_flists, trans_vcs_flists, trans_dpi]))
+    runfiles = merge_default_runfiles(
+        ctx,
+        files = [],
+        targets = ctx.attr.deps,
+        transitive_files = depset(transitive = [trans_srcs, trans_flists, trans_vcs_flists, trans_dpi]),
+    )
 
     all_files = depset(transitive = [trans_srcs, trans_flists, trans_vcs_flists])
 
@@ -765,6 +776,7 @@ def _verilog_rtl_lint_test_impl(ctx):
             "{LINT_PARSER}": runfiles_relative_short_path(lint_parser),
             "{LINT_PARSER_LIB}": runfiles_relative_short_path(ctx.files._lint_parser_lib[0])[:-len(ctx.files._lint_parser_lib[0].basename) - 1],
             "{WAIVER_DIRECT}": ctx.attr.waiver_direct,
+            "{WAIVER_DIRECT_SHELL_QUOTED}": _shell_single_quote(ctx.attr.waiver_direct),
         },
     )
 
@@ -838,6 +850,7 @@ verilog_rtl_lint_test = rule(
             allow_single_file = True,
             default = Label("@rules_verilog//vendors/cadence:verilog_rtl_lint_test.sh.template"),
             doc = "The template to generate the script to run the lint test.\n" +
+                  "{WAIVER_DIRECT} substitutes the raw regex for custom templates. Use {WAIVER_DIRECT_SHELL_QUOTED} without surrounding quotes to insert one shell-safe argument.\n" +
                   "The command templates are located at " +
                   "@rules_verilog//vendors/<vendor name>/verilog_rtl_lint_test.tcl.template\n",
         ),

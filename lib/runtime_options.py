@@ -1,5 +1,7 @@
 """Helpers for the shared DV test runtime-options contract."""
 
+import datetime
+import math
 import re
 import shlex
 
@@ -135,6 +137,16 @@ def resolve_test_timeout_hours(runtime_options, default_timeout_hours, cli_timeo
 
     normalized_runtime_options = normalize_test_runtime_options(runtime_options)
     timeout_minutes = normalized_runtime_options.get("timeout_minutes")
-    if timeout_minutes is None or timeout_minutes < 0:
+    if timeout_minutes is None:
         return default_timeout_hours
-    return float(timeout_minutes) / 60.0
+    timeout_minutes = float(timeout_minutes)
+    if not math.isfinite(timeout_minutes):
+        raise ValueError("Test timeout must be finite")
+    if timeout_minutes < 0:
+        return default_timeout_hours
+    timeout_hours = timeout_minutes / 60.0
+    try:
+        datetime.timedelta(hours=timeout_hours)
+    except OverflowError as exc:
+        raise ValueError("Test timeout exceeds the supported duration") from exc
+    return timeout_hours

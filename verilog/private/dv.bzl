@@ -8,6 +8,30 @@ load(":simulators/vcs.bzl", "vcs_dv_backend", "vcs_dv_unit_test_impl")
 load(":simulators/xcelium.bzl", "xcelium_dv_backend", "xcelium_dv_unit_test_impl")
 load(":verilog.bzl", "VerilogInfo", "gather_shell_defines", "get_transitive_srcs", "merge_default_runfiles", "resolve_unit_test_simulator", "runfiles_relative_short_path", "verilog_input_manifest")
 
+def _expand_runfiles_locations(ctx, value, targets):
+    runfile_paths = {}
+    for target in targets:
+        for file in target[DefaultInfo].files.to_list():
+            runfile_paths[file.path] = runfiles_relative_short_path(file)
+
+    # Expand and normalize only actual location expressions. Literal argument
+    # text can contain execroot-like paths that must remain untouched.
+    segments = value.split("$(")
+    result = segments[0]
+    for segment in segments[1:]:
+        closing = segment.find(")")
+        expression = segment[:closing] if closing >= 0 else segment
+        words = expression.strip().replace("\t", " ").split(" ")
+        if words and words[0] in ["location", "locations"]:
+            macro = "$(" + expression + (")" if closing >= 0 else "")
+            expanded = ctx.expand_location(macro, targets = targets)
+            for path in sorted(runfile_paths.keys(), key = len, reverse = True):
+                expanded = expanded.replace(path, runfile_paths[path])
+            result += expanded + (segment[closing + 1:] if closing >= 0 else "")
+        else:
+            result += "$(" + segment
+    return result
+
 DVTestInfo = provider("Runtime configuration for a DV test.", fields = {
     "sim_opts": "Simulation :options to carry forward.",
     "analog_file": "Optional test-specific SCS entry file.",
@@ -597,7 +621,7 @@ def _verilog_dv_tb_impl(ctx):
         template = compile_config.template,
         output = ctx.outputs.compile_args,
         substitutions = {
-            "{COMPILE_ARGS}": ctx.expand_location("\n".join(compile_config.args), targets = ctx.attr.extra_runfiles),
+            "{COMPILE_ARGS}": _expand_runfiles_locations(ctx, "\n".join(compile_config.args), ctx.attr.extra_runfiles),
             "{DEFINES}": compile_config.defines,
             "{FLISTS}": compile_config.flists,
         },
@@ -609,7 +633,7 @@ def _verilog_dv_tb_impl(ctx):
 
     runtime_config = backend.runtime_config(ctx)
     runtime_runfile_targets = ctx.attr.extra_runfiles + ctx.attr.extra_runtime_runfiles
-    runtime_args = [ctx.expand_location(arg, targets = runtime_runfile_targets) for arg in ctx.attr.extra_runtime_args]
+    runtime_args = [_expand_runfiles_locations(ctx, arg, runtime_runfile_targets) for arg in ctx.attr.extra_runtime_args]
     _validate_runtime_args(runtime_args, simulator)
 
     ctx.actions.expand_template(

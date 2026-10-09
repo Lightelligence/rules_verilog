@@ -3,6 +3,7 @@ import threading
 import unittest
 import datetime
 import os
+import logging
 import signal
 import subprocess
 import time
@@ -15,6 +16,184 @@ from lib.job_lib import BazelTBJob, BazelTestCfgJob, Job, JobManager, JobStatus,
 
 
 class SchedulerResourceTest(unittest.TestCase):
+
+    def _queued_manager(self, jobs):
+        manager = JobManager.__new__(JobManager)
+        manager.log = logging.getLogger("scheduler_order_test")
+        manager.log.setLevel(logging.INFO)
+        manager._condition = threading.Condition()
+        manager._todo = sorted(jobs)
+        for queue in ("_ready", "_launching", "_active", "_finalizing", "_done", "_skipped"):
+            setattr(manager, queue, [])
+        manager._paused = False
+        manager.active_job_limit = 1
+        manager._move_todo_to_ready_locked()
+        return manager
+
+    def test_ready_admission_preserves_priority_fifo_and_status_order(self):
+        rcfg = SimpleNamespace(options=SimpleNamespace(timeout=1), log=_Logger())
+        first, second, urgent, last = [Job(rcfg, name) for name in ("first", "second", "urgent", "last")]
+        first.priority = second.priority = 0
+        urgent.priority = -10
+        last.priority = 10
+        expected = [urgent, first, second, last]
+        manager = self._queued_manager([first, second, last, urgent])
+
+        self.assertEqual(tuple(expected), manager.status_snapshot()["queued"])
+        manager._paused = True
+        self.assertIsNone(manager._take_ready_job_locked())
+        manager._paused = False
+        launched = []
+        while manager.status_snapshot()["queued"]:
+            job = manager._take_ready_job_locked()
+            launched.append(job)
+            manager._launching.remove(job)
+            manager._done.append(job)
+        self.assertEqual(expected, launched)
+
+    def test_blocked_resource_preserves_waiting_fifo_and_requeued_fifo(self):
+
+        class ResourceJob(Job):
+
+            @property
+            def execution_mode(self):
+                return "parallel"
+
+            @property
+            def exclusive_resource(self):
+                return self.resource
+
+        rcfg = SimpleNamespace(options=SimpleNamespace(timeout=1), log=_Logger())
+        blocked, peer, other = [ResourceJob(rcfg, name) for name in ("blocked", "peer", "other")]
+        for job, priority, resource in ((blocked, -10, "busy"), (peer, -10, "busy"), (other, 0, "free")):
+            job.priority, job.resource = priority, resource
+        manager = self._queued_manager([blocked, peer, other])
+        manager.active_job_limit = 2
+        manager._active = [SimpleNamespace(execution_mode="parallel", exclusive_resource="busy")]
+        self.assertIs(other, manager._take_ready_job_locked())
+        self.assertIsNone(manager._take_ready_job_locked())
+        self.assertEqual((blocked, peer), manager.status_snapshot()["queued"])
+        manager._launching.clear()
+        manager._active.clear()
+        self.assertIs(blocked, manager._take_ready_job_locked())
+        manager._launching.remove(blocked)
+        manager._queue_ready_job_locked(blocked)
+        self.assertEqual((peer, blocked), manager.status_snapshot()["queued"])
+        self.assertIs(peer, manager._take_ready_job_locked())
+        manager._launching.remove(peer)
+        self.assertIs(blocked, manager._take_ready_job_locked())
+
+    def test_large_ready_batch_preserves_existing_fifo_and_resource_admission(self):
+
+        class ResourceJob(Job):
+
+            @property
+            def execution_mode(self):
+                return "parallel"
+
+            @property
+            def exclusive_resource(self):
+                return self.resource
+
+        rcfg = SimpleNamespace(options=SimpleNamespace(timeout=1), log=_Logger())
+        existing = [ResourceJob(rcfg, "old_{}".format(index)) for index in range(32)]
+        incoming = [ResourceJob(rcfg, "new_{}".format(index)) for index in range(2048)]
+        for index, job in enumerate(existing + incoming):
+            job.priority = index % 7 - 3
+            job.resource = "busy" if index % 127 == 0 else None
+        manager = self._queued_manager(existing)
+        # Priorities may change after insertion into todo, so this batch is
+        # intentionally mixed while equal-priority arrival order remains stable.
+        manager._todo = incoming[:]
+        manager._move_todo_to_ready_locked()
+        expected = sorted(existing + incoming, key=lambda job: job.priority)
+        self.assertEqual(tuple(expected), manager.status_snapshot()["queued"])
+        manager.active_job_limit = 2
+        manager._active = [SimpleNamespace(execution_mode="parallel", exclusive_resource="busy")]
+
+        def drain_ready():
+            launched = []
+            while True:
+                job = manager._take_ready_job_locked()
+                if job is None:
+                    return launched
+                launched.append(job)
+                manager._launching.remove(job)
+
+        self.assertEqual([job for job in expected if job.resource is None], drain_ready())
+        blocked = [job for job in expected if job.resource == "busy"]
+        self.assertEqual(tuple(blocked), manager.status_snapshot()["queued"])
+        manager._active.clear()
+        self.assertEqual(blocked, drain_ready())
+        self.assertEqual((), manager.status_snapshot()["queued"])
+
+    def test_graceful_exit_preserves_priority_fifo_for_skipped_jobs(self):
+        rcfg = SimpleNamespace(options=SimpleNamespace(timeout=1), log=_Logger())
+        jobs = [Job(rcfg, name) for name in ("first", "second", "urgent")]
+        jobs[-1].priority -= 1
+        manager = self._queued_manager(jobs)
+        manager._done_grace_exit = False
+        expected = [jobs[-1], jobs[0], jobs[1]]
+        manager._graceful_exit_locked()
+        self.assertEqual(expected, manager._skipped)
+        self.assertTrue(all(job.jobstatus == JobStatus.SKIPPED for job in jobs))
+
+    def test_state_logging_retains_logical_ready_order(self):
+        rcfg = SimpleNamespace(options=SimpleNamespace(timeout=1), log=_Logger())
+        jobs = [Job(rcfg, name) for name in ("first", "second")]
+        manager = self._queued_manager(jobs)
+        log = mock.Mock()
+        manager._print_state_locked(log)
+        self.assertIn(mock.call("%s (%d jobs): %s%s", "_ready", 2, jobs, ""), log.call_args_list)
+
+    def test_state_logging_reports_counts_and_truncates_large_queue_samples(self):
+        rcfg = SimpleNamespace(options=SimpleNamespace(timeout=1), log=_Logger())
+        jobs = [Job(rcfg, str(index)) for index in range(20)]
+        manager = self._queued_manager(jobs)
+        manager._done = jobs[:]
+        messages = {}
+
+        def capture(message, queue, *args):
+            messages[queue] = (message % (queue, *args), args)
+
+        manager._print_state_locked(capture)
+        for queue in ("_ready", "_done"):
+            message, (count, sample, suffix) = messages[queue]
+            self.assertEqual(20, count)
+            self.assertEqual(jobs[:16], sample)
+            self.assertEqual(" ...", suffix)
+            self.assertIn("20 jobs", message)
+        self.assertEqual(tuple(jobs), manager.status_snapshot()["queued"])
+        self.assertEqual(tuple(jobs), manager.status_snapshot()["done"])
+
+    def test_scheduler_supports_loggers_without_level_query(self):
+        manager = self._queued_manager([])
+        manager.log = SimpleNamespace(debug=mock.Mock())
+        manager._move_todo_to_ready_locked()
+        self.assertIsNone(manager._take_ready_job_locked())
+        self.assertTrue(manager.log.debug.called)
+
+    def test_shutdown_preserves_ready_cleanup_order_and_cancellation(self):
+        rcfg = SimpleNamespace(options=SimpleNamespace(timeout=1), log=_Logger())
+        for shutdown in ("stop", "kill"):
+            with self.subTest(shutdown=shutdown):
+                cleaned = []
+                jobs = [Job(rcfg, name) for name in ("first", "second", "urgent")]
+                jobs[-1].priority -= 1
+                for job in jobs:
+                    job.discard_preparation = lambda current=job: cleaned.append(current)
+                manager = self._queued_manager(jobs)
+                manager._run_jobs_thread_active = True
+                manager._run_jobs_thread = mock.Mock()
+                manager._run_jobs_thread.is_alive.return_value = False
+                manager._preparation_threads = []
+                manager._shutdown_incomplete = False
+                getattr(manager, shutdown)()
+                self.assertEqual([jobs[-1], jobs[0], jobs[1]], cleaned)
+                self.assertTrue(all(job.cancel_requested == (shutdown == "kill") for job in jobs))
+                if shutdown == "kill":
+                    self.assertEqual(cleaned, manager._skipped)
+                    self.assertTrue(all(job.jobstatus == JobStatus.SKIPPED for job in jobs))
 
     def test_preparation_overlaps_test_but_cache_miss_waits_for_compute(self):
         log = _Logger()
@@ -1259,14 +1438,57 @@ class JobManagerLaunchTest(unittest.TestCase):
         runner._p = _ExitedProcess()
         runner._process_group_id = 456
         runner._check_for_done = mock.Mock(side_effect=RuntimeError("poll failed"))
+        runner._timed_out = False
+        runner._orphaned_process_group = False
 
-        with mock.patch("lib.job_lib.os.killpg") as killpg, \
+        with mock.patch("lib.job_lib.os.killpg", create=True) as killpg, \
              mock.patch.object(runner, "_wait_for_process_group_exit", return_value=True), \
              mock.patch.object(runner._p, "wait", wraps=runner._p.wait) as wait:
             self.assertTrue(runner.check_for_done())
 
         killpg.assert_called_once_with(456, signal.SIGKILL)
         wait.assert_called_once_with(timeout=runner.KILL_GRACE_SECONDS)
+        self.assertEqual(-signal.SIGKILL, runner.returncode)
+        self.assertFalse(runner.shutdown_incomplete)
+        self.assertTrue(runner.check_for_done())
+        runner._check_for_done.assert_called_once()
+
+    def test_monitoring_failure_fails_job_and_skips_dependent_job(self):
+        log = _Logger()
+        rcfg = SimpleNamespace(options=SimpleNamespace(timeout=1, no_bazel=True), log=log)
+        compile_job = Job(rcfg, "compile")
+        compile_job.job_dir = tempfile.mkdtemp()
+        job = BazelTestCfgJob(rcfg, "//tests:cfg", compile_job)
+        child = Job(rcfg, "dependent")
+        child.add_dependency(job)
+        runner = SubprocessJobRunner.__new__(SubprocessJobRunner)
+        runner.job, runner.log, runner.done = job, log, False
+        runner._p = _ExitedProcess()
+        runner._timed_out = runner._orphaned_process_group = False
+        runner._check_for_done = mock.Mock(side_effect=RuntimeError("poll failed"))
+        job.job_lib = runner
+        with mock.patch.object(runner, "_signal_process_group"), \
+             mock.patch.object(runner, "_signal_sidecar_process_groups"), \
+             mock.patch.object(runner, "_wait_for_process_group_exit", return_value=True):
+            self.assertTrue(runner.check_for_done())
+        manager = SchedulerResourceTest()._queued_manager([])
+        manager.log = log
+        manager._todo = [child]
+        manager._finalizing = [job]
+        manager._error_count, manager._quit_count = 0, 2
+        manager._complete_job(job)
+        self.assertEqual(JobStatus.FAILED, job.jobstatus)
+        self.assertEqual(JobStatus.SKIPPED, child.jobstatus)
+        self.assertEqual(1, manager._error_count)
+        self.assertEqual([job], manager._done)
+        self.assertEqual([child], manager._skipped)
+
+    def test_monitoring_failure_preserves_nonzero_child_returncode(self):
+        runner = SubprocessJobRunner.__new__(SubprocessJobRunner)
+        runner._monitoring_failed = True
+        runner._timed_out = runner._orphaned_process_group = False
+        runner._p = SimpleNamespace(returncode=7)
+        self.assertEqual(7, runner.returncode)
 
     def test_runner_exception_uses_bounded_wait_when_direct_child_cannot_be_reaped(self):
         runner = SubprocessJobRunner.__new__(SubprocessJobRunner)

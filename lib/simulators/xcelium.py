@@ -181,8 +181,12 @@ class XceliumSimulator(SimulatorInterface):
         if profile:
             inputs["extra_input_paths"].extend(profile["inputs"])
             inputs["environment"]["ANALOG_FILE_KEY"] = profile["key"]
-        if self.options.coverage and self.options.covfile_was_explicit:
-            inputs["extra_input_paths"].append(self.options.covfile)
+        covfile = self._effective_covfile(vcomp_job)
+        if covfile:
+            inputs["extra_input_paths"].append(covfile)
+        xprop_config = getattr(vcomp_job, "xcelium_xprop_config_path", None)
+        if xprop_config:
+            inputs["extra_input_paths"].append(xprop_config)
         inputs["environment"]["XCELIUMHOME"] = os.environ.get("XCELIUMHOME", "")
         inputs["environment"]["XCELIUM_TOOL_ID"] = self.get_tool_identity()
         return inputs
@@ -252,8 +256,10 @@ class XceliumSimulator(SimulatorInterface):
             return None
         covfile = self.options.covfile if self.options.covfile_was_explicit else vcomp_job.tb_options.get(
             "xcelium_covfile")
-        if not covfile and os.path.isfile(self.options.covfile):
-            covfile = self.options.covfile
+        if not covfile:
+            fallback = os.path.abspath(os.path.join(self.rcfg.proj_dir, self.options.covfile))
+            if os.path.isfile(fallback):
+                return fallback
         if covfile and not os.path.isabs(covfile):
             return os.path.join(vcomp_job.bazel_runfiles_main, covfile)
         return covfile
@@ -495,6 +501,7 @@ class XceliumSimulator(SimulatorInterface):
             self.rcfg.deferred_messages.append("Launch XRUN coverage with {}".format(merge_sh))
 
         # XPROP
+        vcomp_job.xcelium_xprop_config_path = None
         if self.options.xprop and not (self.options.mce or self.options.msie or self.options.msie_prim
                                        or self.options.msie_href):
             if self.options.xprop == 'F':
@@ -503,6 +510,7 @@ class XceliumSimulator(SimulatorInterface):
                 xprop_file = 'cat_xprop.txt'
             xprop_file_path = os.path.join(vcomp_job.bench_dir, xprop_file)
             if os.path.exists(xprop_file_path):
+                vcomp_job.xcelium_xprop_config_path = xprop_file_path
                 opts['xprop_cmd'] = shlex.join(['-xfile', xprop_file_path, '-xverbose'])
             else:
                 log.warning("Xcelium XPROP file not found: %s", xprop_file_path)
