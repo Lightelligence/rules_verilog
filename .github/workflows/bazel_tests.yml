@@ -33,6 +33,7 @@ jobs:
             "tests.bazel_profile_test",
             "tests.check_test_test",
             "tests.compile_cache_test",
+            "tests.coverage_data_test",
             "tests.docs_test",
             "tests.lint_parser_test",
             "tests.regression_discovery_test",
@@ -41,7 +42,8 @@ jobs:
             "tests.sim_artifacts_test",
             "tests.simmer_results_test",
             "tests.simmer_runtime_hardening_test",
-            "tests.simmer_state_test"
+            "tests.simmer_state_test",
+            "tests.vcs_coverage_test"
           )
           python -m unittest $testModules
 

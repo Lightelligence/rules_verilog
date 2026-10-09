@@ -201,6 +201,7 @@ def parse_args(argv):
             '--vcs-cm-cond',
             '--vcs-cm-tgl',
             '--vcs-cm-hier',
+            '--vcs-coverage-profile',
             '--vcs-profile',
             '--vcs-urg-parallel',
             '--vcs-urg-show-tests',

@@ -22,31 +22,45 @@ _METRIC_NAMES = {
     "TOGGLE": "Toggle",
 }
 _PERCENT_RE = re.compile(r"^(?:100(?:\.0+)?|[0-9]{1,2}(?:\.[0-9]+)?)%?$")
+_SEPARATOR_RE = re.compile(r"^[\s\-+=|:]+$")
 
 
 def _tokens(line):
-    return [token.strip("|:") for token in line.split() if token.strip("|:")]
+    return [token.strip(":") for token in re.split(r"[\s|]+", line) if token.strip(":")]
 
 
 def parse_coverage_summary(path):
-    """Return canonical percentage metrics from an URG or IMC text report."""
+    """Return the first complete URG/IMC summary without crossing table boundaries."""
     if not os.path.isfile(path):
         return {}
     with open(path, "r", encoding="utf-8", errors="replace") as filep:
-        lines = filep.readlines()
-
-    for index, line in enumerate(lines):
-        headers = [_METRIC_NAMES[token.upper()] for token in _tokens(line) if token.upper() in _METRIC_NAMES]
-        if "Overall" not in headers or len(headers) < 2:
-            continue
-        for value_line in lines[index + 1:]:
-            values = [token for token in _tokens(value_line) if _PERCENT_RE.match(token) or token.upper() == "N/A"]
-            if len(values) < len(headers):
+        for line in filep:
+            tokens = _tokens(line)
+            headers = [_METRIC_NAMES[token.upper()] for token in tokens if token.upper() in _METRIC_NAMES]
+            if "Overall" not in headers or len(headers) < 2:
                 continue
-            return {
-                header: "N/A" if value.upper() == "N/A" else value if value.endswith("%") else value + "%"
-                for header, value in zip(headers, values)
-            }
+            if tokens[0].upper() == "METRIC":
+                tokens = tokens[1:]
+            if len(tokens) != len(headers) or len(set(headers)) != len(headers):
+                return {}
+            for value_line in filep:
+                # A blank or a new section closes this summary. Only horizontal
+                # table rules may separate the header from its single value row.
+                if not value_line.strip():
+                    return {}
+                if _SEPARATOR_RE.fullmatch(value_line):
+                    continue
+                values = _tokens(value_line)
+                if values and values[0].upper() == "CUMULATIVE":
+                    values = values[1:]
+                if len(values) != len(headers) or any(not _PERCENT_RE.fullmatch(value) and value.upper() != "N/A"
+                                                      for value in values):
+                    return {}
+                return {
+                    header: "N/A" if value.upper() == "N/A" else value if value.endswith("%") else value + "%"
+                    for header, value in zip(headers, values)
+                }
+            return {}
     return {}
 
 

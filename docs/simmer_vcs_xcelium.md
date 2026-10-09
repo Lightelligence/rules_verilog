@@ -879,8 +879,10 @@ rule-provided coverage paths remain relative to the Bazel runfiles directory.
 
 VCS `--vcs-cm` writes one `.vdb` per vcomp and generates
 `<vcomp>_vcs_cov_merge.sh`. The same configured VCS runner is used for `urg`
-and Verdi. Xcelium `--coverage` keeps IMC generation and merge in the Xcelium
-adapter. Coverage switches from one backend are rejected by the other.
+and Verdi. The generated URG command explicitly requests `-format both` so
+both the text dashboard and HTML report are produced. Xcelium `--coverage`
+keeps IMC generation and merge in the Xcelium adapter. Coverage switches from
+one backend are rejected by the other.
 The historical VCS spelling `--cm` remains a compatibility alias.
 
 VCS coverage tuning follows the Y-2026.03 Command Reference and Coverage Guide.
@@ -889,17 +891,50 @@ sensitivity-list events. Use `--vcs-cm-tgl portsonly` to reduce toggle cost, or
 another documented mode when full signal coverage is required. Repeat
 `--vcs-cm-report` for `svpackages` and `noinitial`. URG merge can opt into
 `--vcs-urg-parallel` and `--vcs-urg-show-tests`; the latter retains test
-correlation but increases VDB size.
+correlation but increases VDB size. Parallel merge remains disabled by default:
+measure each bench's merge elapsed time and input VDB size before enabling it,
+since parallel startup and coordination can outweigh the benefit for small
+databases. Simmer records elapsed time for each merge. With `--vcs-cm` enabled,
+add `--vcs-coverage-profile` to also measure input and merged VDB bytes. Directory
+size scans are opt-in because they can be expensive on shared filesystems. For
+example:
+
+```bash
+simmer -t 'sys_tb:*@10' --simulator VCS --vcs-cm line+cond+tgl \
+  --vcs-coverage-profile --report
+```
+
+Coverage-enabled compile reuse requires both `simv` and the static coverage
+model in the bench VDB (`snps/coverage/db/design` with at least one nonempty
+regular file). If that model is missing, automatic cache reuse
+recompiles the bench; `--no-compile` fails the reuse check. Preserve the static
+model alongside `simv` when moving or archiving a reusable compilation.
 
 Run report generation only when the regression database is complete. Keep raw
 per-test coverage until the merge succeeds; merged databases and HTML reports
 can then be archived while per-test databases are removed according to project
 retention policy.
 
-Each run clears stale test coverage before execution. Failed-test databases are
-removed before merge, so the dashboard represents successful tests from the
-current regression rather than accumulated leftovers. Missing metrics are
-reported as `N/A`.
+Per-test coverage names bind the full test identity, seed and iteration to the
+claimed simulation-directory identity (and VSO run ID when present). Tests with
+the same short name in different packages, or simultaneous runs assigned
+different simulation directories, therefore have distinct data directories.
+Each run clears its test coverage before execution. Failed-test databases,
+including failures while collecting post-run results, are removed before merge.
+A failed deletion blocks merging that bench rather than including failed or
+stale test data. Cleanup removes only the owning test's data and preserves the
+static compile model.
+
+Before merging, simmer removes earlier merged outputs and reports. A zero URG
+exit status alone does not establish success: this merge must create a merged
+VDB with the static model above and a dashboard with a parsable coverage table.
+A table whose metrics are all `N/A` is valid. Missing or invalid
+outputs mark the merge failed and keep that bench's dashboard metrics at `N/A`.
+Dashboard lookup uses the compile job's report identity, including bench names
+with path components, so coverage is attached to the corresponding report row.
+The text parser reads incrementally and stops at table boundaries; a truncated
+coverage table cannot consume unrelated numeric rows later in the report.
+Unavailable individual metrics are reported as `N/A`.
 
 Dashboard aggregation matches OpenTitan's DVSim 1.34.1 rule. Code Coverage is
 the mean of available Line/Statement, Branch, Condition/Expression, Toggle and
