@@ -3,6 +3,12 @@ load("@rules_verilog//verilog:defs.bzl", "verilog_rtl_library")
 
 package(default_visibility = ["//visibility:public"])
 
+genrule(
+    name = "generated_config",
+    outs = ["generated_external.cfg"],
+    cmd = "printf 'generated external config\\n' > $@",
+)
+
 py_binary(
     name = "verilog_test_tool",
     srcs = ["verilog_test_tool.py"],

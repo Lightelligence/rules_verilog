@@ -120,6 +120,35 @@ class RegressionReportTest(unittest.TestCase):
             regression_history_series(regressions, list(regressions)),
         )
 
+    def test_process_trd_preserves_seed_log_order_and_job_boundaries(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            report = RegressionReport(SimpleNamespace(log=_Log()), self._report_environment(), temporary_dir)
+            continuation_paths = ["seed_{}/sim.log".format(index) for index in range(1000)]
+            trd = [
+                ("", "", "", "", "", "", "", "orphan.log", ""),
+                ("bench", "test_one", "1s", "2", "1", "1", "4", "initial.log|second.log", "link"),
+            ]
+            trd.extend(("", "", "", "", "", "", "", path, "") for path in continuation_paths)
+            trd.extend([
+                ("", "", "", "", "", "", "", "", ""),
+                ("", "test_two", "2s", "1", "", "", "1", "", ""),
+                ("", "", "", "", "", "", "", "last.log", ""),
+                ("other_bench", "test_three", "", "1", "", "", "1", "other.log", ""),
+            ])
+            report.process_trd(trd)
+
+            self.assertEqual(["bench", "other_bench"], report.bench_list)
+            self.assertEqual([
+                "bench", "test_one", "1s", "2", "1", "1", "4", "50.00",
+                "|".join(["initial.log", "second.log"] + continuation_paths), "link"
+            ], report.trd["bench"][0])
+            self.assertEqual("last.log", report.trd["bench"][1][8])
+            self.assertEqual(["Total", "", "", "3", "1", "1", "5", "60.00", "", ""], report.trd["bench"][-1])
+            self.assertEqual("other.log", report.trd["other_bench"][0][8])
+            report.process_trd([("new_bench", "test", "", "1", "", "", "1", "", "")])
+            self.assertEqual(["new_bench"], report.bench_list)
+            self.assertEqual("", report.trd["new_bench"][0][8])
+
     def test_report_handles_zero_tests_partial_coverage_and_untagged_header(self):
         with tempfile.TemporaryDirectory() as temporary_dir:
             report = RegressionReport(SimpleNamespace(log=_Log()), self._report_environment(), temporary_dir)
@@ -145,7 +174,8 @@ class RegressionReportTest(unittest.TestCase):
                     "total": "80%",
                     "vendor_score": "82%",
                     "cc": {
-                        "Overall": "75%"
+                        "Overall": "75%",
+                        "Condition": "N/A",
                     },
                 }},
                 {},
@@ -162,6 +192,7 @@ class RegressionReportTest(unittest.TestCase):
             self.assertTrue((bench_path / "index.html").is_file())
             report_html = (bench_path / "index.html").read_text(encoding="utf-8")
             self.assertGreaterEqual(report_html.count("N/A"), 2)
+            self.assertIn("<td>N/A</td>", report_html)
             self.assertIn(">No tests</span>", report_html)
 
     def test_compile_only_reports_preserve_compile_failure_and_never_claim_test_pass(self):
@@ -287,12 +318,39 @@ class RegressionReportTest(unittest.TestCase):
             )
 
             bench_path = Path(temporary_dir) / "regression_report" / "project" / "bench"
-            copied_log = bench_path / "logs" / header["time"] / "vcomp_01_compile.log"
+            copied_log = bench_path / "logs" / header["time"] / "001_vcomp_01_compile.log"
             self.assertEqual("compile failed\n", copied_log.read_text(encoding="utf-8"))
             report_html = (bench_path / "index.html").read_text(encoding="utf-8")
             self.assertIn("{}/001_vcomp.html".format(header["time"]), report_html)
             logs_html = (copied_log.parent / "001_vcomp.html").read_text(encoding="utf-8")
-            self.assertIn("vcomp_01_compile.log", logs_html)
+            self.assertIn("001_vcomp_01_compile.log", logs_html)
+
+    def test_archived_logs_keep_colliding_job_slugs_and_repeated_rows_distinct(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            root = Path(temporary_dir)
+            report = RegressionReport(SimpleNamespace(log=_Log()), self._report_environment(), temporary_dir)
+            header = self._header()
+            trd = []
+            contents = []
+            for index, job_name in enumerate(("a+b", "a_b", "a+b")):
+                source = root / str(index) / "seed" / "sim.log"
+                source.parent.mkdir(parents=True)
+                contents.append("job {} seed output\n".format(index))
+                source.write_text(contents[-1], encoding="utf-8")
+                trd.append(("bench" if index == 0 else "", job_name, "", "1", "", "", "1", str(source), ""))
+            report.run(header, trd, {}, {})
+
+            bench_path = root / "regression_report" / "project" / "bench"
+            summary = json.loads((bench_path / "regressions.json").read_text(encoding="utf-8"))[header["time"]]
+            archived_logs = [group[0] for group in summary["logs"]]
+            self.assertEqual(3, len(set(archived_logs)))
+            self.assertEqual(contents, [(bench_path / path).read_text(encoding="utf-8") for path in archived_logs])
+            report_html = (bench_path / "index.html").read_text(encoding="utf-8")
+            for row_index, archived_log in enumerate(archived_logs, start=1):
+                page_name = "{:03d}_a_b.html".format(row_index)
+                logs_page = bench_path / "logs" / header["time"] / page_name
+                self.assertIn(Path(archived_log).name, logs_page.read_text(encoding="utf-8"))
+                self.assertIn("{}/{}".format(header["time"], page_name), report_html)
 
     def test_report_retention_removes_snapshot_and_timestamp_logs(self):
         with tempfile.TemporaryDirectory() as temporary_dir:

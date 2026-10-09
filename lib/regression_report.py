@@ -177,6 +177,7 @@ class RegressionReport:
         self.trd = {}
         current_bench = None
         last_job = None
+        pending_logs = None
 
         for raw_entry in trd:
             entry = list(raw_entry)
@@ -184,13 +185,21 @@ class RegressionReport:
             if entry[0]:
                 current_bench = entry[0]
             if entry[1] and current_bench:
+                if pending_logs is not None:
+                    last_job[8] = "|".join(pending_logs)
+                    pending_logs = None
                 total = _safe_int(entry[6])
                 pass_rate = (_safe_int(entry[3]) / total * 100) if total else 0
                 normalized = entry[:7] + ["{:.2f}".format(pass_rate), entry[7], entry[8]]
                 self.trd.setdefault(current_bench, []).append(normalized)
                 last_job = normalized
             elif entry[7] and last_job is not None:
-                last_job[8] = "|".join(part for part in [last_job[8], entry[7]] if part)
+                if pending_logs is None:
+                    pending_logs = [last_job[8]] if last_job[8] else []
+                pending_logs.append(entry[7])
+
+        if pending_logs is not None:
+            last_job[8] = "|".join(pending_logs)
 
         for bench, rows in self.trd.items():
             test_rows = rows[1:] if rows and rows[0][1] == "vcomp" else rows
@@ -403,7 +412,8 @@ fi
                     self.rcfg.log.warning("Regression log does not exist: %s", source)
                     continue
                 os.makedirs(run_logs_path, exist_ok=True)
-                destination_name = "{}_{:02d}_{}.log".format(_slug(row[1]), log_index, _slug(source.parent.name))
+                destination_name = "{:03d}_{}_{:02d}_{}.log".format(row_index, _slug(row[1]), log_index,
+                                                                    _slug(source.parent.name))
                 destination_path = _contained_path(run_logs_path, destination_name)
                 shutil.copy2(source, destination_path)
                 os.chmod(destination_path, 0o644)

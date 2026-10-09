@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-from lib.runtime_options import append_uvm_control_options, format_log_check_args
+from lib.runtime_options import append_uvm_control_options, format_log_check_args, resolve_test_timeout_hours
 
 
 def _options(**overrides):
@@ -25,6 +25,17 @@ def _options(**overrides):
 
 
 class RuntimeOptionsTest(unittest.TestCase):
+
+    def test_invalid_test_timeout_is_rejected_before_scheduler_polling(self):
+        for timeout in (float("nan"), float("inf"), -float("inf"), 2**63 - 1):
+            with self.subTest(timeout=timeout), self.assertRaisesRegex(ValueError, "timeout"):
+                resolve_test_timeout_hours({"timeout_minutes": timeout}, 12.0, False)
+
+    def test_test_timeout_resolution_preserves_disable_inheritance_and_cli_override(self):
+        self.assertEqual(0, resolve_test_timeout_hours({"timeout_minutes": 0}, 12.0, False))
+        self.assertEqual(0.5, resolve_test_timeout_hours({"timeout_minutes": 30}, 12.0, False))
+        self.assertEqual(12, resolve_test_timeout_hours({"timeout_minutes": -1}, 12.0, False))
+        self.assertEqual(2, resolve_test_timeout_hours({"timeout_minutes": 30}, 2.0, True))
 
     def test_uvm_controls_override_verbosity_and_preserve_file_quoting(self):
         with tempfile.TemporaryDirectory() as temporary_dir:

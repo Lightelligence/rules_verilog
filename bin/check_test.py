@@ -67,25 +67,43 @@ finish_signatures = [
 finish_regex = re.compile(r"(?:" + ")|(?:".join(finish_signatures) + r")", re.MULTILINE)
 enable_regex = re.compile(r".*TEST_CHECK_ENABLE: (.*)")
 disable_regex = re.compile(r".*TEST_CHECK_DISABLE: (.*)")
+non_ascii_bytes_regex = re.compile(rb"[^\x00-\x7f]")
 
 # Global error regex placeholder
 err_regex = None
 active_signatures = list(default_error_signatures)
 
 
+class PatternSet:
+    """Search independently compiled regexes without changing flags or groups."""
+
+    def __init__(self, patterns):
+        self.patterns = tuple(re.compile(pattern, re.MULTILINE) for pattern in patterns)
+
+    def search(self, text):
+        first_match = None
+        for pattern in self.patterns:
+            match = pattern.search(text)
+            if match is not None and (first_match is None or match.start() < first_match.start()):
+                first_match = match
+                if match.start() == 0:
+                    break
+        return first_match
+
+
 def compile_patterns(patterns):
-    """Compile a list of independent patterns into one multiline regex."""
-    if not patterns:
-        return re.compile(r"(?!x)x")
-    return re.compile(r"(?:" + ")|(?:".join(patterns) + r")", re.MULTILINE)
+    """Compile patterns independently, including global inline flags."""
+    if len(patterns) == 1:
+        return re.compile(patterns[0], re.MULTILINE)
+    return PatternSet(patterns)
 
 
 def compile_error_regex():
     """Compiles the list of error signatures into a single regex object."""
     global err_regex
-    if not active_signatures:
-        # Match nothing if list is empty
-        err_regex = compile_patterns([])
+    if active_signatures == default_error_signatures:
+        # The built-in patterns contain no capturing groups or inline flags.
+        err_regex = re.compile(r"(?:" + ")|(?:".join(active_signatures) + r")", re.MULTILINE)
     else:
         err_regex = compile_patterns(active_signatures)
 
@@ -126,8 +144,34 @@ def get_file_tail(filepath, n_lines=25):
         return []
 
 
+def scan_text_log(filepath, error_limit, extra_error_regex=None, required_finish_regex=None):
+    """Stream decoded lines with the same semantics for all project regexes."""
+    error_lines = []
+    seed_lines = []
+    run_time_lines = []
+    found_finish = False
+    with open(filepath, 'r', encoding='utf-8', errors='replace') as log_file:
+        for line in log_file:
+            if "TEST_CHECK_" in line and update_signatures(line):
+                continue
+            if err_regex.search(line) or (extra_error_regex is not None and extra_error_regex.search(line)):
+                error_lines.append(line)
+                if len(error_lines) >= error_limit:
+                    break
+            elif not found_finish and (required_finish_regex.search(line)
+                                       if required_finish_regex is not None else finish_regex.search(line)):
+                found_finish = True
+            elif "SVSEED" in line or "random seed used" in line:
+                seed_lines.append(line)
+            elif "real\t" in line and "user\t" in line:
+                run_time_lines.append(line)
+    return error_lines, seed_lines, run_time_lines, found_finish
+
+
 def scan_static_log(filepath, error_limit, extra_error_regex=None, required_finish_regex=None):
-    """Scan logs without dynamic signature directives using mmap."""
+    """Use mmap for built-in signatures; stream text for project regexes."""
+    if extra_error_regex is not None or required_finish_regex is not None or active_signatures != default_error_signatures:
+        return scan_text_log(filepath, error_limit, extra_error_regex, required_finish_regex)
 
     def decode_line(line):
         return line.decode('utf-8', errors='replace').replace('\r\n', '\n')
@@ -160,22 +204,16 @@ def scan_static_log(filepath, error_limit, extra_error_regex=None, required_fini
             if data.find(b"TEST_CHECK_") != -1:
                 return None
 
-            # Regexes supplied by projects commonly anchor a pattern with `$`.
-            # A byte regex sees the `\r` in a CRLF line ending, so `$` does not
-            # match before `\r\n` even though the text-mode fallback does. Keep
-            # the mmap fast path for the common LF case, and normalize only
-            # logs that actually contain CRLF line endings so both paths have
-            # identical matching semantics.
+            # Byte regexes agree with decoded built-in regexes only for ASCII.
+            # Search the mapping directly without allocating a full-log copy.
+            # Text mode also normalizes CRLF and invalid UTF-8 when streaming.
+            if non_ascii_bytes_regex.search(data) is not None or data.find(b"\r\n") != -1:
+                return scan_text_log(filepath, error_limit)
             search_data = data
-            if data.find(b"\r\n") != -1:
-                search_data = data[:].replace(b"\r\n", b"\n")
 
             error_lines = []
             seen_line_starts = set()
-            error_patterns = [err_regex.pattern]
-            if extra_error_regex is not None:
-                error_patterns.append(extra_error_regex.pattern)
-            byte_error_regex = re.compile(compile_patterns(error_patterns).pattern.encode('utf-8'), re.MULTILINE)
+            byte_error_regex = re.compile(err_regex.pattern.encode('utf-8'), re.MULTILINE)
             for match in byte_error_regex.finditer(search_data):
                 line_start = search_data.rfind(b'\n', 0, match.start()) + 1
                 if line_start in seen_line_starts:
@@ -188,11 +226,7 @@ def scan_static_log(filepath, error_limit, extra_error_regex=None, required_fini
                     break
             seed_lines = find_lines(search_data, [b"SVSEED", b"random seed used"])
             run_time_lines = find_lines(search_data, [b"real\t"], required_marker=b"user\t")
-            if required_finish_regex is None:
-                found_finish = any(search_data.find(signature.encode('utf-8')) != -1 for signature in finish_signatures)
-            else:
-                required_bytes = re.compile(required_finish_regex.pattern.encode('utf-8'), re.MULTILINE)
-                found_finish = required_bytes.search(search_data) is not None
+            found_finish = any(search_data.find(signature.encode('utf-8')) != -1 for signature in finish_signatures)
             return error_lines, seed_lines, run_time_lines, found_finish
 
 
@@ -237,27 +271,8 @@ def main():
             required_finish_regex=project_pass_regex,
         )
         if scan_result is None:
-            error_lines = []
-            seed_lines = []
-            run_time_lines = []
-            found_finish = False
-            with open(logfile, 'r', encoding='utf-8', errors='replace') as f:
-                for line in f:
-                    if "TEST_CHECK_" in line and update_signatures(line):
-                        continue
-                    if err_regex.search(line) or (project_fail_regex is not None and project_fail_regex.search(line)):
-                        error_lines.append(line)
-                        if len(error_lines) >= options.error_limit:
-                            break
-                    elif not found_finish and (project_pass_regex.search(line)
-                                               if project_pass_regex is not None else finish_regex.search(line)):
-                        found_finish = True
-                    elif "SVSEED" in line or "random seed used" in line:
-                        seed_lines.append(line)
-                    elif "real\t" in line and "user\t" in line:
-                        run_time_lines.append(line)
-        else:
-            error_lines, seed_lines, run_time_lines, found_finish = scan_result
+            scan_result = scan_text_log(logfile, options.error_limit, project_fail_regex, project_pass_regex)
+        error_lines, seed_lines, run_time_lines, found_finish = scan_result
     except FileNotFoundError:
         print(f"Error: File {logfile} not found.")
         sys.exit(1)

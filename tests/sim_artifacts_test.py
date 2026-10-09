@@ -15,6 +15,14 @@ class SimArtifactsTest(unittest.TestCase):
         self.assertEqual("bazel_runfiles_main/external/vendor/ip.f", sim_artifacts.runfiles_path(path, root))
         self.assertEqual("/outside/ip.f", sim_artifacts.runfiles_path("/outside/ip.f", root))
 
+    @unittest.skipUnless(os.name == "nt", "Windows drive-relative paths")
+    def test_runfiles_path_preserves_outside_path_on_another_drive(self):
+        path = Path("D:/external/vendor/ip.f")
+
+        self.assertIs(path, sim_artifacts.runfiles_path(path, "C:/build/tb.runfiles/__main__"))
+        self.assertEqual("D:/external/vendor/ip.f",
+                         sim_artifacts.runfiles_path("D:/external/vendor/ip.f", "C:/build/tb.runfiles/__main__"))
+
     def test_materialize_python_script_copies_source_into_job(self):
         root = Path(tempfile.mkdtemp())
         source = root / "external repo" / "check_test.py"

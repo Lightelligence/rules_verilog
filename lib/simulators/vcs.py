@@ -353,14 +353,19 @@ class VcsSimulator(SimulatorInterface):
         return shlex.split(self.get_tool_runner()) + ["crg", "-dir", dbdir, "-shared", "init"], log_path
 
     def prepare_regression_runtime(self, vcomp_jobs):
-        if not self.options.cm:
-            return
-        coverage_jobs = []
+        runtime_jobs = {}
         for vcomp_job in vcomp_jobs.values():
-            vcomp_job.cov_work_dir = os.path.join(self.rcfg.regression_dir, vcomp_job.name + "__COV_WORK_VCS.vdb")
-            coverage_jobs.append(vcomp_job)
-        for vcomp_job in sorted(coverage_jobs, key=lambda job: os.path.abspath(job.cov_work_dir)):
-            vcomp_job.acquire_shared_runtime_lock(vcomp_job.cov_work_dir)
+            # simv and its companion files remain inputs to queued and active
+            # simulations after the compile lock is released. Keep ownership
+            # until those consumers finish so another run cannot rebuild them.
+            paths = [vcomp_job.job_dir]
+            if self.options.cm:
+                vcomp_job.cov_work_dir = os.path.join(self.rcfg.regression_dir, vcomp_job.name + "__COV_WORK_VCS.vdb")
+                paths.append(vcomp_job.cov_work_dir)
+            for path in paths:
+                runtime_jobs.setdefault(os.path.normcase(os.path.realpath(path)), vcomp_job)
+        for runtime_path, vcomp_job in sorted(runtime_jobs.items()):
+            vcomp_job.acquire_shared_runtime_lock(runtime_path)
 
     def generate_compile_options(self, vcomp_job):
         opts = {
@@ -643,6 +648,7 @@ class VcsSimulator(SimulatorInterface):
         vcomp_job.coverage_merge_script = merge_sh
         vcomp_job.coverage_report_dir = report_dir
         vcomp_job.merged_coverage_dir = merged_db_path
+        vcomp_job.coverage_merge_succeeded = False
         self.rcfg.deferred_messages.append("Merge/Launch VCS coverage with {}".format(merge_sh))
 
     def run_report_coverage_merge(self, vcomp_jobs):
@@ -650,12 +656,19 @@ class VcsSimulator(SimulatorInterface):
             return False
         failed = False
         for vcomp_job in vcomp_jobs.values():
+            vcomp_job.coverage_merge_succeeded = False
             merge_script = getattr(vcomp_job, "coverage_merge_script", None)
             if not merge_script:
                 log.error("VCS coverage merge script is unavailable for %s", vcomp_job)
                 failed = True
                 continue
             try:
+                # A successful command must create this run's outputs; a failed
+                # command must never leave an earlier dashboard as current data.
+                for attribute in ("coverage_report_dir", "merged_coverage_dir"):
+                    output_dir = getattr(vcomp_job, attribute, None)
+                    if output_dir and os.path.isdir(output_dir):
+                        shutil.rmtree(output_dir)
                 result = run_bounded_process(["bash", merge_script], capture_output=True, text=True)
             except (OSError, subprocess.TimeoutExpired) as exc:
                 log.error("VCS coverage merge could not start for %s: %s", vcomp_job, exc)
@@ -664,6 +677,8 @@ class VcsSimulator(SimulatorInterface):
             if result.returncode != 0:
                 log.error("VCS coverage merge failed for %s:\n%s\n%s", vcomp_job, result.stdout, result.stderr)
                 failed = True
+            else:
+                vcomp_job.coverage_merge_succeeded = True
         return failed
 
     def cleanup_test_coverage(self, test_job):
@@ -677,7 +692,8 @@ class VcsSimulator(SimulatorInterface):
         coverage = {}
         for vcomp, job in vcomp_jobs.items():
             report_dir = getattr(job, "coverage_report_dir", None)
-            metrics = parse_coverage_summary(os.path.join(report_dir, "dashboard.txt")) if report_dir else {}
+            metrics = (parse_coverage_summary(os.path.join(report_dir, "dashboard.txt"))
+                       if report_dir and getattr(job, "coverage_merge_succeeded", True) else {})
             coverage[vcomp.split(":")[-1]] = aggregate_coverage_metrics(metrics)
         return coverage
 

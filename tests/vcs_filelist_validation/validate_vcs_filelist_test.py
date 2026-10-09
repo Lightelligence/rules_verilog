@@ -5,6 +5,7 @@ import os
 import re
 import shlex
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -80,6 +81,104 @@ def assert_lacks_legacy_filelist_flag(contents, relative_path):
 
 
 class VcsFilelistValidationTest(unittest.TestCase):
+
+    def test_generated_locations_are_available_to_compile_and_runtime_consumers(self):
+        prefix = "tests/vcs_filelist_validation/dv_tb_vcs_runfiles_contract"
+        compile_args = read_runfile(prefix + "_compile_args.f")
+        runtime_args = read_runfile(prefix + "_runtime_args.f")
+        options = ast.literal_eval(read_runfile(prefix + "_tb_options.py"))
+        compile_inputs = read_runfile(options["compile_inputs"])
+
+        expected_compile = {
+            "tests/vcs_filelist_validation/generated_compile.cfg": "generated compile config\n",
+            "external/external_verilog_fixture/generated_external.cfg": "generated external config\n",
+        }
+        expected_runtime = {
+            "tests/vcs_filelist_validation/generated_runtime.data": "generated runtime config\n",
+            "external/external_verilog_fixture/generated_external.cfg": "generated external config\n",
+        }
+        compile_paths = [
+            arg.removeprefix("+optconfigfile+") for arg in shlex.split(compile_args)
+            if arg.startswith("+optconfigfile+")
+        ]
+        self.assertEqual(set(expected_compile), set(compile_paths))
+        for path in compile_paths:
+            self.assertEqual(expected_compile[path], read_runfile(path))
+            self.assertIn("runfile\t" + path, compile_inputs)
+        runtime_paths = [
+            line.removeprefix("-f bazel_runfiles_main/") for line in runtime_args.splitlines()
+            if line.startswith("-f bazel_runfiles_main/")
+        ]
+        self.assertEqual(set(expected_runtime), set(runtime_paths))
+        for path in runtime_paths:
+            self.assertEqual(expected_runtime[path], read_runfile(path))
+        self.assertNotIn("generated_runtime.data", compile_inputs)
+        for arguments in (compile_args, runtime_args):
+            self.assertNotIn("bazel-out/", arguments)
+            self.assertNotIn("../", arguments)
+
+        # The sidecar is reachable only through TB -> RTL -> DV -> DPI.
+        self.assertEqual("DPI runtime sidecar\n",
+                         read_runfile("tests/vcs_filelist_validation/dpi_runtime_sidecar.data"))
+        self.assertEqual("DPI fixture\n", read_runfile("tests/vcs_filelist_validation/libfixture.so"))
+        self.assertNotIn("dpi_runtime_sidecar.data", compile_inputs)
+        self.assertNotIn("libfixture.so", compile_inputs)
+
+    def test_gumi_guard_accepts_punctuation_in_package_and_target_names(self):
+        header = read_runfile(
+            "tests/vcs_filelist_validation/guard-package+punctuation/gumi_guard-target+punctuation.vh")
+        guard = header.splitlines()[0].split()[1]
+        self.assertRegex(guard, r"^[A-Za-z_][A-Za-z0-9_]*$")
+        self.assertIn("`define " + guard, header)
+        self.assertIn("`define gumi_guard_top guard_top", header)
+
+        guards = []
+        for name, module in (("guard-target", "guard_hyphen_top"), ("guard_target", "guard_underscore_top"),
+                             ("guard_45_target", "guard_escape_top")):
+            header = read_runfile("tests/vcs_filelist_validation/guard-package+punctuation/gumi_{}.vh".format(name))
+            guard = header.splitlines()[0].split()[1]
+            self.assertRegex(guard, r"^[A-Za-z_][A-Za-z0-9_]*$")
+            self.assertIn("`define " + guard, header)
+            self.assertIn("`define gumi_{} {}".format(module, module), header)
+            guards.append(guard)
+        self.assertEqual(3, len(set(guards)))
+
+    def test_generated_lint_launchers_preserve_exact_waiver_argv(self):
+        waiver = "quotes:'\" dollars:$HOME $(touch waiver_dollar_executed) backticks:`touch waiver_backtick_executed` regex:\\d+\\s"
+        parser_relative = "tests/vcs_filelist_validation/waiver_argv_parser.py"
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            root = Path(temporary_dir)
+            bin_dir = root / "bin"
+            bin_dir.mkdir()
+            runmod = bin_dir / "runmod"
+            runmod.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+            runmod.chmod(0o755)
+            parser = root / parser_relative
+            parser.parent.mkdir(parents=True)
+            parser.write_text(read_runfile(parser_relative), encoding="utf-8")
+            parser.chmod(0o755)
+            log_path = root / "waiver_argv.json"
+            environment = dict(os.environ)
+            environment.update({
+                "PATH": "{}{}{}".format(bin_dir, os.pathsep, environment["PATH"]),
+                "PYTHON": sys.executable,
+                "WAIVER_ARGV_LOG": str(log_path),
+            })
+            for simulator in ("vcs", "xrun"):
+                launcher = find_runfile("tests/vcs_filelist_validation/rtl_lint_{}_waiver_argv".format(simulator))
+                result = subprocess.run(
+                    ["bash", str(launcher), "--caller-arg", "value with spaces"],
+                    cwd=root,
+                    env=environment,
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(0, result.returncode, result.stderr)
+                self.assertEqual(["--caller-arg", "value with spaces", "--waiver-direct", waiver],
+                                 json.loads(log_path.read_text(encoding="utf-8")))
+                self.assertFalse((root / "waiver_dollar_executed").exists())
+                self.assertFalse((root / "waiver_backtick_executed").exists())
 
     def test_no_synth_remains_compatible_with_simulation_analysis(self):
         filelist = read_runfile("tests/vcs_filelist_validation/no_synth_compat.f")

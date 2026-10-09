@@ -171,6 +171,7 @@ def discover_filelist_inputs(filelist_path, working_directory):
     pending = [(root_filelist, working_directory)]
     source_paths = set()
     include_directories = set()
+    compiler_include_directories = set()
     directory_contents = {}
 
     def directory_inputs(path):
@@ -199,11 +200,34 @@ def discover_filelist_inputs(filelist_path, working_directory):
             discovered.update(directory_inputs(resolved))
         return resolved
 
+    def tokenize(text):
+        lexer = shlex.shlex(text, posix=True)
+        lexer.whitespace_split = True
+        if os.name == "nt":
+            lexer.escape = ""
+        return list(lexer)
+
+    def add_compiler_include_directories(flags, relative_base):
+        try:
+            arguments = tokenize(flags)
+        except ValueError:
+            return
+        index = 0
+        while index < len(arguments):
+            argument = arguments[index]
+            if argument == "-I" and index + 1 < len(arguments):
+                index += 1
+                compiler_include_directories.add(resolve(arguments[index], relative_base))
+            elif argument.startswith("-I") and len(argument) > 2:
+                compiler_include_directories.add(resolve(argument[2:], relative_base))
+            index += 1
+
     while pending:
         current_filelist, relative_base = pending.pop()
-        if current_filelist in parsed_filelists:
+        context = (current_filelist, relative_base)
+        if context in parsed_filelists:
             continue
-        parsed_filelists.add(current_filelist)
+        parsed_filelists.add(context)
         if not os.path.isfile(current_filelist):
             continue
         discovered.add(current_filelist)
@@ -215,11 +239,7 @@ def discover_filelist_inputs(filelist_path, working_directory):
                 # ``C:\\work\\dut.sv`` into ``C:workdut.sv``.  Preserve
                 # native Windows paths without losing quotes inside attached
                 # options; retain POSIX escaping on licensed Linux hosts.
-                lexer = shlex.shlex(filep.read(), posix=True)
-                lexer.whitespace_split = True
-                if os.name == "nt":
-                    lexer.escape = ""
-                tokens = list(lexer)
+                tokens = tokenize(filep.read())
         except ValueError:
             continue
 
@@ -236,6 +256,14 @@ def discover_filelist_inputs(filelist_path, working_directory):
                 index += 2
                 continue
             option, separator, value = token.partition("=")
+            if token == "-CFLAGS" and index + 1 < len(tokens):
+                add_compiler_include_directories(tokens[index + 1], relative_base)
+                index += 2
+                continue
+            if separator and option == "-CFLAGS":
+                add_compiler_include_directories(value, relative_base)
+                index += 1
+                continue
             if separator and option in ("-f", "-file", "-F"):
                 nested = add_path(value, relative_base)
                 contents_base = os.path.dirname(nested) if option == "-F" else relative_base
@@ -280,7 +308,8 @@ def discover_filelist_inputs(filelist_path, working_directory):
     # reuse. Macro-generated include names still require declared input files
     # or explicit include-directory inventories.
     include_tokens = re.compile(
-        r'//[^\r\n]*|/\*.*?\*/|"(?:\\.|[^"\\])*"|(?:`include|\#\s*include)(?:\s|/\*.*?\*/)*"([^"\r\n]+)"', re.DOTALL)
+        r'//[^\r\n]*|/\*.*?\*/|"(?:\\.|[^"\\])*"|(?:`include|\#\s*include)(?:\s|/\*.*?\*/)*"([^"\r\n]+)"'
+        r'|\#\s*include(?:\s|/\*.*?\*/)*<([^>\r\n]+)>', re.DOTALL)
     pending_sources = list(source_paths)
     parsed_sources = set()
     while pending_sources:
@@ -291,10 +320,16 @@ def discover_filelist_inputs(filelist_path, working_directory):
         with open(source_path, "r", encoding="utf-8", errors="surrogateescape") as source_file:
             text = source_file.read()
         for match in include_tokens.finditer(text):
-            if match.group(1) is None:
+            quoted_header, angle_header = match.groups()
+            if quoted_header is None and angle_header is None:
                 continue
-            for base in sorted(include_directories | {os.path.dirname(source_path), working_directory}):
-                header = add_path(match.group(1), base)
+            # Compiler include paths resolve named dependencies only. Walking
+            # them recursively would inventory unrelated SDK/system headers.
+            bases = compiler_include_directories
+            if quoted_header is not None:
+                bases = bases | include_directories | {os.path.dirname(source_path), working_directory}
+            for base in sorted(bases):
+                header = add_path(quoted_header or angle_header, base)
                 if os.path.isfile(header):
                     pending_sources.append(header)
 

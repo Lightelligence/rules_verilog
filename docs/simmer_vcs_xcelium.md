@@ -721,8 +721,9 @@ Xcelium batch defaults are:
 - default simulator remains XRUN
 - batch mode only
 - waves default to VWDB when `--waves` is used without `--wave-type`
-- xprop is opt-in; `--xprop F` uses a bench `fox_xprop.txt` when present and
-  otherwise uses Xcelium's direct FOX mode
+- FOX configuration is selected by default. `--xprop F` uses a bench
+  `fox_xprop.txt`, and `--xprop C` uses `cat_xprop.txt`. If the selected file is
+  absent, simmer warns and emits no XPROP option. Use `--xprop D` to disable it.
 
 ### Xcelium MSIE gatesim
 

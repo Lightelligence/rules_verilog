@@ -505,6 +505,75 @@ class CompileCacheTest(unittest.TestCase):
             filelist.write_text("-F=nested/sources.f\n", encoding="utf-8")
             self.assertEqual(sorted(map(str, (filelist, nested, source))), discover_filelist_inputs(filelist, root))
 
+    def test_same_filelist_in_both_relative_contexts_tracks_and_invalidates_both_sources(self):
+        for switches in ("-f sub/common.f\n-F sub/common.f\n", "-F=sub/common.f\n-f=sub/common.f\n"):
+            with self.subTest(switches=switches), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                sub = root / "sub"
+                sub.mkdir()
+                sources = (root / "top.sv", sub / "top.sv")
+                for source in sources:
+                    source.write_text("module top; endmodule\n", encoding="utf-8")
+                nested = sub / "common.f"
+                nested.write_text("top.sv\n-F common.f\n", encoding="utf-8")
+                filelist = root / "compile.f"
+                filelist.write_text(switches, encoding="utf-8")
+                inputs = discover_filelist_inputs(filelist, root)
+                self.assertEqual(sorted(map(str, (filelist, nested, *sources))), inputs)
+                initial = compile_fingerprint(root, "vcs", filelist, extra_input_paths=inputs)
+                write_compile_fingerprint(root / "build", initial)
+                for source in sources:
+                    source.write_text("module changed; endmodule\n", encoding="utf-8")
+                    changed = compile_fingerprint(root,
+                                                  "vcs",
+                                                  filelist,
+                                                  extra_input_paths=discover_filelist_inputs(filelist, root))
+                    self.assertFalse(can_reuse_compile(root / "build", changed, lambda: None)[0])
+                    with self.assertRaisesRegex(RuntimeError, "fingerprint mismatch"):
+                        validate_compile_fingerprint(root / "build", changed)
+                    source.write_text("module top; endmodule\n", encoding="utf-8")
+
+    def test_compiler_include_flags_track_only_named_transitive_headers(self):
+        for flags, include_name in (('-CFLAGS "-I."', "."), ('-CFLAGS="-I ."', "."),
+                                    ('-CFLAGS \'-I"include dir"\'', "include dir"), ('-CFLAGS \'-I "include dir"\'',
+                                                                                     "include dir")):
+            with self.subTest(flags=flags), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                includes = root / include_name
+                includes.mkdir(exist_ok=True)
+                source = root / "dpi.c"
+                header = includes / "dpi.h"
+                quoted = includes / "quoted.h"
+                nested = includes / "nested.h"
+                unrelated = includes / "unrelated.h"
+                source.write_text(
+                    '#include /* dependency */ <dpi.h>\n'
+                    '// #include <unrelated.h>\n'
+                    'const char *text = "#include <unrelated.h>";\n',
+                    encoding="utf-8")
+                header.write_text('#include "quoted.h"\n', encoding="utf-8")
+                quoted.write_text('#include <nested.h>\n', encoding="utf-8")
+                nested.write_text('#include <dpi.h>\n#define VALUE 1\n', encoding="utf-8")
+                unrelated.write_text("unused SDK header\n", encoding="utf-8")
+                filelist = root / "compile.f"
+                filelist.write_text("{}\ndpi.c\n".format(flags), encoding="utf-8")
+                with mock.patch.object(compile_cache, "_directory_inputs",
+                                       wraps=compile_cache._directory_inputs) as walk:
+                    inputs = discover_filelist_inputs(filelist, root)
+                    walk.assert_not_called()
+                self.assertEqual(sorted(map(str, (filelist, source, header, quoted, nested))), inputs)
+                initial = compile_fingerprint(root, "vcs", filelist, extra_input_paths=inputs)
+                write_compile_fingerprint(root / "build", initial)
+                for changed_header in (header, quoted, nested):
+                    original = changed_header.read_text(encoding="utf-8")
+                    changed_header.write_text(original + "#define CHANGED 1\n", encoding="utf-8")
+                    changed = compile_fingerprint(root,
+                                                  "vcs",
+                                                  filelist,
+                                                  extra_input_paths=discover_filelist_inputs(filelist, root))
+                    self.assertFalse(can_reuse_compile(root / "build", changed, lambda: None)[0])
+                    changed_header.write_text(original, encoding="utf-8")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -216,7 +216,8 @@ def add_test_configuration_arguments(parser):
         type=str,
         default=None,
         action=parser_actions.XpropAction,
-        help=('Opt-in X-propagation selector. F=more pessimistic mode, C=ternary-like mode, D=Disable. '
+        help=('X-propagation selector. VCS is opt-in; XRUN defaults to F through the bench configuration. '
+              'F=more pessimistic mode, C=ternary-like mode, D=Disable. '
               'On Xcelium, F maps to FOX and C maps to CAT. For VCS, prefer --vcs-xprop; this '
               'shared spelling remains compatible.'))
     test_config_group.add_argument(

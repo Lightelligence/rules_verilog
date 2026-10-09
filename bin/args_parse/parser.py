@@ -1,4 +1,6 @@
 import argparse
+import datetime
+import math
 import textwrap
 
 from .common import (
@@ -141,8 +143,12 @@ def parse_args(argv):
         parser.error("--status/--st cannot be combined with history query options.")
     if options.status and options.tests:
         parser.error("--status/--st cannot be combined with -t/--tests.")
-    if options.timeout < 0:
-        parser.error("--timeout must be non-negative (0 disables the timeout).")
+    if not math.isfinite(options.timeout) or options.timeout < 0:
+        parser.error("--timeout must be finite and non-negative (0 disables the timeout).")
+    try:
+        datetime.timedelta(hours=options.timeout)
+    except OverflowError:
+        parser.error("--timeout is too large to represent as a duration in hours.")
     options.simulator_was_explicit = simulator_explicitly_requested(argv)
     options.xprop_was_explicit = any(
         argument_explicitly_requested(argv, argument) for argument in ('--xprop', '--vcs-xprop'))

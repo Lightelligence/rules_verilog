@@ -627,7 +627,18 @@ class RegressionConfig():
         return bglob, tglob, iterations
 
     def _bench_glob_to_regex(self, bench_glob):
-        return re.escape(bench_glob).replace(r"\*", ".*").replace(r"\?", ".")
+        # Use the same glob language as final fnmatch selection, including
+        # bracket classes. Bazel labels cannot contain newlines, so discard
+        # Python's DOTALL wrapper/end marker and use the query's existing $.
+        regex = fnmatch.translate(bench_glob)[len("(?s:"):-len(")\\Z")]
+        # Atomic groups are a Python optimization, not part of the glob
+        # language. Ordinary groups preserve matches on Bazel's regex engine.
+        regex = regex.replace("(?>", "(?:")
+        # The query embeds this regex in a quoted string. Encode quotes and
+        # control characters as regex escapes so selectors cannot end it.
+        for char in "\t\n\r\f\v":
+            regex = regex.replace("\\" + char, char)
+        return "".join(r"\x{:02x}".format(ord(char)) if char in "\"'" or ord(char) < 32 else char for char in regex)
 
     def _build_vcomp_discovery_query(self):
         bench_globs = sorted({self._split_btglob(ta.btiglob)[0] for ta in self.options.tests})

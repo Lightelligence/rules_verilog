@@ -8,7 +8,11 @@ def runfiles_path(path, runfiles_root):
     """Return a path rooted at the per-test bazel_runfiles_main symlink."""
     absolute_path = os.path.abspath(path)
     absolute_root = os.path.abspath(runfiles_root)
-    relative = os.path.relpath(absolute_path, absolute_root)
+    try:
+        relative = os.path.relpath(absolute_path, absolute_root)
+    except ValueError:
+        # Windows paths on different drives cannot be made root-relative.
+        return path
     if relative == os.pardir or relative.startswith(os.pardir + os.sep):
         return path
     return os.path.join("bazel_runfiles_main", relative).replace(os.sep, "/")

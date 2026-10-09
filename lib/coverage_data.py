@@ -40,10 +40,13 @@ def parse_coverage_summary(path):
         if "Overall" not in headers or len(headers) < 2:
             continue
         for value_line in lines[index + 1:]:
-            values = [token for token in _tokens(value_line) if _PERCENT_RE.match(token)]
+            values = [token for token in _tokens(value_line) if _PERCENT_RE.match(token) or token.upper() == "N/A"]
             if len(values) < len(headers):
                 continue
-            return {header: value if value.endswith("%") else value + "%" for header, value in zip(headers, values)}
+            return {
+                header: "N/A" if value.upper() == "N/A" else value if value.endswith("%") else value + "%"
+                for header, value in zip(headers, values)
+            }
     return {}
 
 

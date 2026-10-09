@@ -1,6 +1,8 @@
 import os
+import fnmatch
 import json
 import multiprocessing
+import re
 import subprocess
 import tempfile
 import time
@@ -636,6 +638,37 @@ class RegressionDiscoveryTest(unittest.TestCase):
         query = config._build_vcomp_discovery_query()
 
         self.assertIn('filter(":soc_tb$", kind(dv_tb, //benches/...))', query)
+
+    def test_bench_query_globs_match_final_selection(self):
+        config = self._config(Path(tempfile.mkdtemp()))
+        benches = [
+            "soc_tb1", "soc_tb2", "soc_tb3", "soc_tb[", "soc_tb]", "soc_tb-", "soc_tb^", "soc_tb.a", "soc_tb+a",
+            "soc_tb(a)", "soc_tb_ab_tail", "soc_tb_xab_tail"
+        ]
+        for glob in ("soc_tb[12]", "soc_tb[!2]", "soc_tb[1-3]", "soc_tb[]]", "soc_tb[-]", "soc_tb[^]", "soc_tb[",
+                     "soc_tb[3-1]", "soc_tb?", "soc_tb.*", "soc_tb+a", "soc_tb(a)", "soc_tb*ab*tail"):
+            with self.subTest(glob=glob):
+                config.options.tests[0].btiglob = glob + ":*"
+                query = config._build_vcomp_discovery_query()
+                regex = re.search(r'filter\("([^"\n]*)"', query).group(1)
+                expected = [bench for bench in benches if fnmatch.fnmatchcase(bench, glob)]
+                self.assertEqual(expected, [bench for bench in benches if re.search(regex, "//benches/test:" + bench)])
+                self.assertNotIn("(?s:", regex)
+                self.assertNotIn("(?>", regex)
+
+    def test_bench_query_selector_cannot_escape_quoted_regex(self):
+        config = self._config(Path(tempfile.mkdtemp()))
+        for glob in ('soc_tb") union kind(.*)', "soc_tb'", 'soc_tb["\']', "soc_tb\n"):
+            with self.subTest(glob=glob):
+                regex = config._bench_glob_to_regex(glob)
+                self.assertNotIn('"', regex)
+                self.assertNotIn("'", regex)
+                self.assertNotIn("\n", regex)
+                self.assertIsNotNone(re.fullmatch(regex, glob.replace('["\']', '"')))
+                config.options.tests[0].btiglob = glob + ":*"
+                query = config._build_vcomp_discovery_query()
+                self.assertEqual(2, query.count('"'))
+                self.assertEqual(1, query.count('filter('))
 
     def test_cache_manifest_tracks_requested_bench_query(self):
         config = self._config(Path(tempfile.mkdtemp()))

@@ -20,6 +20,61 @@ filegroup(
     srcs = ["vcs_partitions.cfg"],
 )
 
+genrule(
+    name = "generated_compile_config",
+    outs = ["generated_compile.cfg"],
+    cmd = "printf 'generated compile config\\n' > $@",
+)
+
+genrule(
+    name = "generated_runtime_config",
+    outs = ["generated_runtime.data"],
+    cmd = "printf 'generated runtime config\\n' > $@",
+)
+
+genrule(
+    name = "dpi_library_file",
+    outs = ["libfixture.so"],
+    cmd = "printf 'DPI fixture\\n' > $@",
+)
+
+filegroup(
+    name = "dpi_with_sidecar",
+    srcs = [":dpi_library_file"],
+    data = ["dpi_runtime_sidecar.data"],
+)
+
+verilog_dv_library(
+    name = "dpi_runtime_leaf",
+    srcs = [],
+    dpi = [":dpi_with_sidecar"],
+)
+
+verilog_rtl_library(
+    name = "rtl_runtime_bridge",
+    modules = ["unit_test_top.sv"],
+    deps = [":dpi_runtime_leaf"],
+)
+
+verilog_dv_tb(
+    name = "dv_tb_vcs_runfiles_contract",
+    extra_compile_args = [
+        "+optconfigfile+$(location :generated_compile_config)",
+        "+optconfigfile+$(location @external_verilog_fixture//:generated_config)",
+    ],
+    extra_runfiles = [
+        ":generated_compile_config",
+        "@external_verilog_fixture//:generated_config",
+    ],
+    extra_runtime_args = [
+        "-f bazel_runfiles_main/$(location :generated_runtime_config)",
+        "-f bazel_runfiles_main/$(location @external_verilog_fixture//:generated_config)",
+    ],
+    extra_runtime_runfiles = [":generated_runtime_config"],
+    simulator = "VCS",
+    deps = [":rtl_runtime_bridge"],
+)
+
 sh_binary(
     name = "runtime_tool",
     srcs = ["runtime_tool.sh"],
@@ -105,6 +160,27 @@ verilog_rtl_lint_test(
     simulator = "VCS",
     tags = ["manual"],
     top = "unit_test_top",
+    deps = [":unit_test_top"],
+)
+
+verilog_rtl_lint_test(
+    name = "rtl_lint_vcs_waiver_argv",
+    lint_parser = "waiver_argv_parser.py",
+    simulator = "VCS",
+    tags = ["manual"],
+    top = "unit_test_top",
+    waiver_direct = "quotes:'\" dollars:$HOME $(touch waiver_dollar_executed) backticks:`touch waiver_backtick_executed` regex:\\d+\\s",
+    deps = [":unit_test_top"],
+)
+
+verilog_rtl_lint_test(
+    name = "rtl_lint_xrun_waiver_argv",
+    lint_parser = "waiver_argv_parser.py",
+    rulefile = "legacy_hal_rules.lint",
+    simulator = "XRUN",
+    tags = ["manual"],
+    top = "unit_test_top",
+    waiver_direct = "quotes:'\" dollars:$HOME $(touch waiver_dollar_executed) backticks:`touch waiver_backtick_executed` regex:\\d+\\s",
     deps = [":unit_test_top"],
 )
 
@@ -358,6 +434,10 @@ py_test(
         ":dv_tb_vcs_compile_args.f",
         ":dv_tb_vcs_digest_diamond",
         ":dv_tb_vcs_in_flist_only",
+        ":dv_tb_vcs_runfiles_contract",
+        ":dv_tb_vcs_runfiles_contract_compile_args.f",
+        ":dv_tb_vcs_runfiles_contract_runtime_args.f",
+        ":dv_tb_vcs_runfiles_contract_tb_options.py",
         ":dv_tb_vcs_runtime_args.f",
         ":dv_tb_vcs_runtime_only_runfile",
         ":dv_tb_vcs_runtime_only_runfile_compile_args.f",
@@ -379,6 +459,8 @@ py_test(
         ":rtl_lint_vcs_custom_rulefile_cmds.tcl",
         ":rtl_lint_vcs_legacy_rulefile",
         ":rtl_lint_vcs_legacy_rulefile_cmds.tcl",
+        ":rtl_lint_vcs_waiver_argv",
+        ":rtl_lint_xrun_waiver_argv",
         ":rtl_svunit_explicit_xrun",
         ":rtl_svunit_vcs",
         ":rtl_unit_vcs",
@@ -386,6 +468,10 @@ py_test(
         ":synth_flist_compat",
         ":unit_test_top",
         ":vcs_partitions",
+        "//tests/vcs_filelist_validation/guard-package+punctuation:guard-target",
+        "//tests/vcs_filelist_validation/guard-package+punctuation:guard-target+punctuation",
+        "//tests/vcs_filelist_validation/guard-package+punctuation:guard_45_target",
+        "//tests/vcs_filelist_validation/guard-package+punctuation:guard_target",
         "@filelist_external_fixture//:external_rtl",
     ],
     main = "validate_vcs_filelist_test.py",

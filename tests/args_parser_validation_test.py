@@ -69,6 +69,16 @@ class ArgsParserValidationTest(unittest.TestCase):
         self.assert_parse_error(["--uvm-max-quit-count", "-1"])
         self.assertEqual(0, parse_args(["--uvm-max-quit-count", "0"]).uvm_max_quit_count)
 
+    def test_timeout_rejects_nonfinite_and_unrepresentable_hours(self):
+        for timeout in ("nan", "inf", "-inf", "1e300", "24000000000"):
+            with self.subTest(timeout=timeout):
+                self.assert_parse_error(["--timeout=" + timeout])
+
+    def test_timeout_preserves_zero_and_representable_fractional_hours(self):
+        for timeout in ("0", "0.125", "12", "1e10"):
+            with self.subTest(timeout=timeout):
+                self.assertEqual(float(timeout), parse_args(["--timeout", timeout]).timeout)
+
     def test_history_filters_enable_default_history_query(self):
         for option in ("--history-bench", "--his-bench"):
             with self.subTest(option=option):

@@ -245,6 +245,87 @@ class SimmerRuntimeHardeningTest(unittest.TestCase):
     def test_xcelium_relative_coverage_config_uses_invocation_directory(self):
         self._check_relative_coverage_config("XRUN")
 
+    def test_xcelium_implicit_configs_invalidate_compile_fingerprint(self):
+        for selector in ("F", "C"):
+            with self.subTest(selector=selector), tempfile.TemporaryDirectory() as temporary_dir:
+                root = Path(temporary_dir)
+                runfiles = root / "runfiles"
+                runfiles.mkdir()
+                coverage_config = root / "coverage.ccf"
+                coverage_config.write_text("first coverage configuration", encoding="utf-8")
+                xprop_config = root / ("fox_xprop.txt" if selector == "F" else "cat_xprop.txt")
+                xprop_config.write_text("first xprop configuration", encoding="utf-8")
+                options = parse_args(["--simulator", "XRUN", "--coverage", "A", "--xprop", selector])
+                options.covfile = str(coverage_config)
+                rcfg = SimpleNamespace(proj_dir=str(root), regression_dir=str(root), deferred_messages=[])
+                simulator = simmer.XceliumSimulator(options, rcfg, simmer.jinja2_env)
+                simulator._xcelium_tool_identity = "test compiler"
+                job = SimpleNamespace(name="tb",
+                                      job_dir=str(root / "vcomp"),
+                                      bench_dir=str(root),
+                                      tb_options={},
+                                      bazel_runfiles_main=str(runfiles),
+                                      acquire_shared_runtime_lock=mock.Mock())
+                # Configuration resolution must not depend on the caller's
+                # current directory, which differs from the compile cwd.
+                generated = simulator.generate_compile_options(job)
+                cov_argv = shlex.split(generated["cov_opts"])
+                self.assertEqual(str(coverage_config), cov_argv[cov_argv.index("-covfile") + 1])
+
+                def fingerprint():
+                    return compile_cache.compile_fingerprint(str(root), "compile fixture", str(root / "compile.f"),
+                                                             **simulator.get_compile_fingerprint_inputs(job))
+
+                baseline = fingerprint()
+                for config in (coverage_config, xprop_config):
+                    original = config.read_text(encoding="utf-8")
+                    config.write_text("changed configuration", encoding="utf-8")
+                    self.assertNotEqual(baseline, fingerprint())
+                    config.write_text(original, encoding="utf-8")
+                self.assertEqual(baseline, fingerprint())
+
+    def test_vcs_failed_coverage_merge_does_not_reuse_prior_dashboard(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            root = Path(temporary_dir)
+            report = root / "report"
+            merged = root / "merged.vdb"
+            report.mkdir()
+            merged.mkdir()
+            (report / "dashboard.txt").write_text("SCORE LINE COND\n99.00 99.00 99.00\n", encoding="utf-8")
+            options = parse_args(["--simulator", "VCS", "--cm", "line"])
+            simulator = simmer.VcsSimulator(options, SimpleNamespace(), simmer.jinja2_env)
+            job = SimpleNamespace(coverage_merge_script=str(root / "merge.sh"),
+                                  coverage_report_dir=str(report),
+                                  merged_coverage_dir=str(merged))
+            completed = SimpleNamespace(returncode=1, stdout="", stderr="merge failed")
+            with mock.patch("lib.simulators.vcs.run_bounded_process", return_value=completed):
+                self.assertTrue(simulator.run_report_coverage_merge({"//bench:tb": job}))
+            self.assertFalse(report.exists())
+            self.assertFalse(merged.exists())
+            # Even a partial report from the failed invocation is unavailable.
+            report.mkdir()
+            (report / "dashboard.txt").write_text("SCORE LINE COND\n99.00 99.00 99.00\n", encoding="utf-8")
+            coverage = simulator.collect_coverage_data({"//bench:tb": job})
+            self.assertIsNone(coverage["tb"]["total"])
+
+    def test_vcs_compile_directory_remains_owned_until_regression_cleanup(self):
+        for coverage in (False, True):
+            with self.subTest(coverage=coverage), tempfile.TemporaryDirectory() as root:
+                args = ["--simulator", "VCS"] + (["--cm", "line"] if coverage else [])
+                options = parse_args(args)
+                simulator = simmer.VcsSimulator(options, SimpleNamespace(regression_dir=root), simmer.jinja2_env)
+                job = SimpleNamespace(name="tb",
+                                      job_dir=os.path.join(root, "compile"),
+                                      acquire_shared_runtime_lock=mock.Mock(),
+                                      release_shared_runtime_locks=mock.Mock())
+                simulator.prepare_regression_runtime({"//bench:tb": job})
+                paths = [call.args[0] for call in job.acquire_shared_runtime_lock.call_args_list]
+                self.assertIn(os.path.normcase(os.path.realpath(job.job_dir)), paths)
+                self.assertEqual(2 if coverage else 1, len(paths))
+                job.release_shared_runtime_locks.assert_not_called()
+                simulator.cleanup_shared_runtime_artifacts({"//bench:tb": job})
+                job.release_shared_runtime_locks.assert_called_once_with()
+
     def test_simulation_directory_name_bounds_overlong_utf8_component(self):
         suffix = "_report_rerun_20260808_120000_0123456789abcdef"
         test_name = "long_" + ("测" * 100)
@@ -1086,6 +1167,57 @@ class SimmerRuntimeHardeningTest(unittest.TestCase):
             second.release_shared_runtime_locks()
 
         self.assertFalse(errors)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX advisory-lock behavior")
+    def test_vcs_recompile_waits_after_first_compile_lock_is_released(self):
+        with tempfile.TemporaryDirectory() as root, mock.patch("simmer.log", mock.Mock()):
+            options = parse_args(["--simulator", "VCS"])
+            rcfg = SimpleNamespace(proj_dir=root, regression_dir=root)
+            simulator = simmer.VcsSimulator(options, rcfg, simmer.jinja2_env)
+            jobs = []
+            for _ in range(2):
+                job = simmer.VCompJob.__new__(simmer.VCompJob)
+                job.name = "tb"
+                job.job_dir = os.path.join(root, "compile")
+                job.rcfg = rcfg
+                job._compile_lock = None
+                job._shared_runtime_locks = {}
+                job._cancel_event = threading.Event()
+                jobs.append(job)
+            first, second = jobs
+            simulator.prepare_regression_runtime({"//bench:tb": first})
+            first._acquire_compile_lock()
+            os.makedirs(first.job_dir)
+            executable = Path(first.job_dir) / "simv"
+            executable.write_text("first compilation", encoding="utf-8")
+            first._release_compile_lock()
+            rebuilt = threading.Event()
+            errors = []
+
+            def recompile():
+                try:
+                    simulator.prepare_regression_runtime({"//bench:tb": second})
+                    second._acquire_compile_lock()
+                    executable.write_text("second compilation", encoding="utf-8")
+                    rebuilt.set()
+                except Exception as exc:
+                    errors.append(exc)
+                finally:
+                    second._release_compile_lock()
+                    second.release_shared_runtime_locks()
+
+            waiter = threading.Thread(target=recompile)
+            waiter.start()
+            try:
+                self.assertFalse(rebuilt.wait(0.15))
+                self.assertEqual("first compilation", executable.read_text(encoding="utf-8"))
+            finally:
+                simulator.cleanup_shared_runtime_artifacts({"//bench:tb": first})
+            self.assertTrue(rebuilt.wait(2.0))
+            waiter.join(2.0)
+            self.assertFalse(waiter.is_alive())
+            self.assertFalse(errors)
+            self.assertEqual("second compilation", executable.read_text(encoding="utf-8"))
 
     @unittest.skipUnless(os.name == "posix", "POSIX advisory-lock behavior")
     def test_symlink_lock_wait_stops_after_cancellation(self):

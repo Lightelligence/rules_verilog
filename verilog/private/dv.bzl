@@ -8,6 +8,14 @@ load(":simulators/vcs.bzl", "vcs_dv_backend", "vcs_dv_unit_test_impl")
 load(":simulators/xcelium.bzl", "xcelium_dv_backend", "xcelium_dv_unit_test_impl")
 load(":verilog.bzl", "VerilogInfo", "gather_shell_defines", "get_transitive_srcs", "merge_default_runfiles", "resolve_unit_test_simulator", "runfiles_relative_short_path", "verilog_input_manifest")
 
+def _expand_runfiles_locations(ctx, value, targets):
+    expanded = ctx.expand_location(value, targets = targets, short_paths = True)
+    for target in targets:
+        for file in target[DefaultInfo].files.to_list():
+            if file.short_path.startswith("../"):
+                expanded = expanded.replace(file.short_path, runfiles_relative_short_path(file))
+    return expanded
+
 DVTestInfo = provider("Runtime configuration for a DV test.", fields = {
     "sim_opts": "Simulation :options to carry forward.",
     "analog_file": "Optional test-specific SCS entry file.",
@@ -597,7 +605,7 @@ def _verilog_dv_tb_impl(ctx):
         template = compile_config.template,
         output = ctx.outputs.compile_args,
         substitutions = {
-            "{COMPILE_ARGS}": ctx.expand_location("\n".join(compile_config.args), targets = ctx.attr.extra_runfiles),
+            "{COMPILE_ARGS}": _expand_runfiles_locations(ctx, "\n".join(compile_config.args), ctx.attr.extra_runfiles),
             "{DEFINES}": compile_config.defines,
             "{FLISTS}": compile_config.flists,
         },
@@ -609,7 +617,7 @@ def _verilog_dv_tb_impl(ctx):
 
     runtime_config = backend.runtime_config(ctx)
     runtime_runfile_targets = ctx.attr.extra_runfiles + ctx.attr.extra_runtime_runfiles
-    runtime_args = [ctx.expand_location(arg, targets = runtime_runfile_targets) for arg in ctx.attr.extra_runtime_args]
+    runtime_args = [_expand_runfiles_locations(ctx, arg, runtime_runfile_targets) for arg in ctx.attr.extra_runtime_args]
     _validate_runtime_args(runtime_args, simulator)
 
     ctx.actions.expand_template(
