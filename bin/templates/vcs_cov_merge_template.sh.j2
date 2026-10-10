@@ -4,6 +4,7 @@ set -Eeuo pipefail
 trap 'rc=$?; printf "ERROR: VCS coverage merge failed at line %s (exit %s): %s\n" "$LINENO" "$rc" "$BASH_COMMAND" >&2' ERR
 
 # Merge the coverage database produced by VCS -cm_dir.
+merge_coverage() {
 {{ urg_command }} -full64 -dir {{ cov_db_path|shell_quote }} -dbname {{ merged_db_path|shell_quote }} -flex_merge union \
 {% if urg_parallel -%}
   -parallel \
@@ -11,7 +12,26 @@ trap 'rc=$?; printf "ERROR: VCS coverage merge failed at line %s (exit %s): %s\n
 {% if urg_show_tests -%}
   -show tests \
 {% endif -%}
-  -format both -report {{ report_dir|shell_quote }}
+  "$@"
+}
+
+# Default to one combined invocation. Profiling invokes the two phases separately.
+case "${1:-all}" in
+  all) merge_coverage -format {{ urg_format|shell_quote }} -report {{ report_dir|shell_quote }} ;;
+  merge) merge_coverage -noreport ;;
+  report)
+    # Report from the original tests; a merged VDB coalesces their identities.
+    {{ urg_command }} -full64 -dir {{ cov_db_path|shell_quote }} -flex_merge union \
+{% if urg_parallel -%}
+      -parallel \
+{% endif -%}
+{% if urg_show_tests -%}
+      -show tests \
+{% endif -%}
+      -format {{ urg_format|shell_quote }} -report {{ report_dir|shell_quote }}
+    ;;
+  *) printf 'Unknown coverage phase: %s\n' "$1" >&2; exit 2 ;;
+esac
 
 # Launch Verdi for the merged database.
 printf '%s\n' {{ ('To view merged coverage: ' ~ verdi_command ~ ' -cov -covdir ' ~ merged_db_path)|shell_quote }}

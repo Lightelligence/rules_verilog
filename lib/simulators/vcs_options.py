@@ -10,6 +10,7 @@ def validate_vcs_runtime_options(options, parser):
             options.vcs_cm_hier is not None,
             options.vcs_urg_parallel,
             options.vcs_urg_show_tests,
+            getattr(options, "vcs_urg_format", None) is not None,
             getattr(options, "vcs_coverage_profile", False),
     ]) and not options.cm:
         parser.error("VCS coverage detail switches require '--vcs-cm'. "

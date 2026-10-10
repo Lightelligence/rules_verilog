@@ -1,4 +1,5 @@
 import datetime
+import itertools
 import json
 import os
 from pathlib import Path
@@ -1772,6 +1773,7 @@ run_bounded_process([
             urg_command="true",
             urg_parallel=False,
             urg_show_tests=False,
+            urg_format="both",
             verdi_command="verdi",
         )
         script = root / "merge.sh"
@@ -1798,8 +1800,9 @@ run_bounded_process([
             cov_db_path = str(root / "source database.vdb")
             merged_db_path = str(root / "merged database.vdb")
             report_dir = str(root / "coverage report")
-            for parallel, show_tests in ((False, False), (True, False), (False, True), (True, True)):
-                with self.subTest(parallel=parallel, show_tests=show_tests):
+            for parallel, show_tests, report_format in itertools.product((False, True), (False, True),
+                                                                         ("text", "both")):
+                with self.subTest(parallel=parallel, show_tests=show_tests, report_format=report_format):
                     rendered = template.render(
                         cov_db_path=cov_db_path,
                         merged_db_path=merged_db_path,
@@ -1807,6 +1810,7 @@ run_bounded_process([
                         urg_command=shlex.join(command),
                         urg_parallel=parallel,
                         urg_show_tests=show_tests,
+                        urg_format=report_format,
                         verdi_command="verdi",
                     )
                     expected = command[2:] + [
@@ -1816,14 +1820,31 @@ run_bounded_process([
                         expected.append("-parallel")
                     if show_tests:
                         expected.extend(["-show", "tests"])
-                    expected.extend(["-format", "both", "-report", report_dir])
-                    merge_command = rendered.split("# Merge", 1)[1].split("\n", 1)[1].split("# Launch", 1)[0]
-                    self.assertEqual(command[:2] + expected, shlex.split(merge_command.replace("\\\n", "")))
+                    merge_command = rendered.split("merge_coverage() {\n", 1)[1].split("\n}", 1)[0]
+                    self.assertEqual(command[:2] + expected + ["$@"], shlex.split(merge_command.replace("\\\n", "")))
+                    report_args = ["-format", report_format, "-report", report_dir]
+                    self.assertIn("all) merge_coverage {} ;;".format(shlex.join(report_args)), rendered)
                     if os.name == "posix":
                         script = root / "merge coverage.sh"
                         script.write_text(rendered, encoding="utf-8", newline="\n")
-                        subprocess.run(["bash", str(script)], check=True, capture_output=True, text=True)
-                        self.assertEqual(expected, recorded_args.read_text(encoding="utf-8").splitlines())
+                        for phase in (None, "merge", "report"):
+                            with self.subTest(phase=phase):
+                                argv = ["bash", str(script)] + ([phase] if phase else [])
+                                subprocess.run(argv, check=True, capture_output=True, text=True)
+                                if phase == "report":
+                                    phase_expected = command[2:] + [
+                                        "-full64", "-dir", cov_db_path, "-flex_merge", "union"
+                                    ]
+                                    if parallel:
+                                        phase_expected.append("-parallel")
+                                    if show_tests:
+                                        phase_expected.extend(["-show", "tests"])
+                                    phase_expected += report_args
+                                else:
+                                    phase_expected = expected + (["-noreport"] if phase == "merge" else report_args)
+                                self.assertEqual(phase_expected, recorded_args.read_text(encoding="utf-8").splitlines())
+                        failed = subprocess.run(["bash", str(script), "invalid"], capture_output=True, text=True)
+                        self.assertEqual(2, failed.returncode)
 
     def test_svunit_waves_and_launch_preserve_execution_argv(self):
         root = Path(tempfile.mkdtemp(prefix="svunit argv contract "))

@@ -12,6 +12,7 @@ import socket
 import subprocess
 import tempfile
 import time
+from contextlib import contextmanager
 
 from lib.coverage_data import aggregate_coverage_metrics, parse_coverage_summary
 from lib import job_lib
@@ -655,6 +656,7 @@ class VcsSimulator(SimulatorInterface):
                     urg_command=self.get_tool_command("urg"),
                     urg_parallel=self.options.vcs_urg_parallel,
                     urg_show_tests=self.options.vcs_urg_show_tests,
+                    urg_format=getattr(self.options, "vcs_urg_format", None) or "both",
                     verdi_command=self.get_tool_command("verdi"),
                 ))
         st = os.stat(merge_sh)
@@ -687,29 +689,38 @@ class VcsSimulator(SimulatorInterface):
                 failed = True
                 continue
             try:
-                # A successful command must create this run's outputs; a failed
-                # command must never leave an earlier dashboard as current data.
-                for attribute in ("coverage_report_dir", "merged_coverage_dir"):
-                    output_dir = getattr(vcomp_job, attribute, None)
-                    if output_dir and os.path.isdir(output_dir):
-                        shutil.rmtree(output_dir)
-                if getattr(self.options, "vcs_coverage_profile", False):
-                    self._record_coverage_size(vcomp_job, "input_db_bytes", getattr(vcomp_job, "cov_work_dir", None))
-                log.info("Starting VCS coverage merge for %s", getattr(vcomp_job, "name", vcomp_job))
-                started = time.perf_counter()
-                try:
-                    result = run_bounded_process(["bash", merge_script], capture_output=True, text=True)
-                finally:
-                    vcomp_job.coverage_merge_metrics["urg_duration_s"] = time.perf_counter() - started
-                    log.info("VCS coverage merge for %s took %.3fs", getattr(vcomp_job, "name", vcomp_job),
-                             vcomp_job.coverage_merge_metrics["urg_duration_s"])
-                if result.returncode == 0:
-                    self._validate_coverage_model(getattr(vcomp_job, "merged_coverage_dir", None))
-                    report_dir = getattr(vcomp_job, "coverage_report_dir", None)
-                    if not report_dir or not parse_coverage_summary(os.path.join(report_dir, "dashboard.txt")):
-                        raise OSError("VCS coverage merge did not produce a complete dashboard.txt summary")
-                    if getattr(self.options, "vcs_coverage_profile", False):
-                        self._record_coverage_size(vcomp_job, "merged_db_bytes", vcomp_job.merged_coverage_dir)
+                with self._coverage_phase(vcomp_job, "coverage_total_duration_s"):
+                    # Require outputs from this run, never an earlier dashboard.
+                    with self._coverage_phase(vcomp_job, "output_cleanup_duration_s"):
+                        for attribute in ("coverage_report_dir", "merged_coverage_dir"):
+                            output_dir = getattr(vcomp_job, attribute, None)
+                            if output_dir and os.path.isdir(output_dir):
+                                shutil.rmtree(output_dir)
+                    profile = getattr(self.options, "vcs_coverage_profile", False)
+                    if profile:
+                        self._record_coverage_size(vcomp_job, "input_db_bytes",
+                                                   getattr(vcomp_job, "cov_work_dir", None))
+                    log.info("Starting VCS coverage merge for %s", getattr(vcomp_job, "name", vcomp_job))
+                    with self._coverage_phase(vcomp_job, "urg_duration_s"):
+                        if profile == "phases":
+                            for phase in ("merge", "report"):
+                                with self._coverage_phase(vcomp_job, "urg_{}_duration_s".format(phase)):
+                                    result = run_bounded_process(["bash", merge_script, phase],
+                                                                 capture_output=True,
+                                                                 text=True)
+                                if result.returncode != 0:
+                                    break
+                        else:
+                            result = run_bounded_process(["bash", merge_script], capture_output=True, text=True)
+                    if result.returncode == 0:
+                        with self._coverage_phase(vcomp_job, "model_validation_duration_s"):
+                            self._validate_coverage_model(getattr(vcomp_job, "merged_coverage_dir", None))
+                        with self._coverage_phase(vcomp_job, "dashboard_parse_duration_s"):
+                            report_dir = getattr(vcomp_job, "coverage_report_dir", None)
+                            if not report_dir or not parse_coverage_summary(os.path.join(report_dir, "dashboard.txt")):
+                                raise OSError("VCS coverage merge did not produce a complete dashboard.txt summary")
+                        if profile:
+                            self._record_coverage_size(vcomp_job, "merged_db_bytes", vcomp_job.merged_coverage_dir)
             except (OSError, subprocess.TimeoutExpired) as exc:
                 log.error("VCS coverage merge or output validation failed for %s: %s", vcomp_job, exc)
                 failed = True
@@ -720,6 +731,19 @@ class VcsSimulator(SimulatorInterface):
             else:
                 vcomp_job.coverage_merge_succeeded = True
         return failed
+
+    @staticmethod
+    @contextmanager
+    def _coverage_phase(vcomp_job, metric):
+        """Keep partial timing evidence when a phase fails or is interrupted."""
+        started = time.perf_counter()
+        try:
+            yield
+        finally:
+            elapsed = time.perf_counter() - started
+            vcomp_job.coverage_merge_metrics[metric] = elapsed
+            log.info("VCS coverage %s for %s took %.3fs", metric.removesuffix("_duration_s"),
+                     getattr(vcomp_job, "name", vcomp_job), elapsed)
 
     def cleanup_test_coverage(self, test_job):
         path = getattr(test_job, "coverage_db_path", None)
