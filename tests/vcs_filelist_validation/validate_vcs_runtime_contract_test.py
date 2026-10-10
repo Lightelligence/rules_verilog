@@ -1832,7 +1832,9 @@ run_bounded_process([
                                 argv = ["bash", str(script)] + ([phase] if phase else [])
                                 subprocess.run(argv, check=True, capture_output=True, text=True)
                                 if phase == "report":
-                                    phase_expected = command[2:] + ["-full64", "-dir", cov_db_path]
+                                    phase_expected = command[2:] + [
+                                        "-full64", "-dir", cov_db_path, "-flex_merge", "union"
+                                    ]
                                     if parallel:
                                         phase_expected.append("-parallel")
                                     if show_tests:

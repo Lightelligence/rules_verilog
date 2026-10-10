@@ -21,7 +21,7 @@ case "${1:-all}" in
   merge) merge_coverage -noreport ;;
   report)
     # Report from the original tests; a merged VDB coalesces their identities.
-    {{ urg_command }} -full64 -dir {{ cov_db_path|shell_quote }} \
+    {{ urg_command }} -full64 -dir {{ cov_db_path|shell_quote }} -flex_merge union \
 {% if urg_parallel -%}
       -parallel \
 {% endif -%}
