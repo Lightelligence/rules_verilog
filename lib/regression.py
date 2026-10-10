@@ -554,11 +554,13 @@ class RegressionConfig():
         yield from self._bazelrc_dependency_paths()
 
     def _iter_discovery_dependency_paths(self, submodule_state=None):
-        """Yield metadata only; incomplete external provenance disables reuse."""
+        """Yield metadata only; incomplete discovery provenance disables reuse."""
         if submodule_state is None:
             submodule_state = self._git_submodule_state()
         project_paths = list(self._iter_project_discovery_dependency_paths(submodule_state))
         external_paths, self._discovery_input_error = discovery_inputs.external_metadata(self.proj_dir, project_paths)
+        if self._discovery_input_error is None:
+            self._discovery_input_error = discovery_inputs.project_directory_symlink_error(self.proj_dir)
         yield from project_paths
         yield from external_paths
 

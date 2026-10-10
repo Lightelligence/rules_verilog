@@ -1,4 +1,4 @@
-"""Bounded, fail-closed provenance for mutable external discovery metadata.
+"""Bounded, fail-closed provenance for mutable discovery metadata.
 
 This is not a Starlark evaluator. Only direct, literal native local repository
 declarations are proven here. Macros, repository rules, overrides and unknown
@@ -7,12 +7,132 @@ external labels fall back to Bazel discovery instead of guessing their inputs.
 
 import ast
 import os
+import stat
+import subprocess
 
 MAX_ENTRIES = 50000
 MAX_METADATA = 4096
 MAX_DEPTH = 32
 MAX_FILE_BYTES = 4 * 1024 * 1024
 LOCAL_RULES = {"local_repository", "new_local_repository"}
+
+
+def project_directory_symlink_error(project_root):
+    """Check link topology without walking ordinary tracked source directories."""
+    project_root = os.path.abspath(project_root)
+    repositories = [project_root]
+    directories = []
+    repositories_seen = set()
+    inspected = 0
+    output_links = {
+        "bazel-bin", "bazel-out", "bazel-testlogs", "bazel-{}".format(os.path.basename(project_root)),
+        "bazel-{}".format(os.path.basename(os.path.realpath(project_root))), ".last_sim", ".last_fail"
+    }
+
+    def unsafe(path, detail):
+        return {"kind": "incomplete_dependency_provenance", "path": path, "detail": detail}
+
+    def excluded(path):
+        parts = os.path.relpath(path, project_root).split(os.sep)
+        return any(part in (".git", ".simmer") for part in parts) or parts[0] in output_links
+
+    def directory_link(mode):
+        return stat.S_ISLNK(mode.st_mode) or getattr(mode, "st_reparse_tag", 0) == getattr(
+            stat, "IO_REPARSE_TAG_MOUNT_POINT", -1)
+
+    def inspect(path, enqueue_directory=True):
+        nonlocal inspected
+        if excluded(path):
+            return None
+        inspected += 1
+        if inspected > MAX_ENTRIES:
+            return unsafe(path, "Project directory link inspection limit exceeded")
+        try:
+            mode = os.lstat(path)
+            if directory_link(mode) and os.path.isdir(path):
+                return unsafe(path, "Project directory symlink or junction requires fresh Bazel discovery")
+            if stat.S_ISDIR(mode.st_mode) and enqueue_directory:
+                directories.append((path, 0))
+        except OSError:
+            return unsafe(path, "Project directory links cannot be completely inspected")
+        return None
+
+    while repositories:
+        repository = repositories.pop()
+        if repository in repositories_seen:
+            continue
+        repositories_seen.add(repository)
+        if repository != project_root:
+            error = inspect(repository, enqueue_directory=False)
+            if error:
+                return error
+            # Initialized submodules have their own Git index; inspect that
+            # instead of recursively walking their ordinary tracked sources.
+        commands = (
+            ["git", "ls-files", "--cached", "--stage", "--others", "--directory", "--exclude-standard", "-z"],
+            ["git", "ls-files", "--modified", "-z"],
+            ["git", "ls-files", "--others", "--ignored", "--directory", "--exclude-standard", "-z"],
+        )
+        for command in commands:
+            try:
+                result = subprocess.run(command,
+                                        cwd=repository,
+                                        capture_output=True,
+                                        check=False,
+                                        text=True,
+                                        encoding="utf-8",
+                                        errors="surrogateescape")
+            except OSError:
+                return unsafe(repository, "Project directory links cannot be completely inspected")
+            if result.returncode != 0:
+                # Non-Git workspaces retain a bounded filesystem fallback.
+                directories.append((repository, 0))
+                break
+            for record in result.stdout.split("\0"):
+                if not record:
+                    continue
+                stage, separator, relative_path = record.partition("\t")
+                fields = stage.split(" ")
+                indexed = separator and len(fields) == 3 and fields[0] in ("100644", "100755", "120000", "160000")
+                if indexed:
+                    if fields[0] in ("100644", "100755"):
+                        continue
+                    path = os.path.join(repository, relative_path)
+                    if fields[0] == "160000":
+                        repositories.append(path)
+                        continue
+                else:
+                    path = os.path.join(repository, record.rstrip("/"))
+                error = inspect(path)
+                if error:
+                    return error
+
+    visited = set()
+    while directories:
+        directory, depth = directories.pop()
+        directory = os.path.abspath(directory)
+        if directory in visited or excluded(directory):
+            continue
+        visited.add(directory)
+        if depth > MAX_DEPTH:
+            return unsafe(directory, "Project directory link inspection depth limit exceeded")
+        try:
+            with os.scandir(directory) as children:
+                for entry in children:
+                    if excluded(entry.path):
+                        continue
+                    inspected += 1
+                    if inspected > MAX_ENTRIES:
+                        return unsafe(directory, "Project directory link inspection limit exceeded")
+                    if (entry.is_symlink() or entry.is_dir(follow_symlinks=False)) and directory_link(
+                            entry.stat(follow_symlinks=False)) and entry.is_dir():
+                        return unsafe(entry.path,
+                                      "Project directory symlink or junction requires fresh Bazel discovery")
+                    if entry.is_dir(follow_symlinks=False):
+                        directories.append((entry.path, depth + 1))
+        except OSError:
+            return unsafe(directory, "Project directory links cannot be completely inspected")
+    return None
 
 
 def _symbol(node):

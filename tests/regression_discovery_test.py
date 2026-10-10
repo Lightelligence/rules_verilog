@@ -192,7 +192,7 @@ class RegressionDiscoveryTest(unittest.TestCase):
         ]
         config = self._config(proj_dir)
 
-        dependencies = list(config._iter_discovery_dependency_paths())
+        dependencies = list(config._iter_project_discovery_dependency_paths([]))
         for expected in (
                 proj_dir / "pkg/BUILD",
                 proj_dir / "rules/tool.bzl",
@@ -538,6 +538,184 @@ class RegressionDiscoveryTest(unittest.TestCase):
             (project / "WORKSPACE").write_text("local_repository(name='ip', path='ip')\n", encoding="utf-8")
             config = self._config(project)
             self.assertFalse(config._discovery_dependency_manifest()["cacheable"])
+
+    def test_project_directory_links_never_reuse_stale_vcs_discovery(self):
+        for layout in ("untracked", "tracked", "nested", "ignored", "ignored_nested", "non_git", "type_changed",
+                       "bazel_source", "replaced_directory"):
+            with self.subTest(layout=layout), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                project, metadata = root / "project", root / "metadata"
+                project.mkdir()
+                metadata.mkdir()
+                (project / "WORKSPACE").write_text("workspace(name='consumer')\n", encoding="utf-8")
+                package = "pkg/deep/linked" if layout == "nested" else "generated/linked" if layout == "ignored_nested" else "linked"
+                if layout == "bazel_source":
+                    package = "bazel-metadata"
+                (project / "BUILD").write_text(
+                    "load('//{}:defs.bzl', 'TAGS')\nfilegroup(name='rtl', tags=TAGS)\n".format(package),
+                    encoding="utf-8")
+                (metadata / "BUILD").write_text("exports_files(['defs.bzl'])\n", encoding="utf-8")
+                definitions = metadata / "defs.bzl"
+                definitions.write_text("TAGS = ['old']\n", encoding="utf-8")
+                link = project / package
+                link.parent.mkdir(parents=True, exist_ok=True)
+                try:
+                    link.symlink_to(metadata, target_is_directory=True)
+                except OSError as exc:
+                    self.skipTest("directory symlinks are unavailable: {}".format(exc))
+                if layout != "non_git":
+                    subprocess.run(["git", "init", "-q"], cwd=project, check=True)
+                if layout == "tracked":
+                    subprocess.run(["git", "-c", "core.symlinks=true", "add", "linked"], cwd=project, check=True)
+                if layout == "type_changed":
+                    link.unlink()
+                    link.write_text("previous ordinary file\n", encoding="utf-8")
+                    subprocess.run(["git", "add", "linked"], cwd=project, check=True)
+                    link.unlink()
+                    link.symlink_to(metadata, target_is_directory=True)
+                if layout == "replaced_directory":
+                    link.unlink()
+                    link.mkdir()
+                    (link / "defs.bzl").write_text(definitions.read_text(encoding="utf-8"), encoding="utf-8")
+                    subprocess.run(["git", "add", "linked/defs.bzl"], cwd=project, check=True)
+                    (link / "defs.bzl").unlink()
+                    link.rmdir()
+                    link.symlink_to(metadata, target_is_directory=True)
+                if layout == "ignored":
+                    (project / ".gitignore").write_text("linked\n", encoding="utf-8")
+                if layout == "ignored_nested":
+                    (project / ".gitignore").write_text("generated/\n", encoding="utf-8")
+                config = self._config(project)
+                config.all_vcomp = {"//benches:soc_tb": {"//benches/tests:dma_single_transfer": 1}}
+                config.tests_to_tags = {"//benches/tests:dma_single_transfer": ["old"]}
+                config.tests_to_simulator = {"//benches/tests:dma_single_transfer": "VCS"}
+                config._write_discovery_manifest()
+                manifest = self._cache_payload(config)["manifest"]
+                self.assertFalse(manifest["cacheable"])
+                self.assertIn("Project directory symlink", manifest["uncacheable_reason"]["detail"])
+                definitions.write_text("TAGS = ['new']\n", encoding="utf-8")
+                self.assertFalse(config._should_use_cached_discovery())
+                self.assertFalse(config._discovery_cache_is_fresh())
+                config.options.no_bazel = True
+                log = CmnLogger("linked-vcs-discovery-no-bazel")
+                with mock.patch("lib.regression.rv_utils.calc_simresults_location", return_value=str(root / "results")), \
+                     mock.patch.object(RegressionConfig, "test_discovery_all") as discover, \
+                     self.assertLogs(log, level="CRITICAL"), self.assertRaises(SystemExit) as raised:
+                    RegressionConfig(config.options, log)
+                self.assertEqual(1, raised.exception.code)
+                discover.assert_not_called()
+
+    def test_adding_project_directory_link_invalidates_a_previously_valid_cache(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            project, metadata = root / "project", root / "metadata"
+            project.mkdir()
+            metadata.mkdir()
+            (project / "WORKSPACE").write_text("workspace(name='consumer')\n", encoding="utf-8")
+            (metadata / "BUILD").write_text("filegroup(name='new')\n", encoding="utf-8")
+            subprocess.run(["git", "init", "-q"], cwd=project, check=True)
+            config = self._config(project)
+            config._write_discovery_manifest()
+            self.assertTrue(config._should_use_cached_discovery())
+            link = project / "new_package"
+            try:
+                link.symlink_to(metadata, target_is_directory=True)
+            except OSError as exc:
+                self.skipTest("directory symlinks are unavailable: {}".format(exc))
+            self.assertFalse(config._should_use_cached_discovery())
+            self.assertFalse(config._discovery_cache_is_fresh())
+            link.unlink()
+            self.assertTrue(config._should_use_cached_discovery())
+
+    @unittest.skipUnless(os.name == "nt", "Windows directory junctions")
+    def test_project_directory_junction_disables_cache_reuse(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            project, metadata = root / "project", root / "metadata"
+            project.mkdir()
+            metadata.mkdir()
+            (project / "WORKSPACE").write_text("workspace(name='consumer')\n", encoding="utf-8")
+            (metadata / "BUILD").write_text("filegroup(name='new')\n", encoding="utf-8")
+            subprocess.run(["git", "init", "-q"], cwd=project, check=True)
+            subprocess.run(
+                ["cmd.exe", "/c", "mklink", "/J",
+                 str(project / "linked"), str(metadata)],
+                capture_output=True,
+                check=True)
+            config = self._config(project)
+            self.assertFalse(config._discovery_dependency_manifest()["cacheable"])
+
+    def test_project_link_inspection_checks_submodule_indexes(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            project, metadata = root / "project", root / "metadata"
+            project.mkdir()
+            metadata.mkdir()
+            module = project / "module"
+            module.mkdir()
+            (module / "BUILD").write_text("filegroup(name='rtl')\n", encoding="utf-8")
+            for directory in (project, module):
+                subprocess.run(["git", "init", "-q"], cwd=directory, check=True)
+            subprocess.run(["git", "add", "BUILD"], cwd=module, check=True)
+            subprocess.run([
+                "git", "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "fixture"
+            ],
+                           cwd=module,
+                           check=True)
+            subprocess.run(["git", "add", "module"], cwd=project, capture_output=True, check=True)
+            try:
+                (module / "linked").symlink_to(metadata, target_is_directory=True)
+            except OSError as exc:
+                self.skipTest("directory symlinks are unavailable: {}".format(exc))
+            reason = discovery_inputs.project_directory_symlink_error(project)
+            self.assertIsNotNone(reason)
+            self.assertIn("Project directory symlink", reason["detail"])
+
+    def test_project_link_inspection_preserves_tracked_rtl_fast_path_and_runtime_links(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            project, results = root / "project", root / "results"
+            project.mkdir()
+            results.mkdir()
+            (project / "WORKSPACE").write_text("workspace(name='consumer')\n", encoding="utf-8")
+            (project / "BUILD").write_text("filegroup(name='rtl')\n", encoding="utf-8")
+            source = project / "rtl" / "top.sv"
+            source.parent.mkdir()
+            source.write_text("module top; endmodule\n", encoding="utf-8")
+            subprocess.run(["git", "init", "-q"], cwd=project, check=True)
+            subprocess.run(["git", "add", "WORKSPACE", "BUILD", "rtl/top.sv"], cwd=project, check=True)
+            for name in ("bazel-bin", "bazel-out", "bazel-testlogs", "bazel-project", ".last_sim", ".last_fail"):
+                try:
+                    (project / name).symlink_to(results, target_is_directory=True)
+                except OSError as exc:
+                    self.skipTest("directory symlinks are unavailable: {}".format(exc))
+            config = self._config(project)
+            with mock.patch("lib.discovery_inputs.os.scandir", side_effect=AssertionError("tracked tree walk")):
+                before = config._discovery_dependency_manifest()
+                source.write_text("module changed; endmodule\n", encoding="utf-8")
+                after = config._discovery_dependency_manifest()
+            self.assertTrue(before["cacheable"])
+            self.assertEqual(before, after)
+            self.assertNotIn("rtl/top.sv", {entry["path"] for entry in before["files"]})
+
+    def test_project_directory_link_inspection_limits_and_errors_disable_reuse(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            (project / "WORKSPACE").write_text("workspace(name='consumer')\n", encoding="utf-8")
+            (project / "nested").mkdir()
+            config = self._config(project)
+            with mock.patch.object(discovery_inputs, "MAX_ENTRIES", 0):
+                manifest = config._discovery_dependency_manifest()
+            self.assertFalse(manifest["cacheable"])
+            self.assertIn("limit", manifest["uncacheable_reason"]["detail"])
+            with mock.patch.object(discovery_inputs, "MAX_DEPTH", 0):
+                manifest = config._discovery_dependency_manifest()
+            self.assertFalse(manifest["cacheable"])
+            self.assertIn("depth limit", manifest["uncacheable_reason"]["detail"])
+            with mock.patch("lib.discovery_inputs.os.scandir", side_effect=PermissionError("fixture denied")):
+                manifest = config._discovery_dependency_manifest()
+            self.assertFalse(manifest["cacheable"])
+            self.assertIn("completely inspected", manifest["uncacheable_reason"]["detail"])
 
     def test_no_bazel_rejects_stale_cache(self):
         config = self._config(Path(tempfile.mkdtemp()))

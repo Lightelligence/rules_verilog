@@ -979,6 +979,11 @@ seed and original simulator options. Run it directly from any directory. Set
   one-time INFO notice; normal invocations rediscover through Bazel. This conservative
   fallback may increase discovery time for complex workspaces. Explicit
   `--no-bazel` rejects an unprovable cache instead of silently using it.
+  Main-workspace directory links are checked using Git's indexed modes and
+  worktree changes, plus bounded inspection of untracked and ignored
+  directories. Ordinary tracked RTL directories are not recursively scanned
+  by this link check. Bazel output links and simmer's `.last_sim`/`.last_fail`
+  navigation links are excluded.
 - Normal runs issue an incremental `bazel build` for each selected testbench
   **and its selected test-config targets**, even if their output files exist.
   This refreshes runfiles and compile-input digests after Verilog source
