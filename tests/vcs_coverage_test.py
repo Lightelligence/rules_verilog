@@ -233,7 +233,7 @@ class VcsCoverageTest(unittest.TestCase):
         self.assertNotIn("urg_report_duration_s", metrics)
 
     def test_profile_runs_merge_then_report_and_records_separate_timings(self):
-        self.options.vcs_coverage_profile = True
+        self.options.vcs_coverage_profile = "phases"
         with mock.patch("lib.simulators.vcs.run_bounded_process", side_effect=lambda *_a, **_k: self._outputs()) as run:
             self.assertFalse(self._merge())
         self.assertEqual(["merge", "report"], [call.args[0][-1] for call in run.call_args_list])
@@ -243,7 +243,7 @@ class VcsCoverageTest(unittest.TestCase):
         self.assertTrue(self.vcomp.coverage_merge_succeeded)
 
     def test_profile_phase_failures_and_timeouts_keep_timings_and_stop_merge(self):
-        self.options.vcs_coverage_profile = True
+        self.options.vcs_coverage_profile = "phases"
         for phase in ("merge", "report"):
             for timeout in (False, True):
                 with self.subTest(phase=phase, timeout=timeout):
@@ -301,6 +301,7 @@ class VcsCoverageTest(unittest.TestCase):
         self.assertEqual(model.stat().st_size, metrics["merged_db_bytes"])
         self.assertGreaterEqual(metrics["input_db_bytes_scan_s"], 0)
         self.assertGreaterEqual(metrics["merged_db_bytes_scan_s"], 0)
+        self.assertNotIn("urg_merge_duration_s", metrics)
 
     def test_byte_inventory_failure_does_not_invalidate_valid_merge(self):
         self.vcomp.coverage_merge_metrics = {}
@@ -331,6 +332,10 @@ class VcsCoverageTest(unittest.TestCase):
         options = parse_args(["--simulator", "VCS", "--vcs-cm", "line", "--vcs-coverage-profile"])
         VcsSimulator(options, self.rcfg, None).validate_resolved_options()
         self.assertTrue(VcsSimulator(options, self.rcfg, None).options.vcs_coverage_profile)
+        self.assertEqual("bytes", options.vcs_coverage_profile)
+        options = parse_args(["--simulator", "VCS", "--vcs-cm", "line", "--vcs-coverage-profile", "phases"])
+        VcsSimulator(options, self.rcfg, None).validate_resolved_options()
+        self.assertEqual("phases", options.vcs_coverage_profile)
 
     def test_report_format_requires_coverage_and_is_vcs_only(self):
         for arguments in (["--simulator", "VCS"], ["--simulator", "XRUN"]):

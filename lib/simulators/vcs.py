@@ -655,7 +655,8 @@ class VcsSimulator(SimulatorInterface):
                     report_dir=report_dir,
                     urg_command=self.get_tool_command("urg"),
                     urg_parallel=self.options.vcs_urg_parallel,
-                    urg_show_tests=self.options.vcs_urg_show_tests,
+                    urg_show_tests=self.options.vcs_urg_show_tests
+                    or getattr(self.options, "vcs_coverage_profile", False) == "phases",
                     urg_format=getattr(self.options, "vcs_urg_format", None) or "both",
                     verdi_command=self.get_tool_command("verdi"),
                 ))
@@ -702,7 +703,7 @@ class VcsSimulator(SimulatorInterface):
                                                    getattr(vcomp_job, "cov_work_dir", None))
                     log.info("Starting VCS coverage merge for %s", getattr(vcomp_job, "name", vcomp_job))
                     with self._coverage_phase(vcomp_job, "urg_duration_s"):
-                        if profile:
+                        if profile == "phases":
                             for phase in ("merge", "report"):
                                 with self._coverage_phase(vcomp_job, "urg_{}_duration_s".format(phase)):
                                     result = run_bounded_process(["bash", merge_script, phase],

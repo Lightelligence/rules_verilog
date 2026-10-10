@@ -902,18 +902,25 @@ static-model validation, dashboard parsing and the total coverage operation.
 These timings include failures; phases that were not reached have no timing.
 Cleanup here means the old merged VDB/report, not per-test failure cleanup.
 
-With `--vcs-cm` enabled, `--vcs-coverage-profile` runs URG merge (`-noreport`)
-and report generation as separate processes and records each wall time. Their
+With `--vcs-cm` enabled, `--vcs-coverage-profile phases` runs URG merge
+(`-noreport`) and report generation as separate processes and records each wall time. Their
 times include tool/runner startup, and report time includes loading the merged
 VDB. This diagnostic mode adds an extra startup and database reload; compare
-normal end-to-end runs when assessing speedup. Profiling also inventories input
-and merged VDB logical bytes, recording each scan's time separately. Scans are
+normal end-to-end runs when assessing speedup. Phase profiling retains per-test
+correlation with `-show tests` so reporting from the merged VDB preserves test
+counts; this increases merged VDB size and merge work. For a matched comparison
+against combined URG, also use `--vcs-urg-show-tests` in the combined run.
+Profiling also inventories input and merged VDB logical bytes, recording each
+scan's time separately. Scans are
 opt-in because they can be expensive on shared filesystems. For example:
 
 ```bash
 simmer -t 'sys_tb:*@10' --simulator VCS --vcs-cm line+cond+tgl \
-  --vcs-coverage-profile --report
+  --vcs-coverage-profile phases --report
 ```
+
+The existing `--vcs-coverage-profile` spelling (or explicit `bytes`) only adds
+byte inventories and keeps the normal single URG invocation.
 
 The generated script accepts `merge` or `report` to rerun an individual phase;
 without an argument it performs the normal combined merge/report. Run it only

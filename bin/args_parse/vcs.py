@@ -75,9 +75,12 @@ def add_vcs_arguments(parser):
                        '--vcs-coverage-profile',
                        parent='--vcs-cm',
                        default=False,
-                       action='store_true',
-                       help=('Time URG merge and report separately and inventory input/merged VDB bytes. '
-                             'Uses two URG invocations, adding startup and VDB reload overhead; routine runs '
+                       nargs='?',
+                       const='bytes',
+                       choices=['bytes', 'phases'],
+                       help=('Inventory input/merged VDB bytes and scan time (default: bytes). Select phases '
+                             'to also time merge/report with separate URG invocations, retaining per-test '
+                             'correlation. This adds startup, VDB reload and storage overhead. Routine runs '
                              'keep one invocation and log combined URG time. Requires --vcs-cm.'))
     add_child_argument(gvcs,
                        '--vcs-urg-format',
