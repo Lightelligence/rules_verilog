@@ -206,8 +206,8 @@ def scan_static_log(filepath, error_limit, extra_error_regex=None, required_fini
 
             # Byte regexes agree with decoded built-in regexes only for ASCII.
             # Search the mapping directly without allocating a full-log copy.
-            # Text mode also normalizes CRLF and invalid UTF-8 when streaming.
-            if non_ascii_bytes_regex.search(data) is not None or data.find(b"\r\n") != -1:
+            # Text mode normalizes both CRLF and standalone CR line endings.
+            if non_ascii_bytes_regex.search(data) is not None or data.find(b"\r") != -1:
                 return scan_text_log(filepath, error_limit)
             search_data = data
 
