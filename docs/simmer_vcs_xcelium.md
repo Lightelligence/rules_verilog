@@ -902,14 +902,17 @@ static-model validation, dashboard parsing and the total coverage operation.
 These timings include failures; phases that were not reached have no timing.
 Cleanup here means the old merged VDB/report, not per-test failure cleanup.
 
-With `--vcs-cm` enabled, `--vcs-coverage-profile phases` runs URG merge
-(`-noreport`) and report generation as separate processes and records each wall time. Their
-times include tool/runner startup, and report time includes loading the merged
-VDB. This diagnostic mode adds an extra startup and database reload; compare
-normal end-to-end runs when assessing speedup. Phase profiling retains per-test
-correlation with `-show tests` so reporting from the merged VDB preserves test
-counts; this increases merged VDB size and merge work. For a matched comparison
-against combined URG, also use `--vcs-urg-show-tests` in the combined run.
+With `--vcs-cm` enabled, `--vcs-coverage-profile phases` runs URG merge-only
+(`-noreport`, writing the merged VDB) and report-only (without `-dbname`)
+as separate processes and records each wall time. Both read the original VDB:
+reporting from a merged VDB would coalesce the original test identities and
+change the report's test count. Report time therefore includes loading and
+in-memory aggregation as well as rendering; it is not pure report file I/O.
+Both times include tool/runner startup. This diagnostic mode repeats database
+loading and aggregation, so its phase times cannot be added or subtracted to
+derive internal phases of a normal combined URG run. Compare normal end-to-end
+runs when assessing speedup.
+
 Profiling also inventories input and merged VDB logical bytes, recording each
 scan's time separately. Scans are
 opt-in because they can be expensive on shared filesystems. For example:

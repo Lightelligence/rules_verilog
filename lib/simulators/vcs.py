@@ -655,8 +655,7 @@ class VcsSimulator(SimulatorInterface):
                     report_dir=report_dir,
                     urg_command=self.get_tool_command("urg"),
                     urg_parallel=self.options.vcs_urg_parallel,
-                    urg_show_tests=self.options.vcs_urg_show_tests
-                    or getattr(self.options, "vcs_coverage_profile", False) == "phases",
+                    urg_show_tests=self.options.vcs_urg_show_tests,
                     urg_format=getattr(self.options, "vcs_urg_format", None) or "both",
                     verdi_command=self.get_tool_command("verdi"),
                 ))

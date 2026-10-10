@@ -20,7 +20,8 @@ case "${1:-all}" in
   all) merge_coverage -format {{ urg_format|shell_quote }} -report {{ report_dir|shell_quote }} ;;
   merge) merge_coverage -noreport ;;
   report)
-    {{ urg_command }} -full64 -dir {{ merged_db_path|shell_quote }} \
+    # Report from the original tests; a merged VDB coalesces their identities.
+    {{ urg_command }} -full64 -dir {{ cov_db_path|shell_quote }} \
 {% if urg_parallel -%}
       -parallel \
 {% endif -%}

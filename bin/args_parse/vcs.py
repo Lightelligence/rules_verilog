@@ -79,8 +79,9 @@ def add_vcs_arguments(parser):
                        const='bytes',
                        choices=['bytes', 'phases'],
                        help=('Inventory input/merged VDB bytes and scan time (default: bytes). Select phases '
-                             'to also time merge/report with separate URG invocations, retaining per-test '
-                             'correlation. This adds startup, VDB reload and storage overhead. Routine runs '
+                             'to also time merge-only/report-only URG invocations. Report timing includes '
+                             'loading and aggregating the original VDB to preserve test counts. This adds '
+                             'startup and repeated aggregation overhead. Routine runs '
                              'keep one invocation and log combined URG time. Requires --vcs-cm.'))
     add_child_argument(gvcs,
                        '--vcs-urg-format',
