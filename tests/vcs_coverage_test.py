@@ -221,6 +221,58 @@ class VcsCoverageTest(unittest.TestCase):
         self.assertEqual("80.00%", coverage["tb"]["cc"]["Overall"])
         self.assertGreaterEqual(self.vcomp.coverage_merge_metrics["urg_duration_s"], 0)
 
+    def test_default_times_cleanup_validation_parse_and_total_with_one_urg_call(self):
+        with mock.patch("lib.simulators.vcs.run_bounded_process", side_effect=lambda *_a, **_k: self._outputs()) as run:
+            self.assertFalse(self._merge())
+        run.assert_called_once_with(["bash", self.vcomp.coverage_merge_script], capture_output=True, text=True)
+        metrics = self.vcomp.coverage_merge_metrics
+        phases = ("output_cleanup", "urg", "model_validation", "dashboard_parse")
+        self.assertGreaterEqual(metrics["coverage_total_duration_s"],
+                                sum(metrics[phase + "_duration_s"] for phase in phases))
+        self.assertNotIn("urg_merge_duration_s", metrics)
+        self.assertNotIn("urg_report_duration_s", metrics)
+
+    def test_profile_runs_merge_then_report_and_records_separate_timings(self):
+        self.options.vcs_coverage_profile = True
+        with mock.patch("lib.simulators.vcs.run_bounded_process", side_effect=lambda *_a, **_k: self._outputs()) as run:
+            self.assertFalse(self._merge())
+        self.assertEqual(["merge", "report"], [call.args[0][-1] for call in run.call_args_list])
+        metrics = self.vcomp.coverage_merge_metrics
+        self.assertGreaterEqual(metrics["urg_duration_s"],
+                                metrics["urg_merge_duration_s"] + metrics["urg_report_duration_s"])
+        self.assertTrue(self.vcomp.coverage_merge_succeeded)
+
+    def test_profile_phase_failures_and_timeouts_keep_timings_and_stop_merge(self):
+        self.options.vcs_coverage_profile = True
+        for phase in ("merge", "report"):
+            for timeout in (False, True):
+                with self.subTest(phase=phase, timeout=timeout):
+
+                    def execute(argv, **_kwargs):
+                        if argv[-1] == phase:
+                            if timeout:
+                                raise subprocess.TimeoutExpired(argv, 1)
+                            return SimpleNamespace(returncode=1, stdout="partial output", stderr="fixture failure")
+                        return self._outputs()
+
+                    with mock.patch("lib.simulators.vcs.run_bounded_process", side_effect=execute) as run:
+                        self.assertTrue(self._merge())
+                    self.assertEqual(1 if phase == "merge" else 2, run.call_count)
+                    self.assertFalse(self.vcomp.coverage_merge_succeeded)
+                    metrics = self.vcomp.coverage_merge_metrics
+                    for metric in ("urg_duration_s", "coverage_total_duration_s", "urg_{}_duration_s".format(phase)):
+                        self.assertGreaterEqual(metrics[metric], 0)
+                    self.assertNotIn("dashboard_parse_duration_s", metrics)
+
+    def test_cleanup_failure_keeps_cleanup_and_total_timings_without_running_urg(self):
+        Path(self.vcomp.coverage_report_dir).mkdir()
+        with mock.patch("lib.simulators.vcs.shutil.rmtree", side_effect=PermissionError("cleanup denied")), \
+             mock.patch("lib.simulators.vcs.run_bounded_process") as run:
+            self.assertTrue(self._merge())
+        run.assert_not_called()
+        self.assertIn("output_cleanup_duration_s", self.vcomp.coverage_merge_metrics)
+        self.assertIn("coverage_total_duration_s", self.vcomp.coverage_merge_metrics)
+
     def test_all_unavailable_metrics_are_valid_summary_output(self):
         with mock.patch("lib.simulators.vcs.run_bounded_process",
                         side_effect=lambda *_a, **_k: self._outputs("SCORE LINE\nN/A N/A\n")):
@@ -279,6 +331,20 @@ class VcsCoverageTest(unittest.TestCase):
         options = parse_args(["--simulator", "VCS", "--vcs-cm", "line", "--vcs-coverage-profile"])
         VcsSimulator(options, self.rcfg, None).validate_resolved_options()
         self.assertTrue(VcsSimulator(options, self.rcfg, None).options.vcs_coverage_profile)
+
+    def test_report_format_requires_coverage_and_is_vcs_only(self):
+        for arguments in (["--simulator", "VCS"], ["--simulator", "XRUN"]):
+            for report_format in ("text", "both"):
+                with self.subTest(arguments=arguments, report_format=report_format), self.assertRaises(ValueError):
+                    options = parse_args(arguments + ["--vcs-urg-format", report_format])
+                    backend = VcsSimulator if options.simulator == "VCS" else simmer.XceliumSimulator
+                    backend(options, self.rcfg, None).validate_resolved_options()
+        for report_format in ("text", "both"):
+            options = parse_args(["--simulator", "VCS", "--vcs-cm", "line", "--vcs-urg-format", report_format])
+            VcsSimulator(options, self.rcfg, None).validate_resolved_options()
+            self.assertEqual(report_format, options.vcs_urg_format)
+        with self.assertRaises(SystemExit):
+            parse_args(["--simulator", "VCS", "--vcs-cm", "line", "--vcs-urg-format", "html"])
 
 
 if __name__ == "__main__":

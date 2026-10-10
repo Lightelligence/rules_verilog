@@ -76,9 +76,16 @@ def add_vcs_arguments(parser):
                        parent='--vcs-cm',
                        default=False,
                        action='store_true',
-                       help=('Record logical input/merged VDB bytes and scan durations for each coverage merge. '
-                             'URG elapsed time is always logged; byte inventories are opt-in to avoid extra '
-                             'filesystem scans in routine regressions. Requires --vcs-cm.'))
+                       help=('Time URG merge and report separately and inventory input/merged VDB bytes. '
+                             'Uses two URG invocations, adding startup and VDB reload overhead; routine runs '
+                             'keep one invocation and log combined URG time. Requires --vcs-cm.'))
+    add_child_argument(gvcs,
+                       '--vcs-urg-format',
+                       parent='--vcs-cm',
+                       choices=['text', 'both'],
+                       default=None,
+                       help=('Select URG report output: text for dashboard only, both for text and HTML '
+                             '(default). Requires --vcs-cm; does not change compile or simulation coverage.'))
     add_child_argument(gvcs,
                        '--vcs-urg-parallel',
                        parent='--vcs-cm',

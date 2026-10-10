@@ -879,8 +879,11 @@ rule-provided coverage paths remain relative to the Bazel runfiles directory.
 
 VCS `--vcs-cm` writes one `.vdb` per vcomp and generates
 `<vcomp>_vcs_cov_merge.sh`. The same configured VCS runner is used for `urg`
-and Verdi. The generated URG command explicitly requests `-format both` so
-both the text dashboard and HTML report are produced. Xcelium `--coverage`
+and Verdi. By default URG requests `-format both`, producing the text dashboard
+and HTML report. Use `--vcs-urg-format text` to omit HTML while retaining the
+dashboard used by simmer. `--vcs-urg-format both` explicitly selects the default.
+This report-only choice does not change compilation or simulation coverage.
+Xcelium `--coverage`
 keeps IMC generation and merge in the Xcelium adapter. Coverage switches from
 one backend are rejected by the other.
 The historical VCS spelling `--cm` remains a compatibility alias.
@@ -894,15 +897,34 @@ another documented mode when full signal coverage is required. Repeat
 correlation but increases VDB size. Parallel merge remains disabled by default:
 measure each bench's merge elapsed time and input VDB size before enabling it,
 since parallel startup and coordination can outweigh the benefit for small
-databases. Simmer records elapsed time for each merge. With `--vcs-cm` enabled,
-add `--vcs-coverage-profile` to also measure input and merged VDB bytes. Directory
-size scans are opt-in because they can be expensive on shared filesystems. For
-example:
+databases. Simmer always logs wall times for old-output cleanup, combined URG,
+static-model validation, dashboard parsing and the total coverage operation.
+These timings include failures; phases that were not reached have no timing.
+Cleanup here means the old merged VDB/report, not per-test failure cleanup.
+
+With `--vcs-cm` enabled, `--vcs-coverage-profile` runs URG merge (`-noreport`)
+and report generation as separate processes and records each wall time. Their
+times include tool/runner startup, and report time includes loading the merged
+VDB. This diagnostic mode adds an extra startup and database reload; compare
+normal end-to-end runs when assessing speedup. Profiling also inventories input
+and merged VDB logical bytes, recording each scan's time separately. Scans are
+opt-in because they can be expensive on shared filesystems. For example:
 
 ```bash
 simmer -t 'sys_tb:*@10' --simulator VCS --vcs-cm line+cond+tgl \
   --vcs-coverage-profile --report
 ```
+
+The generated script accepts `merge` or `report` to rerun an individual phase;
+without an argument it performs the normal combined merge/report. Run it only
+on a completed database using the same licensed compute environment.
+
+For a performance comparison, snapshot the same completed VDB and use fresh
+output directories for serial/parallel crossed with text/both. Keep the host,
+CPU/memory allocation and tool version fixed, and compare repeated runs with
+rotated ordering. Check identical dashboard metrics and test counts before
+claiming an improvement. Separate profiling runs identify costly phases but
+cannot be directly compared with normal combined URG timings.
 
 Coverage-enabled compile reuse requires both `simv` and the static coverage
 model in the bench VDB (`snps/coverage/db/design` with at least one nonempty
