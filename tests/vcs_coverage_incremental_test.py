@@ -1,3 +1,4 @@
+import contextlib
 import hashlib
 import json
 import os
@@ -332,6 +333,92 @@ class VcsCoverageIncrementalTest(unittest.TestCase):
         self.assertEqual("inside", (final / "internal.xml").read_text())
         self.assertEqual("inside", (final / "internal-chain.xml").read_text())
         self.assertEqual("outside", (final / "external.xml").read_text())
+
+
+class VcsCoverageTraversalTest(unittest.TestCase):
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+
+    def file(self, name, contents=b"model"):
+        path = self.root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(contents)
+        return path
+
+    def link(self, name, target):
+        path = self.root / name
+        try:
+            path.symlink_to(target, target_is_directory=target.is_dir())
+        except OSError:
+            if os.name == "nt":
+                self.skipTest("Windows symlink privilege is unavailable")
+            raise
+        return path
+
+    def expected_digest(self, paths):
+        digest = hashlib.sha256()
+        for path in sorted(paths):
+            digest.update(os.fsencode(str(path.relative_to(self.root))) + b"\0")
+            digest.update(hashlib.sha256(path.read_bytes()).digest())
+        return digest.hexdigest()
+
+    def test_model_and_dataset_hashes_keep_path_identity_and_exclusions(self):
+        design = self.file("snps/coverage/db/design/top.xml")
+        shape = self.file("partition/snps/coverage/db/shape/shape.xml", b"shape")
+        self.file("snps/coverage/db/design/design.cv.xml", b"URG metadata")
+        self.file("snps/coverage/db/common/runtime.xml", b"runtime")
+        hits = self.file("snps/coverage/db/testdata/one/hits.xml", b"hits")
+        partition_hits = self.file("partition/snps/coverage/db/testdata/one/hits.xml", b"partition hits")
+        self.assertEqual(self.expected_digest([design, shape]), vcs_coverage.model_digest(self.root))
+        self.assertEqual({"one": self.expected_digest([hits, partition_hits])}, vcs_coverage.datasets(self.root))
+        original_model = vcs_coverage.model_digest(self.root)
+        original_datasets = vcs_coverage.datasets(self.root)
+        hits.write_bytes(b"new hits")
+        self.assertEqual(original_model, vcs_coverage.model_digest(self.root))
+        self.assertNotEqual(original_datasets, vcs_coverage.datasets(self.root))
+        shape.write_bytes(b"new shape")
+        self.assertNotEqual(original_model, vcs_coverage.model_digest(self.root))
+
+    def test_directory_aliases_are_hashed_under_each_logical_path(self):
+        model = self.file("partition/snps/coverage/db/design/model.xml")
+        alias = self.link("alias", self.root / "partition")
+        self.assertEqual(self.expected_digest([model, alias / "snps/coverage/db/design/model.xml"]),
+                         vcs_coverage.model_digest(self.root))
+
+    def test_ancestor_directory_link_is_rejected(self):
+        self.file("partition/snps/coverage/db/design/model.xml")
+        self.link("partition/back", self.root)
+        with self.assertRaisesRegex(OSError, "Cyclic coverage directory"):
+            vcs_coverage.model_digest(self.root)
+
+    def test_dangling_link_is_rejected(self):
+        self.file("snps/coverage/db/design/model.xml")
+        self.link("missing", self.root / "not-present")
+        with self.assertRaises(OSError):
+            vcs_coverage.model_digest(self.root)
+
+    def test_missing_direntry_inode_uses_portable_identity(self):
+        model = self.file("snps/coverage/db/design/model.xml")
+        original_scandir = os.scandir
+
+        @contextlib.contextmanager
+        def entries_without_inodes(path):
+            with original_scandir(path) as entries:
+                entries = list(entries)
+            wrapped = []
+            for entry in entries:
+                metadata = entry.stat(follow_symlinks=True)
+                wrapped.append(
+                    SimpleNamespace(name=entry.name,
+                                    stat=lambda metadata=metadata, **_kwargs: SimpleNamespace(
+                                        st_mode=metadata.st_mode, st_dev=metadata.st_dev, st_ino=0)))
+            yield wrapped
+
+        with mock.patch.object(vcs_coverage.os, "scandir", entries_without_inodes):
+            self.assertEqual(self.expected_digest([model]), vcs_coverage.model_digest(self.root))
 
 
 if __name__ == "__main__":

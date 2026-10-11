@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import stat
 import tempfile
 import uuid
 from contextlib import contextmanager
@@ -21,20 +22,31 @@ def _digest_files(files):
     return digest.hexdigest() if found else None
 
 
-def _walk(root, ancestors=frozenset()):
-    resolved = root.resolve(strict=True)
-    if resolved in ancestors:
+def _walk(root, ancestors=frozenset(), metadata=None):
+    # Reuse the directory entry's followed stat result. Resolving every path
+    # and calling both is_dir/is_file repeats metadata requests on EDA storage.
+    metadata = metadata if metadata is not None else root.stat()
+    if not metadata.st_ino:
+        # Windows DirEntry.stat may omit inode numbers; os.stat supplies them.
+        metadata = root.stat()
+    identity = ((metadata.st_dev,
+                 metadata.st_ino) if metadata.st_ino else os.path.normcase(str(root.resolve(strict=True))))
+    if identity in ancestors:
         raise OSError("Cyclic coverage directory: {}".format(root))
-    ancestors = ancestors | {resolved}
-    for entry in sorted(root.iterdir()):
-        if entry.is_dir():
-            yield entry, None
-            if entry.parts[-4:] != ("snps", "coverage", "db", "testdata"):
-                yield from _walk(entry, ancestors)
-        elif entry.is_file():
-            yield None, entry
+    ancestors = ancestors | {identity}
+    with os.scandir(root) as entries:
+        children = sorted(entries, key=lambda entry: entry.name)
+    for entry in children:
+        path = root / entry.name
+        metadata = entry.stat(follow_symlinks=True)
+        if stat.S_ISDIR(metadata.st_mode):
+            yield path, None
+            if path.parts[-4:] != ("snps", "coverage", "db", "testdata"):
+                yield from _walk(path, ancestors, metadata)
+        elif stat.S_ISREG(metadata.st_mode):
+            yield None, path
         else:
-            raise OSError("Unreadable coverage entry: {}".format(entry))
+            raise OSError("Unreadable coverage entry: {}".format(path))
 
 
 def model_digest(database):
