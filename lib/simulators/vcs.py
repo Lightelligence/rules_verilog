@@ -730,15 +730,16 @@ class VcsSimulator(SimulatorInterface):
                             job.coverage_view_script_path = os.path.join(self.rcfg.regression_dir,
                                                                          "{}__run_coverage.sh".format(job.name))
                     else:
-                        history_path = vcs_coverage.history_path(job)
-                        if os.path.lexists(history_path):
+                        history_path = vcs_coverage.history_path(job) if getattr(job, "merged_coverage_dir",
+                                                                                 None) else None
+                        if history_path and os.path.lexists(history_path):
                             os.unlink(history_path)
                         if self._run_coverage_merges({label: job}):
                             failed = True
                             continue
                         with self._coverage_phase(job, "coverage_history_write_duration_s"):
                             history = vcs_coverage.make_history(job, signature)
-                            if history is not None:
+                            if history is not None and history_path:
                                 vcs_coverage.write_json(history_path, history)
                     job.coverage_merge_succeeded = True
                     self.rcfg.deferred_messages.append("Open VCS coverage: {} (report: {} --report)".format(

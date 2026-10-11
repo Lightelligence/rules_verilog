@@ -243,6 +243,13 @@ class VcsCoverageIncrementalTest(unittest.TestCase):
         self.assertFalse(self.merge())
         self.assertEqual(2, len(self.calls[-1]))
 
+    def test_failed_legacy_job_without_output_paths_returns_failure(self):
+        self.options.vcs_coverage_incremental = False
+        job = SimpleNamespace(name="tb", coverage_merge_script=str(self.root / "merge.sh"))
+        with mock.patch("lib.simulators.vcs.run_bounded_process", return_value=SimpleNamespace(returncode=1)):
+            self.assertTrue(self.simulator.run_report_coverage_merge({"//bench:tb": job}))
+        self.assertFalse(job.coverage_merge_succeeded)
+
     def test_recovery_rolls_back_interrupted_publication_before_retry(self):
         before = self.baseline()
         self.inputs(new="two")
