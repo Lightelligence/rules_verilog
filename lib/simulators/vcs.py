@@ -748,6 +748,18 @@ class VcsSimulator(SimulatorInterface):
                             if report_format == "summary":
                                 with self._coverage_phase(vcomp_job, "summary_write_duration_s"):
                                     self._write_coverage_summary(vcomp_job, metrics)
+                                with self._coverage_phase(vcomp_job, "summary_cleanup_duration_s"):
+                                    # URG summary still emits large module/group
+                                    # tables. Keep the dashboard and provenance;
+                                    # detailed analysis reads the final VDB.
+                                    with os.scandir(report_dir) as entries:
+                                        for entry in entries:
+                                            if entry.name in ("dashboard.txt", "dashboard.html", "summary.json"):
+                                                continue
+                                            if entry.is_dir(follow_symlinks=False):
+                                                shutil.rmtree(entry.path)
+                                            else:
+                                                os.unlink(entry.path)
                         if profile:
                             self._record_coverage_size(vcomp_job, "merged_db_bytes", vcomp_job.merged_coverage_dir)
             except (OSError, subprocess.TimeoutExpired) as exc:

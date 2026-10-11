@@ -889,7 +889,11 @@ The default `--vcs-urg-format summary` uses one URG invocation with `-dbname`,
 object pages. Simmer then writes one self-contained `dashboard.html` and
 `summary.json` in `<vcomp>__vcs_cov_report`. The JSON records the coverage
 scores, original input-test identities/count and database paths. Existing
-regression reports consume the same text dashboard. The hierarchy depth limits
+regression reports consume the same text dashboard. After successful validation,
+unused URG summary tables are removed; only `dashboard.txt`, `dashboard.html`
+and `summary.json` remain. URG can still write sizable temporary text summaries
+during the command; its complete diagnostics are preserved outside that report
+directory in `<vcomp>_vcs_cov_merge.log`. The hierarchy depth limits
 displayed detail, not coverage calculations or instrumentation.
 
 Use `--vcs-urg-format none` for merge-only (`-noreport`) when only the final

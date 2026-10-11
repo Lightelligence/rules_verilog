@@ -490,14 +490,20 @@ class VcsCoverageTest(unittest.TestCase):
         self.assertNotIn("-format both", script)
         for name in ("first", "second"):
             (Path(self.vcomp.cov_work_dir) / "snps/coverage/db/testdata" / name).mkdir(parents=True)
-        with mock.patch(
-                "lib.simulators.vcs.run_bounded_process",
-                side_effect=lambda *_a, **_k: self._outputs("Number of tests: 2\nSCORE LINE\n90.00 80.00\n")) as run:
+
+        def outputs(*_args, **_kwargs):
+            result = self._outputs("Number of tests: 2\nSCORE LINE\n90.00 80.00\n")
+            (Path(self.vcomp.coverage_report_dir) / "groups.txt").write_text("unused group summary" * 1000)
+            return result
+
+        with mock.patch("lib.simulators.vcs.run_bounded_process", side_effect=outputs) as run:
             self.assertFalse(self._merge())
         self.assertEqual(1, run.call_count)
         self.assertEqual(["bash", self.vcomp.coverage_merge_script], run.call_args.args[0])
         report = Path(self.vcomp.coverage_report_dir)
         self.assertEqual([report / "dashboard.html"], list(report.rglob("*.html")))
+        self.assertEqual({"dashboard.txt", "dashboard.html", "summary.json"}, {path.name for path in report.iterdir()})
+        self.assertIn("summary_cleanup_duration_s", self.vcomp.coverage_merge_metrics)
         summary = json.loads((report / "summary.json").read_text())
         self.assertEqual(2, summary["input_test_count"])
         self.assertEqual(["first", "second"], summary["input_tests"])
