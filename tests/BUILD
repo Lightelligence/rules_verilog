@@ -101,6 +101,22 @@ py_test(
 )
 
 py_test(
+    name = "vcs_coverage_incremental_test",
+    timeout = "short",
+    srcs = ["vcs_coverage_incremental_test.py"],
+    data = [
+        "//bin:templates/run_coverage_template.sh.j2",
+        "//bin:templates/vcs_cov_merge_template.sh.j2",
+    ],
+    deps = [
+        "//bin:args_parser_lib",
+        "//lib:job_lib",
+        "//lib:vcs_coverage",
+        "//lib/simulators",
+    ],
+)
+
+py_test(
     name = "docs_test",
     timeout = "short",
     srcs = ["docs_test.py"],

@@ -202,6 +202,7 @@ def parse_args(argv):
             '--vcs-cm-tgl',
             '--vcs-cm-hier',
             '--vcs-coverage-profile',
+            '--vcs-coverage-incremental',
             '--vcs-profile',
             '--vcs-urg-parallel',
             '--vcs-urg-format',

@@ -16,7 +16,7 @@ import time
 from contextlib import contextmanager
 
 from lib.coverage_data import aggregate_coverage_metrics, parse_coverage_summary
-from lib import job_lib
+from lib import job_lib, vcs_coverage
 from .base import SimulatorInterface, ValidationErrorParser, run_bounded_process
 from .options import validate_explicit_switches
 from .vcs_options import validate_vcs_runtime_options
@@ -643,8 +643,18 @@ class VcsSimulator(SimulatorInterface):
             return
 
         merge_sh = os.path.join(self.rcfg.regression_dir, "{}_vcs_cov_merge.sh".format(vcomp_job.name))
-        merged_db_path = os.path.join(self.rcfg.regression_dir, "{}__MERGED_COV.vdb".format(vcomp_job.name))
-        report_dir = os.path.join(self.rcfg.regression_dir, "{}__vcs_cov_report".format(vcomp_job.name))
+        vcomp_job.coverage_merge_script = merge_sh
+        vcomp_job.coverage_merge_log = os.path.splitext(merge_sh)[0] + ".log"
+        vcomp_job.coverage_report_dir = os.path.join(self.rcfg.regression_dir,
+                                                     "{}__vcs_cov_report".format(vcomp_job.name))
+        vcomp_job.merged_coverage_dir = os.path.join(self.rcfg.regression_dir,
+                                                     "{}__MERGED_COV.vdb".format(vcomp_job.name))
+        vcomp_job.coverage_merge_succeeded = False
+        self._render_coverage_merge(vcomp_job)
+        self.rcfg.deferred_messages.append("VCS coverage merge script: {}".format(merge_sh))
+
+    def _render_coverage_merge(self, vcomp_job):
+        merge_sh = vcomp_job.coverage_merge_script
         cov_db_path = vcomp_job.cov_work_dir
         report_format = getattr(self.options, "vcs_urg_format", None) or "summary"
         summary_depth = getattr(self.options, "vcs_urg_summary_depth", None)
@@ -656,8 +666,9 @@ class VcsSimulator(SimulatorInterface):
             filep.write(
                 merge_template.render(
                     cov_db_path=cov_db_path,
-                    merged_db_path=merged_db_path,
-                    report_dir=report_dir,
+                    cov_db_paths=getattr(vcomp_job, "coverage_input_vdbs", [cov_db_path]),
+                    merged_db_path=vcomp_job.merged_coverage_dir,
+                    report_dir=vcomp_job.coverage_report_dir,
                     urg_command=self.get_tool_command("urg"),
                     urg_parallel=self.options.vcs_urg_parallel,
                     urg_show_tests=self.options.vcs_urg_show_tests,
@@ -667,14 +678,81 @@ class VcsSimulator(SimulatorInterface):
                 ))
         st = os.stat(merge_sh)
         os.chmod(merge_sh, st.st_mode | stat.S_IEXEC)
-        vcomp_job.coverage_merge_script = merge_sh
-        vcomp_job.coverage_merge_log = os.path.splitext(merge_sh)[0] + ".log"
-        vcomp_job.coverage_report_dir = report_dir
-        vcomp_job.merged_coverage_dir = merged_db_path
-        vcomp_job.coverage_merge_succeeded = False
-        self.rcfg.deferred_messages.append("VCS coverage merge script: {}".format(merge_sh))
 
     def run_report_coverage_merge(self, vcomp_jobs):
+        if not self.options.cm:
+            return False
+        failed = False
+        incremental = getattr(self.options, "vcs_coverage_incremental", False)
+        signature = {
+            key: getattr(self.options, key, None)
+            for key in ("cm", "vcs_cm_line", "vcs_cm_report", "vcs_cm_cond", "vcs_cm_tgl")
+        }
+        for label, job in vcomp_jobs.items():
+            job.coverage_merge_succeeded = False
+            job.coverage_merge_metrics = {}
+            work = job
+            started = time.perf_counter()
+            status = getattr(job, "jobstatus", None)
+            if incremental and (getattr(job, "coverage_cleanup_failed", False) or
+                                (status is not None and not status.successful)):
+                log.error("Incremental VCS coverage blocked after compilation or data cleanup failed for %s", job)
+                failed = True
+                continue
+            try:
+                with vcs_coverage.merge_lock(self.rcfg.regression_dir, str(job.name)):
+                    if incremental:
+                        with vcs_coverage.CoverageUpdate(job, self.rcfg.regression_dir, signature) as update:
+                            work = update.job
+                            prepare_duration = time.perf_counter() - started
+                            if update.reuse:
+                                log.info("No new VCS coverage datasets for %s; retaining the previous generation",
+                                         job.name)
+                                work.coverage_merge_succeeded = True
+                            else:
+                                self._render_coverage_merge(work)
+                                merge_failed = self._run_coverage_merges({label: work})
+                                work.coverage_merge_metrics["coverage_state_prepare_duration_s"] = prepare_duration
+                                if merge_failed:
+                                    failed = True
+                                    job.coverage_merge_metrics = work.coverage_merge_metrics
+                                    continue
+                                with self._coverage_phase(work, "coverage_publish_duration_s"):
+                                    vcs_coverage.write_json(vcs_coverage.history_path(work), work.coverage_history_data)
+                                    update.publish()
+                            work.coverage_merge_metrics["coverage_state_prepare_duration_s"] = prepare_duration
+                            job.coverage_merge_metrics = work.coverage_merge_metrics
+                            job.coverage_merge_metrics.update(
+                                added_dataset_count=len(work.coverage_history_data["added_tests"])
+                                if not update.reuse else 0,
+                                duplicate_dataset_count=len(update.current["datasets"]) -
+                                (len(work.coverage_history_data["added_tests"]) if not update.reuse else 0))
+                            job.coverage_view_script_path = os.path.join(self.rcfg.regression_dir,
+                                                                         "{}__run_coverage.sh".format(job.name))
+                    else:
+                        history_path = vcs_coverage.history_path(job)
+                        if os.path.lexists(history_path):
+                            os.unlink(history_path)
+                        if self._run_coverage_merges({label: job}):
+                            failed = True
+                            continue
+                        with self._coverage_phase(job, "coverage_history_write_duration_s"):
+                            history = vcs_coverage.make_history(job, signature)
+                            if history is not None:
+                                vcs_coverage.write_json(history_path, history)
+                    job.coverage_merge_succeeded = True
+                    self.rcfg.deferred_messages.append("Open VCS coverage: {} (report: {} --report)".format(
+                        job.coverage_view_script_path, job.coverage_view_script_path))
+            except (OSError, ValueError, TypeError, subprocess.TimeoutExpired) as exc:
+                job.coverage_merge_succeeded = False
+                job.coverage_merge_metrics = work.coverage_merge_metrics
+                log.error("VCS coverage update failed for %s: %s", job.name, exc)
+                failed = True
+            finally:
+                job.coverage_merge_metrics["coverage_total_duration_s"] = time.perf_counter() - started
+        return failed
+
+    def _run_coverage_merges(self, vcomp_jobs):
         if not self.options.cm:
             return False
         failed = False
@@ -784,8 +862,6 @@ class VcsSimulator(SimulatorInterface):
                 failed = True
             else:
                 vcomp_job.coverage_merge_succeeded = True
-                self.rcfg.deferred_messages.append("Open VCS coverage: {} (report: {} --report)".format(
-                    vcomp_job.coverage_view_script_path, vcomp_job.coverage_view_script_path))
         return failed
 
     def _coverage_viewer_argv(self):
@@ -801,26 +877,32 @@ class VcsSimulator(SimulatorInterface):
         return argv
 
     def _coverage_viewer_path(self, job):
-        return os.path.join(self.rcfg.regression_dir, "{}__run_coverage.sh".format(job.name))
+        return getattr(job, "coverage_view_script_output_path",
+                       os.path.join(self.rcfg.regression_dir, "{}__run_coverage.sh".format(job.name)))
 
     def _write_coverage_viewer(self, job):
         """Publish a viewer only after this run's merged outputs were validated."""
         directory = os.path.abspath(self.rcfg.regression_dir)
         template = self.env.get_template("run_coverage_template.sh.j2")
+        path = self._coverage_viewer_path(job)
         contents = template.render(
-            merged_db_relative=os.path.relpath(job.merged_coverage_dir, directory),
-            report_dir_relative=os.path.relpath(job.coverage_report_dir, directory),
+            merged_db_relative=os.path.relpath(getattr(job, "coverage_published_merged_dir", job.merged_coverage_dir),
+                                               directory),
+            report_dir_relative=os.path.relpath(getattr(job, "coverage_published_report_dir", job.coverage_report_dir),
+                                                directory),
             viewer_argv=self._coverage_viewer_argv(),
         )
         temporary = None
         try:
-            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", newline="\n", dir=directory,
+            with tempfile.NamedTemporaryFile(mode="w",
+                                             encoding="utf-8",
+                                             newline="\n",
+                                             dir=os.path.dirname(path),
                                              delete=False) as output:
                 temporary = output.name
                 output.write(contents)
                 output.write("\n")
             os.chmod(temporary, os.stat(temporary).st_mode | stat.S_IEXEC)
-            path = self._coverage_viewer_path(job)
             os.replace(temporary, path)
             job.coverage_view_script_path = path
         finally:
@@ -836,6 +918,8 @@ class VcsSimulator(SimulatorInterface):
         if os.path.isdir(testdata):
             with os.scandir(testdata) as entries:
                 tests = sorted(entry.name for entry in entries if entry.is_dir(follow_symlinks=False))
+        tests = getattr(job, "coverage_input_tests", tests)
+        published_merged = getattr(job, "coverage_published_merged_dir", job.merged_coverage_dir)
         summary = {
             "bench":
             job.name,
@@ -844,22 +928,29 @@ class VcsSimulator(SimulatorInterface):
             "input_vdb":
             job.cov_work_dir,
             "merged_vdb":
-            job.merged_coverage_dir,
+            published_merged,
             "input_test_count":
             len(tests) if tests is not None else None,
             "input_tests":
             tests,
             "scores_from":
-            "merged_vdb" if getattr(self.options, "vcs_coverage_profile", False) == "phases" else "input_tests",
+            "merged_vdb" if
+            (getattr(self.options, "vcs_coverage_profile", False) == "phases"
+             or getattr(job, "coverage_history_data", {}).get("merge_mode") == "incremental") else "input_tests",
         }
+        if hasattr(job, "coverage_history_data"):
+            history = job.coverage_history_data
+            summary.update(merge_mode=history["merge_mode"],
+                           previous_generation=history["previous_generation"],
+                           added_tests=history["added_tests"])
         with open(os.path.join(job.coverage_report_dir, "summary.json"), "w", encoding="utf-8") as output:
             json.dump(summary, output, indent=2)
             output.write("\n")
         rows = "".join("<tr><th>{}</th><td>{}</td></tr>".format(html.escape(metric), html.escape(value))
                        for metric, value in metrics.items())
-        command = "{} -cov -covdir {}".format(shlex.join(self._coverage_viewer_argv()),
-                                              shlex.quote(job.merged_coverage_dir))
-        viewer = shlex.quote(os.path.abspath(self._coverage_viewer_path(job)))
+        command = "{} -cov -covdir {}".format(shlex.join(self._coverage_viewer_argv()), shlex.quote(published_merged))
+        viewer = shlex.quote(
+            os.path.abspath(getattr(job, "coverage_published_viewer_path", self._coverage_viewer_path(job))))
         contents = """<!doctype html>
 <html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{name} coverage summary</title>

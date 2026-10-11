@@ -24,6 +24,11 @@ py_library(
 )
 
 py_library(
+    name = "vcs_coverage",
+    srcs = ["vcs_coverage.py"],
+)
+
+py_library(
     name = "job_lib",
     srcs = ["job_lib.py"],
     deps = [

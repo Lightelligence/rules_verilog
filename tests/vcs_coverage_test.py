@@ -481,6 +481,13 @@ class VcsCoverageTest(unittest.TestCase):
         self.assertEqual(2, script.count("-show summary 1"))
         self.assertIn("merge) merge_coverage -noreport ;;", script)
 
+    def test_incremental_coverage_does_not_change_compilation_options(self):
+        self.vcomp.acquire_shared_runtime_lock = mock.Mock()
+        baseline = self.simulator.generate_compile_options(self.vcomp)
+        self.options.vcs_coverage_incremental = True
+        self.simulator.validate_resolved_options()
+        self.assertEqual(baseline, self.simulator.generate_compile_options(self.vcomp))
+
     def test_default_summary_writes_one_html_and_vdb_in_one_call_with_original_test_count(self):
         self.options.vcs_urg_format = None
         self.simulator.env = jinja2.Environment(loader=jinja2.FileSystemLoader(REPO_ROOT / "bin/templates"),

@@ -30,6 +30,7 @@ py_library(
         ":vso",
         "//lib:coverage_data",
         "//lib:job_lib",
+        "//lib:vcs_coverage",
     ],
 )
 

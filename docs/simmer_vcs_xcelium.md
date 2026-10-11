@@ -945,6 +945,46 @@ Background regressions only generate the script; they never start a GUI or
 regenerate reports when it is opened. A failed new merge removes the previous
 viewer script, preventing a stale shortcut from representing the latest run.
 
+#### Incremental coverage updates
+
+When adding cases or seeds to an existing regression, use the same project,
+`SIMRESULTS` location and bench with `--vcs-coverage-incremental`:
+
+```bash
+simmer -t 'sys_tb:new_case@1' --simulator VCS --vcs-cm A \
+  --vcs-coverage-incremental
+```
+
+The first invocation establishes a baseline. Later invocations merge the
+previous `<vcomp>__MERGED_COV.vdb` with only newly collected passing datasets.
+They do not reopen the historical case VDBs. URG still reads and writes the
+aggregate database and recomputes the coverage scores; this is an incremental
+input merge, not an in-place patch to the database or HTML. The default still
+retains one HTML dashboard, a text summary and JSON provenance. The viewer
+script continues to load the updated VDB from the same final path.
+
+A small `<vcomp>__MERGED_COV.vdb.simmer.json` sidecar records model identity,
+contributing dataset hashes and generation lineage. Identical replayed data is
+skipped; partially repeated batches filter out already merged datasets before
+URG runs. Changed data under an existing dataset identity cannot replace its
+old counters incrementally. Static design/shape changes or different coverage
+instrumentation require a new full baseline, because coverage denominators
+and bin identities may have changed. New test code that changes the coverage
+model is subject to this same check.
+
+Incremental updates run under a per-bench lock. They generate and validate
+outputs in a staging directory before replacing the final VDB, report, viewer
+and lineage sidecar. A failed update preserves the previous generation; the
+next update recovers an interrupted publication from its journal. This
+preservation behavior is specific to incremental mode. Without the option,
+the normal merge represents only the current regression's data.
+
+Earlier compact reports with `summary.json` test provenance can establish the
+lineage without remerging their original case databases, provided their static
+models match. Their old dataset hashes are unknown, so reusing those old
+identities is rejected; newly tracked identities support exact replay skipping.
+The sidecar is also written by new full merges, including merge-only output.
+
 Full URG reports require an explicit request: `--vcs-urg-format text` generates
 full text reports and `--vcs-urg-format both` generates full text and HTML
 reports, which can contain many interlinked files. `--vcs-urg-summary-depth N`

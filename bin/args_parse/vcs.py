@@ -72,6 +72,15 @@ def add_vcs_arguments(parser):
                        help=('Pass an existing -cm_hier configuration file to VCS. Requires --vcs-cm; the path is '
                              'validated before Bazel starts and overrides the testbench vcs_cm_hier setting.'))
     add_child_argument(gvcs,
+                       '--vcs-coverage-incremental',
+                       parent='--vcs-cm',
+                       default=False,
+                       action='store_true',
+                       help=('Update this bench\'s previous merged VDB with new passing test datasets only. '
+                             'Requires compatible static coverage models; repeated identical datasets are skipped. '
+                             'Publishes the updated VDB/report after validation and preserves the previous result '
+                             'on failure. The first invocation establishes a baseline. Requires --vcs-cm.'))
+    add_child_argument(gvcs,
                        '--vcs-coverage-profile',
                        parent='--vcs-cm',
                        default=False,
