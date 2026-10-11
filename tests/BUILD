@@ -77,7 +77,10 @@ py_test(
     name = "vcs_coverage_test",
     timeout = "short",
     srcs = ["vcs_coverage_test.py"],
-    data = ["//bin:simmer.py"],
+    data = [
+        "//bin:simmer.py",
+        "//bin:templates/vcs_cov_merge_template.sh.j2",
+    ],
     deps = [
         "//bin:args_parser_lib",
         "//bin:check_test_lib",

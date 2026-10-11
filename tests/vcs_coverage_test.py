@@ -8,6 +8,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
+import jinja2
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "bin"))
 
@@ -239,7 +241,10 @@ class VcsCoverageTest(unittest.TestCase):
     def test_default_times_cleanup_validation_parse_and_total_with_one_urg_call(self):
         with mock.patch("lib.simulators.vcs.run_bounded_process", side_effect=lambda *_a, **_k: self._outputs()) as run:
             self.assertFalse(self._merge())
-        run.assert_called_once_with(["bash", self.vcomp.coverage_merge_script], capture_output=True, text=True)
+        self.assertEqual(["bash", self.vcomp.coverage_merge_script], run.call_args.args[0])
+        self.assertNotIn("capture_output", run.call_args.kwargs)
+        self.assertEqual(subprocess.STDOUT, run.call_args.kwargs["stderr"])
+        self.assertEqual(self.vcomp.coverage_merge_log, run.call_args.kwargs["stdout"].name)
         metrics = self.vcomp.coverage_merge_metrics
         phases = ("output_cleanup", "urg", "model_validation", "dashboard_parse")
         self.assertGreaterEqual(metrics["coverage_total_duration_s"],
@@ -256,6 +261,41 @@ class VcsCoverageTest(unittest.TestCase):
         self.assertGreaterEqual(metrics["urg_duration_s"],
                                 metrics["urg_merge_duration_s"] + metrics["urg_report_duration_s"])
         self.assertTrue(self.vcomp.coverage_merge_succeeded)
+
+    def test_interrupted_urg_preserves_stdout_and_stderr_in_its_log(self):
+
+        def interrupt(_argv, **kwargs):
+            subprocess.run(
+                [sys.executable, "-c", "import sys; print('URG progress'); sys.stderr.write('URG warning\\n')"],
+                stdout=kwargs["stdout"],
+                stderr=kwargs["stderr"],
+                check=True)
+            raise SystemExit(130)
+
+        with mock.patch("lib.simulators.vcs.run_bounded_process", side_effect=interrupt):
+            with self.assertRaises(SystemExit) as stopped:
+                self._merge()
+        self.assertEqual(130, stopped.exception.code)
+        output = Path(self.vcomp.coverage_merge_log).read_text(encoding="utf-8")
+        self.assertIn("URG progress", output)
+        self.assertIn("URG warning", output)
+        self.assertFalse(self.vcomp.coverage_merge_succeeded)
+        self.assertIn("coverage_total_duration_s", self.vcomp.coverage_merge_metrics)
+
+    def test_large_urg_failure_keeps_full_log_and_bounds_error_tail(self):
+
+        def fail(_argv, **kwargs):
+            kwargs["stdout"].write("begin-marker\n" + "x" * 100000 + "\nend-marker\n")
+            return SimpleNamespace(returncode=1)
+
+        with mock.patch("lib.simulators.vcs.run_bounded_process", side_effect=fail), \
+             self.assertLogs("lib.simulators.vcs", level="ERROR") as messages:
+            self.assertTrue(self._merge())
+        output = Path(self.vcomp.coverage_merge_log).read_text(encoding="utf-8")
+        self.assertIn("begin-marker", output)
+        self.assertIn("end-marker", messages.output[0])
+        self.assertNotIn("begin-marker", messages.output[0])
+        self.assertLess(len(messages.output[0]), 70000)
 
     def test_profile_phase_failures_and_timeouts_keep_timings_and_stop_merge(self):
         self.options.vcs_coverage_profile = "phases"
@@ -410,6 +450,31 @@ class VcsCoverageTest(unittest.TestCase):
             self.assertEqual(report_format, options.vcs_urg_format)
         with self.assertRaises(SystemExit):
             parse_args(["--simulator", "VCS", "--vcs-cm", "line", "--vcs-urg-format", "html"])
+
+    def test_summary_depth_requires_vcs_coverage_and_positive_depth(self):
+        for argv in (["--simulator", "VCS"], ["--simulator", "XRUN"],
+                     ["--simulator", "VCS", "--vcs-cm", "line", "--vcs-urg-summary-depth",
+                      "0"], ["--simulator", "VCS", "--vcs-cm", "line", "--vcs-urg-summary-depth", "-1"]):
+            if "--vcs-urg-summary-depth" not in argv:
+                argv += ["--vcs-urg-summary-depth", "1"]
+            with self.subTest(argv=argv), self.assertRaises(ValueError):
+                options = parse_args(argv)
+                backend = VcsSimulator if options.simulator == "VCS" else simmer.XceliumSimulator
+                backend(options, self.rcfg, None).validate_resolved_options()
+
+    def test_summary_depth_changes_only_report_arguments(self):
+        self.simulator.env = jinja2.Environment(loader=jinja2.FileSystemLoader(REPO_ROOT / "bin/templates"),
+                                                undefined=jinja2.StrictUndefined)
+        self.simulator.env.filters['shell_quote'] = shlex.quote
+        self.vcomp.acquire_shared_runtime_lock = mock.Mock()
+        baseline = self.simulator.generate_compile_options(self.vcomp)
+        self.assertNotIn("-show summary", Path(self.vcomp.coverage_merge_script).read_text())
+        self.options.vcs_urg_summary_depth = 1
+        self.simulator.validate_resolved_options()
+        self.assertEqual(baseline, self.simulator.generate_compile_options(self.vcomp))
+        script = Path(self.vcomp.coverage_merge_script).read_text()
+        self.assertEqual(2, script.count("-show summary 1"))
+        self.assertIn("merge) merge_coverage -noreport ;;", script)
 
 
 if __name__ == "__main__":

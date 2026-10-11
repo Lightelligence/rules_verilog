@@ -11,10 +11,14 @@ def validate_vcs_runtime_options(options, parser):
             options.vcs_urg_parallel,
             options.vcs_urg_show_tests,
             getattr(options, "vcs_urg_format", None) is not None,
+            getattr(options, "vcs_urg_summary_depth", None) is not None,
             getattr(options, "vcs_coverage_profile", False),
     ]) and not options.cm:
         parser.error("VCS coverage detail switches require '--vcs-cm'. "
                      "Stopping before Bazel starts.")
+    summary_depth = getattr(options, "vcs_urg_summary_depth", None)
+    if summary_depth is not None and summary_depth < 1:
+        parser.error("--vcs-urg-summary-depth must be a positive integer. Stopping before Bazel starts.")
     if options.vcs_cm_line is not None and 'line' not in options.cm and 'A' not in options.cm:
         parser.error("--vcs-cm-line requires line coverage in '--vcs-cm' "
                      "(for example '--vcs-cm line' or '--vcs-cm A'). "

@@ -882,6 +882,17 @@ VCS `--vcs-cm` writes one `.vdb` per vcomp and generates
 and Verdi. By default URG requests `-format both`, producing the text dashboard
 and HTML report. Use `--vcs-urg-format text` to omit HTML while retaining the
 dashboard used by simmer. `--vcs-urg-format both` explicitly selects the default.
+Both formats otherwise generate detailed reports. For routine regression summaries,
+use `--vcs-urg-summary-depth 1` to request `-show summary 1`: keep summary scores
+and test counts while omitting detailed object pages and limiting the displayed
+hierarchy depth. This does not exclude design objects from coverage calculations
+and does not change compilation or simulation instrumentation. Omit the option
+when detailed reports are needed. Combine it with `--vcs-urg-format text` to avoid
+HTML output as well.
+
+URG stdout and stderr are streamed to `<vcomp>_vcs_cov_merge.log`, including output
+before cancellation or timeout. Failures print at most the final 64 KiB and link
+the complete log; phase profiling labels merge and report output in that log.
 This report-only choice does not change compilation or simulation coverage.
 Xcelium `--coverage`
 keeps IMC generation and merge in the Xcelium adapter. Coverage switches from

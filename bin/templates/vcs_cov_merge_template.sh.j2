@@ -17,7 +17,7 @@ merge_coverage() {
 
 # Default to one combined invocation. Profiling invokes the two phases separately.
 case "${1:-all}" in
-  all) merge_coverage -format {{ urg_format|shell_quote }} -report {{ report_dir|shell_quote }} ;;
+  all) merge_coverage -format {{ urg_format|shell_quote }} -report {{ report_dir|shell_quote }}{% if urg_summary_depth|default(none) is not none %} -show summary {{ urg_summary_depth|string|shell_quote }}{% endif %} ;;
   merge) merge_coverage -noreport ;;
   report)
     # Report from the original tests; a merged VDB coalesces their identities.
@@ -28,7 +28,7 @@ case "${1:-all}" in
 {% if urg_show_tests -%}
       -show tests \
 {% endif -%}
-      -format {{ urg_format|shell_quote }} -report {{ report_dir|shell_quote }}
+      -format {{ urg_format|shell_quote }} -report {{ report_dir|shell_quote }}{% if urg_summary_depth|default(none) is not none %} -show summary {{ urg_summary_depth|string|shell_quote }}{% endif %}
     ;;
   *) printf 'Unknown coverage phase: %s\n' "$1" >&2; exit 2 ;;
 esac

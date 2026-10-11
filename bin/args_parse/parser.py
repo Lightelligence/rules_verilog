@@ -205,6 +205,7 @@ def parse_args(argv):
             '--vcs-profile',
             '--vcs-urg-parallel',
             '--vcs-urg-format',
+            '--vcs-urg-summary-depth',
             '--vcs-urg-show-tests',
             '--vcs-partcomp',
             '--no-vcs-partcomp',

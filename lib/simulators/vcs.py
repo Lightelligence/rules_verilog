@@ -657,11 +657,13 @@ class VcsSimulator(SimulatorInterface):
                     urg_parallel=self.options.vcs_urg_parallel,
                     urg_show_tests=self.options.vcs_urg_show_tests,
                     urg_format=getattr(self.options, "vcs_urg_format", None) or "both",
+                    urg_summary_depth=getattr(self.options, "vcs_urg_summary_depth", None),
                     verdi_command=self.get_tool_command("verdi"),
                 ))
         st = os.stat(merge_sh)
         os.chmod(merge_sh, st.st_mode | stat.S_IEXEC)
         vcomp_job.coverage_merge_script = merge_sh
+        vcomp_job.coverage_merge_log = os.path.splitext(merge_sh)[0] + ".log"
         vcomp_job.coverage_report_dir = report_dir
         vcomp_job.merged_coverage_dir = merged_db_path
         vcomp_job.coverage_merge_succeeded = False
@@ -701,17 +703,29 @@ class VcsSimulator(SimulatorInterface):
                         self._record_coverage_size(vcomp_job, "input_db_bytes",
                                                    getattr(vcomp_job, "cov_work_dir", None))
                     log.info("Starting VCS coverage merge for %s", getattr(vcomp_job, "name", vcomp_job))
-                    with self._coverage_phase(vcomp_job, "urg_duration_s"):
+                    merge_log = getattr(vcomp_job, "coverage_merge_log",
+                                        None) or os.path.splitext(merge_script)[0] + ".log"
+                    vcomp_job.coverage_merge_log = merge_log
+                    # Stream tool output to disk so cancellation keeps diagnostics
+                    # and large reports do not accumulate console output in RAM.
+                    with self._coverage_phase(vcomp_job, "urg_duration_s"), open(merge_log, "w",
+                                                                                 encoding="utf-8") as output:
                         if profile == "phases":
                             for phase in ("merge", "report"):
+                                output.write("=== URG {} ===\n".format(phase))
+                                output.flush()
                                 with self._coverage_phase(vcomp_job, "urg_{}_duration_s".format(phase)):
                                     result = run_bounded_process(["bash", merge_script, phase],
-                                                                 capture_output=True,
+                                                                 stdout=output,
+                                                                 stderr=subprocess.STDOUT,
                                                                  text=True)
                                 if result.returncode != 0:
                                     break
                         else:
-                            result = run_bounded_process(["bash", merge_script], capture_output=True, text=True)
+                            result = run_bounded_process(["bash", merge_script],
+                                                         stdout=output,
+                                                         stderr=subprocess.STDOUT,
+                                                         text=True)
                     if result.returncode == 0:
                         with self._coverage_phase(vcomp_job, "model_validation_duration_s"):
                             self._validate_coverage_model(getattr(vcomp_job, "merged_coverage_dir", None))
@@ -722,15 +736,26 @@ class VcsSimulator(SimulatorInterface):
                         if profile:
                             self._record_coverage_size(vcomp_job, "merged_db_bytes", vcomp_job.merged_coverage_dir)
             except (OSError, subprocess.TimeoutExpired) as exc:
-                log.error("VCS coverage merge or output validation failed for %s: %s", vcomp_job, exc)
+                log.error("VCS coverage merge or output validation failed for %s: %s (log: %s)", vcomp_job, exc,
+                          getattr(vcomp_job, "coverage_merge_log", "unavailable"))
                 failed = True
                 continue
             if result.returncode != 0:
-                log.error("VCS coverage merge failed for %s:\n%s\n%s", vcomp_job, result.stdout, result.stderr)
+                log.error("VCS coverage merge failed for %s (full log: %s):\n%s", vcomp_job, merge_log,
+                          self._coverage_log_tail(merge_log))
                 failed = True
             else:
                 vcomp_job.coverage_merge_succeeded = True
         return failed
+
+    @staticmethod
+    def _coverage_log_tail(path, limit=65536):
+        try:
+            with open(path, "rb") as stream:
+                stream.seek(max(0, os.fstat(stream.fileno()).st_size - limit))
+                return stream.read(limit).decode("utf-8", errors="replace")
+        except OSError as exc:
+            return "Unable to read coverage log: {}".format(exc)
 
     @staticmethod
     @contextmanager

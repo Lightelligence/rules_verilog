@@ -88,8 +88,16 @@ def add_vcs_arguments(parser):
                        parent='--vcs-cm',
                        choices=['text', 'both'],
                        default=None,
-                       help=('Select URG report output: text for dashboard only, both for text and HTML '
+                       help=('Select URG report output: text without HTML, both for text and HTML '
                              '(default). Requires --vcs-cm; does not change compile or simulation coverage.'))
+    add_child_argument(gvcs,
+                       '--vcs-urg-summary-depth',
+                       parent='--vcs-cm',
+                       type=int,
+                       default=None,
+                       help=('Generate summary reports to this positive hierarchy depth with -show summary N. '
+                             'Omits detailed object pages while retaining coverage scores and test counts. '
+                             'Omit this option for full reports. Requires --vcs-cm.'))
     add_child_argument(gvcs,
                        '--vcs-urg-parallel',
                        parent='--vcs-cm',
