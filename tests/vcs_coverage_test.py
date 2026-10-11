@@ -609,7 +609,7 @@ class VcsCoverageTest(unittest.TestCase):
                     self.simulator._write_coverage_viewer(self.vcomp)
                 self.assertFalse((self.root / "tb__run_coverage.sh").exists())
 
-    def _viewer_fixture(self, viewer_command="verdi"):
+    def _viewer_fixture(self):
         directory = self.root / "coverage output ' $;()"
         directory.mkdir()
         self.rcfg.regression_dir = str(directory)
@@ -622,7 +622,8 @@ class VcsCoverageTest(unittest.TestCase):
                           "pathlib.Path(sys.argv[1]).write_text(json.dumps({'argv':sys.argv[2:], 'cwd':os.getcwd()}))\n"
                           "sys.exit(int(os.environ.get('VIEWER_EXIT', '0')))\n")
         self.options.vcs_runner = shlex.join([sys.executable, str(runner), str(capture), "literal $(touch unwanted)"])
-        with mock.patch.dict(os.environ, {"RV_VCS_COVERAGE_VIEWER": viewer_command}):
+        with mock.patch.dict(os.environ):
+            os.environ.pop("RV_VCS_COVERAGE_VIEWER", None)
             self.simulator._write_coverage_viewer(self.vcomp)
         environment = dict(os.environ)
         environment.pop("SIMMER_COVERAGE_LAUNCHER", None)
@@ -632,7 +633,11 @@ class VcsCoverageTest(unittest.TestCase):
     @unittest.skipUnless(os.name == "posix", "Generated Bash viewers run on the EDA/Linux host")
     def test_viewer_captures_reader_override_as_literal_arguments(self):
         reader = ["env", "NOVAS_HOME=/tools/Verdi ' release", "/tools/Verdi ' $(touch unwanted)/bin/verdi"]
-        directory, capture, environment = self._viewer_fixture(shlex.join(reader))
+        directory, capture, environment = self._viewer_fixture()
+        viewer_command = self.options.vcs_runner + " " + shlex.join(reader)
+        self.options.vcs_runner = "invalid-compile-runner-that-must-not-be-called"
+        with mock.patch.dict(os.environ, {"RV_VCS_COVERAGE_VIEWER": viewer_command}):
+            self.simulator._write_coverage_viewer(self.vcomp)
         environment["RV_VCS_COVERAGE_VIEWER"] = "another reader"
         completed = subprocess.run([str(directory / "tb__run_coverage.sh")],
                                    cwd=self.root,

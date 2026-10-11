@@ -790,13 +790,15 @@ class VcsSimulator(SimulatorInterface):
 
     def _coverage_viewer_argv(self):
         """Allow a coverage reader release independent of the VCS compiler."""
-        command = os.environ.get("RV_VCS_COVERAGE_VIEWER", "verdi")
+        command = os.environ.get("RV_VCS_COVERAGE_VIEWER")
+        if command is None:
+            return shlex.split(self.get_tool_runner()) + ["verdi"]
         if "\n" in command or "\r" in command:
             raise ValueError("RV_VCS_COVERAGE_VIEWER cannot contain newlines")
         argv = shlex.split(command)
         if not argv:
             raise ValueError("RV_VCS_COVERAGE_VIEWER cannot be empty")
-        return shlex.split(self.get_tool_runner()) + argv
+        return argv
 
     def _coverage_viewer_path(self, job):
         return os.path.join(self.rcfg.regression_dir, "{}__run_coverage.sh".format(job.name))
