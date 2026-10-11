@@ -888,6 +888,10 @@ keeps IMC generation and merge in the Xcelium adapter. Coverage switches from
 one backend are rejected by the other.
 The historical VCS spelling `--cm` remains a compatibility alias.
 
+Coverage compilation preserves the static VDB model and partition links so
+incremental VCS compilation can reuse them. Previous per-test data is removed
+before a new run; a missing static model rejects executable reuse.
+
 VCS coverage tuning follows the Y-2026.03 Command Reference and Coverage Guide.
 Use `--vcs-cm-cond obs+event` for observability-based condition coverage plus
 sensitivity-list events. Use `--vcs-cm-tgl portsonly` to reduce toggle cost, or

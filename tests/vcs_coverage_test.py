@@ -145,6 +145,21 @@ class VcsCoverageTest(unittest.TestCase):
         self.assertFalse(testdata.exists())
         self.assertFalse(self.vcomp.coverage_cleanup_failed)
 
+    def test_incremental_compilation_preserves_static_model_and_partition_links(self):
+        model = self._model(self.vcomp.cov_work_dir)
+        partition_model = self._model(self.root / "partition.vdb")
+        link = Path(self.vcomp.cov_work_dir) / "partition.vdb"
+        self._link(link, partition_model.parents[4])
+        testdata = model.parent.parent / "testdata"
+        testdata.mkdir()
+        (testdata / "previous").write_text("stale coverage", encoding="utf-8")
+        self.simulator.prepare_compile_execution(self.vcomp, reusing_compile=False)
+        self.assertEqual("<coverage-model/>", model.read_text(encoding="utf-8"))
+        self.assertTrue(link.is_symlink())
+        self.assertTrue(partition_model.is_file())
+        self.assertFalse(testdata.exists())
+        self.simulator._validate_coverage_model(self.vcomp.cov_work_dir)
+
     def test_reuse_cleanup_error_is_not_silently_accepted(self):
         self._model(self.vcomp.cov_work_dir)
         testdata = Path(self.vcomp.cov_work_dir) / "snps" / "coverage" / "db" / "testdata"

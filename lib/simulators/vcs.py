@@ -953,8 +953,10 @@ class VcsSimulator(SimulatorInterface):
     def prepare_compile_execution(self, vcomp_job, reusing_compile):
         if not self.options.cm:
             return
-        path = (os.path.join(vcomp_job.cov_work_dir, "snps", "coverage", "db", "testdata")
-                if reusing_compile else vcomp_job.cov_work_dir)
+        # An invoked VCS compile can still reuse partition objects or -Mupdate
+        # outputs. Those may not regenerate the static coverage model, so keep
+        # it and its partition links for both compilation and executable reuse.
+        path = os.path.join(vcomp_job.cov_work_dir, "snps", "coverage", "db", "testdata")
         try:
             self._remove_coverage_directory(path)
         except OSError:
