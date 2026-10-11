@@ -932,13 +932,14 @@ the VCS runner for viewing, allowing it to load its own module. For example,
 on the tested ETX installation:
 
 ```bash
-export RV_VCS_COVERAGE_VIEWER="bash -lc 'module unload verdi && module load verdi/X-2025.06-SP2-5S && exec verdi \"\$@\"' simmer-coverage"
+export RV_VCS_COVERAGE_VIEWER="bash -lc 'module unload vcs verdi && module load verdi/X-2025.06-SP2-5S && exec verdi \"\$@\"' simmer-coverage"
 ```
 
 The default is `verdi` from the configured VCS runner. Reader compatibility
-depends on the installed release and database; on the tested ETX dataset,
-Y-2026.03-1 loaded the complete merged VDB, while X-2025.06-SP2-4 crashed on
-both the original and merged VDB. This does not require recollecting coverage.
+and GUI startup depend on the installed release, database and desktop
+environment. Confirm module selection separately from opening a completed
+VDB; a successful module lookup alone does not validate the GUI. Selecting a
+different reader does not recollect coverage or change the compiler version.
 
 Background regressions only generate the script; they never start a GUI or
 regenerate reports when it is opened. A failed new merge removes the previous
