@@ -928,11 +928,12 @@ To select a coverage reader separately from VCS compilation, set
 `RV_VCS_COVERAGE_VIEWER` before generating the coverage output. Its quoted
 command is captured in the script and report instructions; it does not change
 the compiler, simulation, URG command or compile cache. The command replaces
-the VCS runner for viewing, allowing it to load its own module. For example,
-on the tested ETX installation:
+the VCS runner for viewing, allowing it to load its own module. Use the tool
+versions selected by the project's `env/stools.yaml` when present. For example,
+for an ETX project using `verdi/X-2025.06-SP2-4S`:
 
 ```bash
-export RV_VCS_COVERAGE_VIEWER="bash -lc 'module unload vcs verdi && module load verdi/X-2025.06-SP2-5S && exec verdi \"\$@\"' simmer-coverage"
+export RV_VCS_COVERAGE_VIEWER="bash -lc 'module unload vcs verdi && module load verdi/X-2025.06-SP2-4S && exec verdi \"\$@\"' simmer-coverage"
 ```
 
 The default is `verdi` from the configured VCS runner. Reader compatibility
