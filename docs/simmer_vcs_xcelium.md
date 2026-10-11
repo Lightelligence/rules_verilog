@@ -879,11 +879,132 @@ rule-provided coverage paths remain relative to the Bazel runfiles directory.
 
 VCS `--vcs-cm` writes one `.vdb` per vcomp and generates
 `<vcomp>_vcs_cov_merge.sh`. The same configured VCS runner is used for `urg`
-and Verdi. The generated URG command explicitly requests `-format both` so
-both the text dashboard and HTML report are produced. Xcelium `--coverage`
+and Verdi. Individual simulation datasets have unique `-cm_name` directories
+under the shared VDB's `testdata`; they reuse the static design model instead
+of copying it for every case.
+
+The default `--vcs-urg-format summary` uses one URG invocation with `-dbname`,
+`-format text` and `-show summary 1`. It writes the final
+`<vcomp>__MERGED_COV.vdb` and small text summaries, without generating URG HTML
+object pages. Simmer then writes one self-contained `dashboard.html` and
+`summary.json` in `<vcomp>__vcs_cov_report`. The JSON records the coverage
+scores, original input-test identities/count and database paths. Existing
+regression reports consume the same text dashboard. After successful validation,
+unused URG summary tables are removed; only `dashboard.txt`, `dashboard.html`
+and `summary.json` remain. URG can still write sizable temporary text summaries
+during the command; its complete diagnostics are preserved outside that report
+directory in `<vcomp>_vcs_cov_merge.log`. The hierarchy depth limits
+displayed detail, not coverage calculations or instrumentation.
+
+Use `--vcs-urg-format none` for merge-only (`-noreport`) when only the final
+VDB is needed. No report is generated and simmer displays coverage as N/A.
+Detailed analysis uses the merged VDB directly:
+
+```bash
+verdi -cov -covdir '<vcomp>__MERGED_COV.vdb'
+```
+
+After the merge and output validation succeed, simmer also creates an executable
+`<vcomp>__run_coverage.sh` beside the merged VDB. Run it from an ETX/Linux desktop
+terminal to open Verdi Coverage and automatically load that database:
+
+```bash
+./<vcomp>__run_coverage.sh
+./<vcomp>__run_coverage.sh --report  # Open the existing HTML, or print its text summary.
+```
+
+The script uses the configured VCS tool runner, locates the VDB/report relative
+to its own location and accepts extra Verdi arguments after `--verdi`. It works
+with merge-only output too; `--report` explains when no report was generated.
+For sites that launch GUI tools through LSF, configure a quoted launcher just
+as for `run_waves.sh`:
+
+```bash
+SIMMER_COVERAGE_LAUNCHER="bsub -I -q syn" ./<vcomp>__run_coverage.sh
+```
+
+The calling desktop session must provide a working display and tool licenses.
+To select a coverage reader separately from VCS compilation, set
+`RV_VCS_COVERAGE_VIEWER` before generating the coverage output. Its quoted
+command is captured in the script and report instructions; it does not change
+the compiler, simulation, URG command or compile cache. The command replaces
+the VCS runner for viewing, allowing it to load its own module. Use the tool
+versions selected by the project's `env/stools.yaml` when present. For example,
+for an ETX project using `verdi/X-2025.06-SP2-4S`:
+
+```bash
+export RV_VCS_COVERAGE_VIEWER="bash -lc 'module unload vcs verdi && module load verdi/X-2025.06-SP2-4S && exec verdi \"\$@\"' simmer-coverage"
+```
+
+The default is `verdi` from the configured VCS runner. Reader compatibility
+and GUI startup depend on the installed release, database and desktop
+environment. Confirm module selection separately from opening a completed
+VDB; a successful module lookup alone does not validate the GUI. Selecting a
+different reader does not recollect coverage or change the compiler version.
+
+Background regressions only generate the script; they never start a GUI or
+regenerate reports when it is opened. A failed new merge removes the previous
+viewer script, preventing a stale shortcut from representing the latest run.
+
+#### Incremental coverage updates
+
+When adding cases or seeds to an existing regression, use the same project,
+`SIMRESULTS` location and bench with `--vcs-coverage-incremental`:
+
+```bash
+simmer -t 'sys_tb:new_case@1' --simulator VCS --vcs-cm A \
+  --vcs-coverage-incremental
+```
+
+The first invocation establishes a baseline. Later invocations merge the
+previous `<vcomp>__MERGED_COV.vdb` with only newly collected passing datasets.
+They do not reopen the historical case VDBs. URG still reads and writes the
+aggregate database and recomputes the coverage scores; this is an incremental
+input merge, not an in-place patch to the database or HTML. The default still
+retains one HTML dashboard, a text summary and JSON provenance. The viewer
+script continues to load the updated VDB from the same final path.
+
+A small `<vcomp>__MERGED_COV.vdb.simmer.json` sidecar records model identity,
+contributing dataset hashes and generation lineage. Identical replayed data is
+skipped; partially repeated batches filter out already merged datasets before
+URG runs. Changed data under an existing dataset identity cannot replace its
+old counters incrementally. Static design/shape changes or different coverage
+instrumentation require a new full baseline, because coverage denominators
+and bin identities may have changed. New test code that changes the coverage
+model is subject to this same check.
+
+Incremental updates run under a per-bench lock. They generate and validate
+outputs in a staging directory before replacing the final VDB, report, viewer
+and lineage sidecar. A failed update preserves the previous generation; the
+next update recovers an interrupted publication from its journal. This
+preservation behavior is specific to incremental mode. Without the option,
+the normal merge represents only the current regression's data.
+
+Earlier compact reports with `summary.json` test provenance can establish the
+lineage without remerging their original case databases, provided their static
+models match. Their old dataset hashes are unknown, so reusing those old
+identities is rejected; newly tracked identities support exact replay skipping.
+The sidecar is also written by new full merges, including merge-only output.
+
+Full URG reports require an explicit request: `--vcs-urg-format text` generates
+full text reports and `--vcs-urg-format both` generates full text and HTML
+reports, which can contain many interlinked files. `--vcs-urg-summary-depth N`
+limits these reports to summary files. Summary output defaults to depth 1;
+merge-only output rejects this option. All these choices affect postprocessing
+only, so they do not require recompiling or rerunning completed simulations.
+
+URG stdout and stderr are streamed to `<vcomp>_vcs_cov_merge.log`, including output
+before cancellation or timeout. Failures print at most the final 64 KiB and link
+the complete log; phase profiling labels merge and report output in that log.
+This report-only choice does not change compilation or simulation coverage.
+Xcelium `--coverage`
 keeps IMC generation and merge in the Xcelium adapter. Coverage switches from
 one backend are rejected by the other.
 The historical VCS spelling `--cm` remains a compatibility alias.
+
+Coverage compilation preserves the static VDB model and partition links so
+incremental VCS compilation can reuse them. Previous per-test data is removed
+before a new run; a missing static model rejects executable reuse.
 
 VCS coverage tuning follows the Y-2026.03 Command Reference and Coverage Guide.
 Use `--vcs-cm-cond obs+event` for observability-based condition coverage plus
@@ -894,15 +1015,49 @@ another documented mode when full signal coverage is required. Repeat
 correlation but increases VDB size. Parallel merge remains disabled by default:
 measure each bench's merge elapsed time and input VDB size before enabling it,
 since parallel startup and coordination can outweigh the benefit for small
-databases. Simmer records elapsed time for each merge. With `--vcs-cm` enabled,
-add `--vcs-coverage-profile` to also measure input and merged VDB bytes. Directory
-size scans are opt-in because they can be expensive on shared filesystems. For
-example:
+databases. Simmer always logs wall times for old-output cleanup, combined URG,
+static-model validation, dashboard parsing and the total coverage operation.
+These timings include failures; phases that were not reached have no timing.
+Cleanup here means the old merged VDB/report, not per-test failure cleanup.
+
+With `--vcs-cm` enabled, `--vcs-coverage-profile phases` runs URG merge-only
+(`-noreport`, writing the merged VDB) and report-only (without `-dbname`)
+as separate processes and records each wall time. Full text/both reporting
+reads the original VDB to preserve the original test identities. Lightweight
+summary reporting instead reads the final merged VDB. URG normally coalesces
+these datasets into one merged test; `summary.json` and the HTML dashboard keep
+the original contributing-test count separately. That count records input
+datasets, not regression pass status. Report time includes loading and rendering;
+full reports also repeat in-memory aggregation. Both times include tool/runner
+startup. Diagnostic phase times cannot be added or subtracted to derive internal
+phases of the normal combined run. Compare normal end-to-end runs when assessing
+speedup. Merge-only output executes and times only the merge phase.
+
+Profiling also inventories input and merged VDB logical bytes, following
+partition VDB links and counting each distinct regular file once. These are
+reachable file sizes, not allocated disk space. Each scan's time is recorded
+separately; unreadable or broken links make the inventory unavailable without
+failing coverage collection. Scans are opt-in because they can be expensive on
+shared filesystems. For example:
 
 ```bash
 simmer -t 'sys_tb:*@10' --simulator VCS --vcs-cm line+cond+tgl \
-  --vcs-coverage-profile --report
+  --vcs-coverage-profile phases --report
 ```
+
+The existing `--vcs-coverage-profile` spelling (or explicit `bytes`) only adds
+byte inventories and keeps the normal single URG invocation.
+
+The generated script accepts `merge` or `report` to rerun an individual phase;
+without an argument it performs the selected merge/report output. Run it only
+on a completed database using the same licensed compute environment.
+
+For a performance comparison, snapshot the same completed VDB and use fresh
+output directories for serial/parallel crossed with text/both. Keep the host,
+CPU/memory allocation and tool version fixed, and compare repeated runs with
+rotated ordering. Check identical dashboard metrics and test counts before
+claiming an improvement. Separate profiling runs identify costly phases but
+cannot be directly compared with normal combined URG timings.
 
 Coverage-enabled compile reuse requires both `simv` and the static coverage
 model in the bench VDB (`snps/coverage/db/design` with at least one nonempty

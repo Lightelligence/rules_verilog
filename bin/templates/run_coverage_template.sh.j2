@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+MERGED_DB="${SCRIPT_DIR}/"{{ merged_db_relative|shell_quote }}
+REPORT_DIR="${SCRIPT_DIR}/"{{ report_dir_relative|shell_quote }}
+
+usage() {
+    printf 'Usage: %s [--verdi [VERDI_ARGS...] | --report | --help]\n' "${BASH_SOURCE[0]}"
+    printf '%s\n' 'Default: open Verdi Coverage with the completed merged VDB.' \
+        '--report: open the existing HTML summary, or print the text summary.' \
+        'SIMMER_COVERAGE_LAUNCHER can prepend a launcher, e.g. bsub -I -q syn.'
+}
+
+case "${1:-}" in
+    --help|-h) usage; exit 0 ;;
+    --report)
+        [[ $# == 1 ]] || { usage >&2; exit 2; }
+        if [[ -s "${REPORT_DIR}/dashboard.html" ]] && command -v xdg-open >/dev/null 2>&1; then
+            exec xdg-open "${REPORT_DIR}/dashboard.html"
+        elif [[ -s "${REPORT_DIR}/dashboard.txt" ]]; then
+            exec cat -- "${REPORT_DIR}/dashboard.txt"
+        fi
+        printf 'Error: No viewable coverage report at %s (report generation may be disabled).\n' "${REPORT_DIR}" >&2
+        exit 1
+        ;;
+    --verdi|--) shift ;;
+    '') ;;
+    *) usage >&2; exit 2 ;;
+esac
+
+if [[ ! -d "${MERGED_DB}/snps/coverage/db" ]]; then
+    printf 'Error: Merged coverage database is not available: %s\n' "${MERGED_DB}" >&2
+    exit 1
+fi
+printf 'Merged coverage database: %s\nReport directory: %s\n' "${MERGED_DB}" "${REPORT_DIR}"
+cd -- "${SCRIPT_DIR}"
+VIEWER_ARGV=({% for arg in viewer_argv %}{{ arg|shell_quote }} {% endfor %}-cov -covdir "${MERGED_DB}" "$@")
+
+if [[ -n "${SIMMER_COVERAGE_LAUNCHER:-}" ]]; then
+    # Preserve quoted launcher arguments literally, without eval or expansion.
+    if command -v python3.12 >/dev/null 2>&1; then
+        LAUNCHER_PYTHON=python3.12
+    elif command -v python3 >/dev/null 2>&1; then
+        LAUNCHER_PYTHON=python3
+    else
+        printf '%s\n' 'Error: Python 3 is required to parse SIMMER_COVERAGE_LAUNCHER.' >&2
+        exit 1
+    fi
+    LAUNCHER_FILE="$(mktemp)"
+    trap 'rm -f -- "${LAUNCHER_FILE}"' EXIT
+    "${LAUNCHER_PYTHON}" -c \
+        'import os, shlex, sys; sys.stdout.buffer.write(b"".join(os.fsencode(arg) + b"\0" for arg in shlex.split(sys.argv[1])))' \
+        "${SIMMER_COVERAGE_LAUNCHER}" >"${LAUNCHER_FILE}"
+    LAUNCHER_ARGV=()
+    while IFS= read -r -d '' arg; do LAUNCHER_ARGV+=("$arg"); done <"${LAUNCHER_FILE}"
+    rm -f -- "${LAUNCHER_FILE}"
+    trap - EXIT
+    [[ -n "${LAUNCHER_ARGV[0]:-}" ]] || { printf '%s\n' 'Error: Coverage launcher is empty.' >&2; exit 1; }
+    VIEWER_ARGV=("${LAUNCHER_ARGV[@]}" "${VIEWER_ARGV[@]}")
+fi
+
+printf 'Executing:'
+printf ' %q' "${VIEWER_ARGV[@]}"
+printf '\n'
+exec "${VIEWER_ARGV[@]}"

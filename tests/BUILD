@@ -77,7 +77,11 @@ py_test(
     name = "vcs_coverage_test",
     timeout = "short",
     srcs = ["vcs_coverage_test.py"],
-    data = ["//bin:simmer.py"],
+    data = [
+        "//bin:simmer.py",
+        "//bin:templates/run_coverage_template.sh.j2",
+        "//bin:templates/vcs_cov_merge_template.sh.j2",
+    ],
     deps = [
         "//bin:args_parser_lib",
         "//bin:check_test_lib",
@@ -92,6 +96,22 @@ py_test(
         "//lib:sim_artifacts",
         "//lib:simmer_results",
         "//lib:simmer_state",
+        "//lib/simulators",
+    ],
+)
+
+py_test(
+    name = "vcs_coverage_incremental_test",
+    timeout = "short",
+    srcs = ["vcs_coverage_incremental_test.py"],
+    data = [
+        "//bin:templates/run_coverage_template.sh.j2",
+        "//bin:templates/vcs_cov_merge_template.sh.j2",
+    ],
+    deps = [
+        "//bin:args_parser_lib",
+        "//lib:job_lib",
+        "//lib:vcs_coverage",
         "//lib/simulators",
     ],
 )
@@ -214,6 +234,7 @@ py_test(
         "simmer_interrupt_probe.py",
         "//bin:simmer.py",
         "//bin:templates/rerun_template.sh.j2",
+        "//bin:templates/run_coverage_template.sh.j2",
         "//bin:templates/run_waves_template.sh.j2",
         "//bin:templates/sim_template.sh.j2",
         "//bin:templates/vcs_compile_template.sh.j2",

@@ -1,4 +1,5 @@
 import os
+import json
 import shlex
 import subprocess
 import sys
@@ -7,6 +8,8 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
+
+import jinja2
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "bin"))
@@ -25,13 +28,17 @@ class VcsCoverageTest(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
-        self.options = parse_args(["--simulator", "VCS", "--vcs-cm", "line", "--no-vcs-partcomp"])
+        self.options = parse_args(
+            ["--simulator", "VCS", "--vcs-cm", "line", "--no-vcs-partcomp", "--vcs-urg-format", "both"])
         self.rcfg = SimpleNamespace(options=self.options,
                                     regression_dir=str(self.root),
                                     proj_dir=str(self.root),
                                     log=CmnLogger("vcs-coverage-test"),
                                     deferred_messages=[])
-        self.simulator = VcsSimulator(self.options, self.rcfg, None)
+        environment = jinja2.Environment(loader=jinja2.FileSystemLoader(REPO_ROOT / "bin/templates"),
+                                         undefined=jinja2.StrictUndefined)
+        environment.filters['shell_quote'] = shlex.quote
+        self.simulator = VcsSimulator(self.options, self.rcfg, environment)
         self.vcomp = SimpleNamespace(name="tb",
                                      job_dir=str(self.root / "compile"),
                                      cov_work_dir=str(self.root / "work.vdb"),
@@ -145,6 +152,21 @@ class VcsCoverageTest(unittest.TestCase):
         self.assertFalse(testdata.exists())
         self.assertFalse(self.vcomp.coverage_cleanup_failed)
 
+    def test_incremental_compilation_preserves_static_model_and_partition_links(self):
+        model = self._model(self.vcomp.cov_work_dir)
+        partition_model = self._model(self.root / "partition.vdb")
+        link = Path(self.vcomp.cov_work_dir) / "partition.vdb"
+        self._link(link, partition_model.parents[4])
+        testdata = model.parent.parent / "testdata"
+        testdata.mkdir()
+        (testdata / "previous").write_text("stale coverage", encoding="utf-8")
+        self.simulator.prepare_compile_execution(self.vcomp, reusing_compile=False)
+        self.assertEqual("<coverage-model/>", model.read_text(encoding="utf-8"))
+        self.assertTrue(link.is_symlink())
+        self.assertTrue(partition_model.is_file())
+        self.assertFalse(testdata.exists())
+        self.simulator._validate_coverage_model(self.vcomp.cov_work_dir)
+
     def test_reuse_cleanup_error_is_not_silently_accepted(self):
         self._model(self.vcomp.cov_work_dir)
         testdata = Path(self.vcomp.cov_work_dir) / "snps" / "coverage" / "db" / "testdata"
@@ -221,6 +243,96 @@ class VcsCoverageTest(unittest.TestCase):
         self.assertEqual("80.00%", coverage["tb"]["cc"]["Overall"])
         self.assertGreaterEqual(self.vcomp.coverage_merge_metrics["urg_duration_s"], 0)
 
+    def test_full_report_times_cleanup_validation_parse_and_total_with_one_urg_call(self):
+        with mock.patch("lib.simulators.vcs.run_bounded_process", side_effect=lambda *_a, **_k: self._outputs()) as run:
+            self.assertFalse(self._merge())
+        self.assertEqual(["bash", self.vcomp.coverage_merge_script], run.call_args.args[0])
+        self.assertNotIn("capture_output", run.call_args.kwargs)
+        self.assertEqual(subprocess.STDOUT, run.call_args.kwargs["stderr"])
+        self.assertEqual(self.vcomp.coverage_merge_log, run.call_args.kwargs["stdout"].name)
+        metrics = self.vcomp.coverage_merge_metrics
+        phases = ("output_cleanup", "urg", "model_validation", "dashboard_parse")
+        self.assertGreaterEqual(metrics["coverage_total_duration_s"],
+                                sum(metrics[phase + "_duration_s"] for phase in phases))
+        self.assertNotIn("urg_merge_duration_s", metrics)
+        self.assertNotIn("urg_report_duration_s", metrics)
+
+    def test_profile_runs_merge_then_report_and_records_separate_timings(self):
+        self.options.vcs_coverage_profile = "phases"
+        with mock.patch("lib.simulators.vcs.run_bounded_process", side_effect=lambda *_a, **_k: self._outputs()) as run:
+            self.assertFalse(self._merge())
+        self.assertEqual(["merge", "report"], [call.args[0][-1] for call in run.call_args_list])
+        metrics = self.vcomp.coverage_merge_metrics
+        self.assertGreaterEqual(metrics["urg_duration_s"],
+                                metrics["urg_merge_duration_s"] + metrics["urg_report_duration_s"])
+        self.assertTrue(self.vcomp.coverage_merge_succeeded)
+
+    def test_interrupted_urg_preserves_stdout_and_stderr_in_its_log(self):
+
+        def interrupt(_argv, **kwargs):
+            subprocess.run(
+                [sys.executable, "-c", "import sys; print('URG progress'); sys.stderr.write('URG warning\\n')"],
+                stdout=kwargs["stdout"],
+                stderr=kwargs["stderr"],
+                check=True)
+            raise SystemExit(130)
+
+        with mock.patch("lib.simulators.vcs.run_bounded_process", side_effect=interrupt):
+            with self.assertRaises(SystemExit) as stopped:
+                self._merge()
+        self.assertEqual(130, stopped.exception.code)
+        output = Path(self.vcomp.coverage_merge_log).read_text(encoding="utf-8")
+        self.assertIn("URG progress", output)
+        self.assertIn("URG warning", output)
+        self.assertFalse(self.vcomp.coverage_merge_succeeded)
+        self.assertIn("coverage_total_duration_s", self.vcomp.coverage_merge_metrics)
+
+    def test_large_urg_failure_keeps_full_log_and_bounds_error_tail(self):
+
+        def fail(_argv, **kwargs):
+            kwargs["stdout"].write("begin-marker\n" + "x" * 100000 + "\nend-marker\n")
+            return SimpleNamespace(returncode=1)
+
+        with mock.patch("lib.simulators.vcs.run_bounded_process", side_effect=fail), \
+             self.assertLogs("lib.simulators.vcs", level="ERROR") as messages:
+            self.assertTrue(self._merge())
+        output = Path(self.vcomp.coverage_merge_log).read_text(encoding="utf-8")
+        self.assertIn("begin-marker", output)
+        self.assertIn("end-marker", messages.output[0])
+        self.assertNotIn("begin-marker", messages.output[0])
+        self.assertLess(len(messages.output[0]), 70000)
+
+    def test_profile_phase_failures_and_timeouts_keep_timings_and_stop_merge(self):
+        self.options.vcs_coverage_profile = "phases"
+        for phase in ("merge", "report"):
+            for timeout in (False, True):
+                with self.subTest(phase=phase, timeout=timeout):
+
+                    def execute(argv, **_kwargs):
+                        if argv[-1] == phase:
+                            if timeout:
+                                raise subprocess.TimeoutExpired(argv, 1)
+                            return SimpleNamespace(returncode=1, stdout="partial output", stderr="fixture failure")
+                        return self._outputs()
+
+                    with mock.patch("lib.simulators.vcs.run_bounded_process", side_effect=execute) as run:
+                        self.assertTrue(self._merge())
+                    self.assertEqual(1 if phase == "merge" else 2, run.call_count)
+                    self.assertFalse(self.vcomp.coverage_merge_succeeded)
+                    metrics = self.vcomp.coverage_merge_metrics
+                    for metric in ("urg_duration_s", "coverage_total_duration_s", "urg_{}_duration_s".format(phase)):
+                        self.assertGreaterEqual(metrics[metric], 0)
+                    self.assertNotIn("dashboard_parse_duration_s", metrics)
+
+    def test_cleanup_failure_keeps_cleanup_and_total_timings_without_running_urg(self):
+        Path(self.vcomp.coverage_report_dir).mkdir()
+        with mock.patch("lib.simulators.vcs.shutil.rmtree", side_effect=PermissionError("cleanup denied")), \
+             mock.patch("lib.simulators.vcs.run_bounded_process") as run:
+            self.assertTrue(self._merge())
+        run.assert_not_called()
+        self.assertIn("output_cleanup_duration_s", self.vcomp.coverage_merge_metrics)
+        self.assertIn("coverage_total_duration_s", self.vcomp.coverage_merge_metrics)
+
     def test_all_unavailable_metrics_are_valid_summary_output(self):
         with mock.patch("lib.simulators.vcs.run_bounded_process",
                         side_effect=lambda *_a, **_k: self._outputs("SCORE LINE\nN/A N/A\n")):
@@ -249,12 +361,58 @@ class VcsCoverageTest(unittest.TestCase):
         self.assertEqual(model.stat().st_size, metrics["merged_db_bytes"])
         self.assertGreaterEqual(metrics["input_db_bytes_scan_s"], 0)
         self.assertGreaterEqual(metrics["merged_db_bytes_scan_s"], 0)
+        self.assertNotIn("urg_merge_duration_s", metrics)
 
     def test_byte_inventory_failure_does_not_invalidate_valid_merge(self):
+        self._model(self.vcomp.cov_work_dir)
+        self.options.vcs_coverage_profile = True
+        logger = CmnLogger("vcs-coverage-inventory-failure")
+        scandir = os.scandir
+
+        def scan(path):
+            if os.fspath(path) == self.vcomp.cov_work_dir:
+                raise PermissionError("inventory denied")
+            return scandir(path)
+
+        with mock.patch("lib.simulators.vcs.os.scandir", side_effect=scan), \
+             mock.patch("lib.simulators.vcs.log", logger), \
+             mock.patch("lib.simulators.vcs.run_bounded_process", side_effect=lambda *_a, **_k: self._outputs()):
+            self.assertFalse(self._merge())
+            logger.exit_if_warnings_or_errors("Optional inventory failed the regression")
+        self.assertIsNone(self.vcomp.coverage_merge_metrics["input_db_bytes"])
+        self.assertTrue(self.vcomp.coverage_merge_succeeded)
+
+    def _link(self, link, target, directory=True):
+        try:
+            link.symlink_to(target, target_is_directory=directory)
+        except OSError as exc:
+            if getattr(exc, "winerror", None) == 1314:
+                self.skipTest("Windows symlink privilege is unavailable")
+            raise
+
+    def test_byte_inventory_counts_linked_partition_models_and_file_aliases_once(self):
+        self.vcomp.coverage_merge_metrics = {}
+        model = self._model(self.vcomp.cov_work_dir)
+        partition_model = self._model(self.root / "partition.vdb")
+        partitions = Path(self.vcomp.cov_work_dir) / "partitionlib"
+        partitions.mkdir()
+        self._link(partitions / "partition.vdb", partition_model.parents[4])
+        self._link(partitions / "partition-alias.vdb", partition_model.parents[4])
+        self._link(partitions / "model-alias.xml", partition_model, directory=False)
+        os.link(partition_model, partitions / "model-hardlink.xml")
+        self._link(partition_model.parents[4] / "cycle", Path(self.vcomp.cov_work_dir))
+        self.simulator._record_coverage_size(self.vcomp, "input_db_bytes", self.vcomp.cov_work_dir)
+        self.assertEqual(model.stat().st_size + partition_model.stat().st_size,
+                         self.vcomp.coverage_merge_metrics["input_db_bytes"])
+
+    def test_byte_inventory_broken_partition_link_is_unavailable_without_failing_regression(self):
         self.vcomp.coverage_merge_metrics = {}
         self._model(self.vcomp.cov_work_dir)
-        with mock.patch("os.walk", side_effect=PermissionError("inventory denied")):
+        self._link(Path(self.vcomp.cov_work_dir) / "missing.vdb", self.root / "missing.vdb")
+        logger = CmnLogger("vcs-coverage-broken-partition")
+        with mock.patch("lib.simulators.vcs.log", logger):
             self.simulator._record_coverage_size(self.vcomp, "input_db_bytes", self.vcomp.cov_work_dir)
+            logger.exit_if_warnings_or_errors("Optional inventory failed the regression")
         self.assertIsNone(self.vcomp.coverage_merge_metrics["input_db_bytes"])
 
     def test_report_keys_follow_actual_slash_and_analog_job_names(self):
@@ -279,6 +437,316 @@ class VcsCoverageTest(unittest.TestCase):
         options = parse_args(["--simulator", "VCS", "--vcs-cm", "line", "--vcs-coverage-profile"])
         VcsSimulator(options, self.rcfg, None).validate_resolved_options()
         self.assertTrue(VcsSimulator(options, self.rcfg, None).options.vcs_coverage_profile)
+        self.assertEqual("bytes", options.vcs_coverage_profile)
+        options = parse_args(["--simulator", "VCS", "--vcs-cm", "line", "--vcs-coverage-profile", "phases"])
+        VcsSimulator(options, self.rcfg, None).validate_resolved_options()
+        self.assertEqual("phases", options.vcs_coverage_profile)
+
+    def test_report_format_requires_coverage_and_is_vcs_only(self):
+        for arguments in (["--simulator", "VCS"], ["--simulator", "XRUN"]):
+            for report_format in ("summary", "none", "text", "both"):
+                with self.subTest(arguments=arguments, report_format=report_format), self.assertRaises(ValueError):
+                    options = parse_args(arguments + ["--vcs-urg-format", report_format])
+                    backend = VcsSimulator if options.simulator == "VCS" else simmer.XceliumSimulator
+                    backend(options, self.rcfg, None).validate_resolved_options()
+        for report_format in ("summary", "none", "text", "both"):
+            options = parse_args(["--simulator", "VCS", "--vcs-cm", "line", "--vcs-urg-format", report_format])
+            VcsSimulator(options, self.rcfg, None).validate_resolved_options()
+            self.assertEqual(report_format, options.vcs_urg_format)
+        with self.assertRaises(SystemExit):
+            parse_args(["--simulator", "VCS", "--vcs-cm", "line", "--vcs-urg-format", "html"])
+
+    def test_summary_depth_requires_vcs_coverage_and_positive_depth(self):
+        for argv in (["--simulator", "VCS"], ["--simulator", "XRUN"],
+                     ["--simulator", "VCS", "--vcs-cm", "line", "--vcs-urg-summary-depth",
+                      "0"], ["--simulator", "VCS", "--vcs-cm", "line", "--vcs-urg-summary-depth", "-1"]):
+            if "--vcs-urg-summary-depth" not in argv:
+                argv += ["--vcs-urg-summary-depth", "1"]
+            with self.subTest(argv=argv), self.assertRaises(ValueError):
+                options = parse_args(argv)
+                backend = VcsSimulator if options.simulator == "VCS" else simmer.XceliumSimulator
+                backend(options, self.rcfg, None).validate_resolved_options()
+
+    def test_summary_depth_changes_only_report_arguments(self):
+        self.simulator.env = jinja2.Environment(loader=jinja2.FileSystemLoader(REPO_ROOT / "bin/templates"),
+                                                undefined=jinja2.StrictUndefined)
+        self.simulator.env.filters['shell_quote'] = shlex.quote
+        self.vcomp.acquire_shared_runtime_lock = mock.Mock()
+        baseline = self.simulator.generate_compile_options(self.vcomp)
+        self.assertNotIn("-show summary", Path(self.vcomp.coverage_merge_script).read_text())
+        self.options.vcs_urg_summary_depth = 1
+        self.simulator.validate_resolved_options()
+        self.assertEqual(baseline, self.simulator.generate_compile_options(self.vcomp))
+        script = Path(self.vcomp.coverage_merge_script).read_text()
+        self.assertEqual(2, script.count("-show summary 1"))
+        self.assertIn("merge) merge_coverage -noreport ;;", script)
+
+    def test_incremental_coverage_does_not_change_compilation_options(self):
+        self.vcomp.acquire_shared_runtime_lock = mock.Mock()
+        baseline = self.simulator.generate_compile_options(self.vcomp)
+        self.options.vcs_coverage_incremental = True
+        self.simulator.validate_resolved_options()
+        self.assertEqual(baseline, self.simulator.generate_compile_options(self.vcomp))
+
+    def test_default_summary_writes_one_html_and_vdb_in_one_call_with_original_test_count(self):
+        self.options.vcs_urg_format = None
+        self.simulator.env = jinja2.Environment(loader=jinja2.FileSystemLoader(REPO_ROOT / "bin/templates"),
+                                                undefined=jinja2.StrictUndefined)
+        self.simulator.env.filters['shell_quote'] = shlex.quote
+        self.simulator.setup_coverage_merge(self.vcomp)
+        script = Path(self.vcomp.coverage_merge_script).read_text()
+        self.assertIn("merge_coverage -noreport", script)
+        self.assertIn("-dir {} -format text".format(shlex.quote(self.vcomp.merged_coverage_dir)), script)
+        self.assertNotIn("-format both", script)
+        for name in ("first", "second"):
+            (Path(self.vcomp.cov_work_dir) / "snps/coverage/db/testdata" / name).mkdir(parents=True)
+
+        def outputs(*_args, **_kwargs):
+            result = self._outputs("Number of tests: 2\nSCORE LINE\n90.00 80.00\n")
+            (Path(self.vcomp.coverage_report_dir) / "groups.txt").write_text("unused group summary" * 1000)
+            return result
+
+        with mock.patch("lib.simulators.vcs.run_bounded_process", side_effect=outputs) as run:
+            self.assertFalse(self._merge())
+        self.assertEqual(1, run.call_count)
+        self.assertEqual(["bash", self.vcomp.coverage_merge_script], run.call_args.args[0])
+        report = Path(self.vcomp.coverage_report_dir)
+        self.assertEqual([report / "dashboard.html"], list(report.rglob("*.html")))
+        self.assertEqual({"dashboard.txt", "dashboard.html", "summary.json"}, {path.name for path in report.iterdir()})
+        self.assertIn("summary_cleanup_duration_s", self.vcomp.coverage_merge_metrics)
+        summary = json.loads((report / "summary.json").read_text())
+        self.assertEqual(2, summary["input_test_count"])
+        self.assertEqual(["first", "second"], summary["input_tests"])
+        self.assertEqual("input_tests", summary["scores_from"])
+        self.assertEqual("80.00%", summary["metrics"]["Line"])
+        self.assertIn("<strong>2</strong>", (report / "dashboard.html").read_text())
+        self.assertNotIn("urg_report_duration_s", self.vcomp.coverage_merge_metrics)
+        self.options.vcs_coverage_profile = "phases"
+        with mock.patch("lib.simulators.vcs.run_bounded_process",
+                        side_effect=lambda *_a, **_k: self._outputs("Number of tests: 1\nSCORE LINE\n90.00 80.00\n")):
+            self.assertFalse(self._merge())
+        summary = json.loads((report / "summary.json").read_text())
+        self.assertEqual(2, summary["input_test_count"])
+        self.assertEqual("merged_vdb", summary["scores_from"])
+
+    def test_merge_only_requires_model_and_never_requires_or_renders_report(self):
+        self.options.vcs_urg_format = "none"
+
+        def outputs(*_args, **_kwargs):
+            self._model(self.vcomp.merged_coverage_dir)
+            return SimpleNamespace(returncode=0)
+
+        with mock.patch("lib.simulators.vcs.run_bounded_process", side_effect=outputs) as run:
+            self.assertFalse(self._merge())
+        self.assertEqual(["bash", self.vcomp.coverage_merge_script, "merge"], run.call_args.args[0])
+        self.assertEqual(1, run.call_count)
+        self.assertFalse(Path(self.vcomp.coverage_report_dir).exists())
+        self.assertNotIn("dashboard_parse_duration_s", self.vcomp.coverage_merge_metrics)
+        self.assertIsNone(self.simulator.collect_coverage_data({"//bench:tb": self.vcomp})["tb"]["total"])
+        self.options.vcs_urg_summary_depth = 1
+        with self.assertRaises(ValueError):
+            self.simulator.validate_resolved_options()
+
+    def test_summary_page_escapes_bench_names_and_database_paths(self):
+        self._outputs()
+        self.vcomp.name = "<script>alert(1)</script>"
+        self.vcomp.merged_coverage_dir = "<unsafe path>"
+        self.simulator._write_coverage_summary(self.vcomp, {"Line": "80.00%"})
+        page = (Path(self.vcomp.coverage_report_dir) / "dashboard.html").read_text()
+        self.assertNotIn("<script>", page)
+        self.assertIn("&lt;script&gt;", page)
+        self.assertIn("&lt;unsafe path&gt;", page)
+
+    def test_viewer_is_published_only_after_output_validation_and_removed_after_failed_merge(self):
+        viewer = self.root / "tb__run_coverage.sh"
+        viewer.write_text("stale viewer")
+        with mock.patch("lib.simulators.vcs.run_bounded_process", return_value=SimpleNamespace(returncode=0)):
+            self.assertTrue(self._merge())
+        self.assertFalse(viewer.exists())
+        self.assertIsNone(self.vcomp.coverage_view_script_path)
+        with mock.patch("lib.simulators.vcs.run_bounded_process", side_effect=lambda *_a, **_k: self._outputs()) as run:
+            self.assertFalse(self._merge())
+        self.assertEqual(1, run.call_count)
+        self.assertEqual(str(viewer), self.vcomp.coverage_view_script_path)
+        if os.name == "posix":
+            self.assertTrue(viewer.stat().st_mode & 0o100)
+        self.assertNotIn(b"\r", viewer.read_bytes())
+        with mock.patch("lib.simulators.vcs.run_bounded_process", return_value=SimpleNamespace(returncode=1)):
+            self.assertTrue(self._merge())
+        self.assertFalse(viewer.exists())
+        self.assertIsNone(self.vcomp.coverage_view_script_path)
+
+    def test_viewer_is_invalidated_when_compilation_or_cleanup_blocks_merge(self):
+        for attribute, value in (("jobstatus", JobStatus.FAILED), ("coverage_cleanup_failed", True)):
+            with self.subTest(attribute=attribute):
+                viewer = self.root / "tb__run_coverage.sh"
+                viewer.write_text("stale viewer")
+                setattr(self.vcomp, attribute, value)
+                with mock.patch("lib.simulators.vcs.run_bounded_process") as run:
+                    self.assertTrue(self._merge())
+                run.assert_not_called()
+                self.assertFalse(viewer.exists())
+                delattr(self.vcomp, attribute)
+
+    def test_viewer_creation_failure_is_reported_without_discarding_merged_data(self):
+        with mock.patch("lib.simulators.vcs.run_bounded_process", side_effect=lambda *_a, **_k: self._outputs()), \
+             mock.patch.object(self.simulator, "_write_coverage_viewer", side_effect=OSError("read-only output")):
+            self.assertTrue(self._merge())
+        self.assertFalse(self.vcomp.coverage_merge_succeeded)
+        self.assertIsNone(self.vcomp.coverage_view_script_path)
+        self.assertTrue(Path(self.vcomp.merged_coverage_dir).is_dir())
+
+    def test_viewer_command_override_updates_instructions_without_changing_compile_runner(self):
+        viewer = shlex.join(["env", "NOVAS_HOME=/tools/Verdi ' release", "/tools/Verdi ' release/bin/verdi"])
+        compiler = self.simulator.get_tool_command("vcs")
+        with mock.patch.dict(os.environ, {"RV_VCS_COVERAGE_VIEWER": viewer}):
+            self.simulator.setup_coverage_merge(self.vcomp)
+            self._outputs()
+            self.simulator._write_coverage_summary(self.vcomp, {"Line": "80.00%"})
+            self.assertIn("/tools/Verdi", Path(self.vcomp.coverage_merge_script).read_text())
+            page = (Path(self.vcomp.coverage_report_dir) / "dashboard.html").read_text()
+            self.assertIn("NOVAS_HOME=/tools/Verdi", page)
+            self.assertEqual(compiler, self.simulator.get_tool_command("vcs"))
+
+    def test_viewer_rejects_invalid_command_without_publishing_script(self):
+        self._outputs()
+        for command in ("", "   ", "unterminated '", "verdi\nother", "verdi\rother"):
+            with self.subTest(command=command), mock.patch.dict(os.environ, {"RV_VCS_COVERAGE_VIEWER": command}):
+                with self.assertRaises(ValueError):
+                    self.simulator._write_coverage_viewer(self.vcomp)
+                self.assertFalse((self.root / "tb__run_coverage.sh").exists())
+
+    def _viewer_fixture(self):
+        directory = self.root / "coverage output ' $;()"
+        directory.mkdir()
+        self.rcfg.regression_dir = str(directory)
+        self.vcomp.merged_coverage_dir = str(directory / "merged ' $;().vdb")
+        self.vcomp.coverage_report_dir = str(directory / "report ' $;()")
+        self._outputs()
+        capture = self.root / "viewer.json"
+        runner = self.root / "viewer runner.py"
+        runner.write_text("import json, os, pathlib, sys\n"
+                          "pathlib.Path(sys.argv[1]).write_text(json.dumps({'argv':sys.argv[2:], 'cwd':os.getcwd()}))\n"
+                          "sys.exit(int(os.environ.get('VIEWER_EXIT', '0')))\n")
+        self.options.vcs_runner = shlex.join([sys.executable, str(runner), str(capture), "literal $(touch unwanted)"])
+        with mock.patch.dict(os.environ):
+            os.environ.pop("RV_VCS_COVERAGE_VIEWER", None)
+            self.simulator._write_coverage_viewer(self.vcomp)
+        environment = dict(os.environ)
+        environment.pop("SIMMER_COVERAGE_LAUNCHER", None)
+        environment.pop("VIEWER_EXIT", None)
+        return directory, capture, environment
+
+    @unittest.skipUnless(os.name == "posix", "Generated Bash viewers run on the EDA/Linux host")
+    def test_viewer_captures_reader_override_as_literal_arguments(self):
+        reader = ["env", "NOVAS_HOME=/tools/Verdi ' release", "/tools/Verdi ' $(touch unwanted)/bin/verdi"]
+        directory, capture, environment = self._viewer_fixture()
+        viewer_command = self.options.vcs_runner + " " + shlex.join(reader)
+        self.options.vcs_runner = "invalid-compile-runner-that-must-not-be-called"
+        with mock.patch.dict(os.environ, {"RV_VCS_COVERAGE_VIEWER": viewer_command}):
+            self.simulator._write_coverage_viewer(self.vcomp)
+        environment["RV_VCS_COVERAGE_VIEWER"] = "another reader"
+        completed = subprocess.run([str(directory / "tb__run_coverage.sh")],
+                                   cwd=self.root,
+                                   env=environment,
+                                   capture_output=True,
+                                   text=True)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+        self.assertEqual(["literal $(touch unwanted)"] + reader + ["-cov", "-covdir", self.vcomp.merged_coverage_dir],
+                         json.loads(capture.read_text())["argv"])
+        self.assertFalse((directory / "unwanted").exists())
+
+    @unittest.skipUnless(os.name == "posix", "Generated Bash viewers run on the EDA/Linux host")
+    def test_viewer_executes_literal_arguments_from_another_directory_and_after_relocation(self):
+        directory, capture, environment = self._viewer_fixture()
+        relocated = self.root / "relocated coverage ' $;()"
+        directory.rename(relocated)
+        viewer = relocated / "tb__run_coverage.sh"
+        subprocess.run(["bash", "-n", str(viewer)], check=True, capture_output=True, text=True)
+        completed = subprocess.run([str(viewer), "--verdi", "-pathmap", "source paths.txt"],
+                                   cwd=self.root,
+                                   env=environment,
+                                   capture_output=True,
+                                   text=True)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+        recorded = json.loads(capture.read_text())
+        self.assertEqual([
+            "literal $(touch unwanted)", "verdi", "-cov", "-covdir",
+            str(relocated / "merged ' $;().vdb"), "-pathmap", "source paths.txt"
+        ], recorded["argv"])
+        self.assertEqual(str(relocated), recorded["cwd"])
+        self.assertFalse((relocated / "unwanted").exists())
+        environment["VIEWER_EXIT"] = "7"
+        completed = subprocess.run([str(viewer)], env=environment, capture_output=True, text=True)
+        self.assertEqual(7, completed.returncode)
+
+    @unittest.skipUnless(os.name == "posix", "Generated Bash viewers run on the EDA/Linux host")
+    def test_viewer_preserves_quoted_launcher_arguments_and_rejects_invalid_quoting(self):
+        directory, capture, environment = self._viewer_fixture()
+        prefix_capture = self.root / "launcher.json"
+        launcher = self.root / "launcher script.py"
+        launcher.write_text("import json, os, pathlib, sys\n"
+                            "pathlib.Path(sys.argv[1]).write_text(json.dumps(sys.argv[2:3]))\n"
+                            "os.execvp(sys.argv[3], sys.argv[3:])\n")
+        environment["SIMMER_COVERAGE_LAUNCHER"] = shlex.join(
+            [sys.executable, str(launcher),
+             str(prefix_capture), "queue ' literal $(touch unwanted)"])
+        viewer = directory / "tb__run_coverage.sh"
+        completed = subprocess.run([str(viewer)], cwd=self.root, env=environment, capture_output=True, text=True)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+        self.assertEqual(["queue ' literal $(touch unwanted)"], json.loads(prefix_capture.read_text()))
+        self.assertTrue(capture.exists())
+        self.assertFalse((directory / "unwanted").exists())
+        for invalid in ("unterminated '", "   "):
+            capture.unlink(missing_ok=True)
+            environment["SIMMER_COVERAGE_LAUNCHER"] = invalid
+            completed = subprocess.run([str(viewer)], env=environment, capture_output=True, text=True)
+            self.assertNotEqual(0, completed.returncode)
+            self.assertFalse(capture.exists())
+
+    @unittest.skipUnless(os.name == "posix", "Generated Bash viewers run on the EDA/Linux host")
+    def test_viewer_report_and_help_do_not_launch_verdi_or_regenerate_reports(self):
+        directory, capture, environment = self._viewer_fixture()
+        report = Path(self.vcomp.coverage_report_dir)
+        before = (report / "dashboard.txt").read_bytes()
+        opener = self.root / "xdg-open"
+        opened = self.root / "opened-report.txt"
+        opener.write_text("#!/bin/sh\nprintf '%s' \"$1\" > {}\n".format(shlex.quote(str(opened))))
+        opener.chmod(0o700)
+        environment["PATH"] = str(self.root) + os.pathsep + environment["PATH"]
+        (report / "dashboard.html").write_text("<h1>summary</h1>")
+        viewer = directory / "tb__run_coverage.sh"
+        completed = subprocess.run([str(viewer), "--report"],
+                                   cwd=self.root,
+                                   env=environment,
+                                   capture_output=True,
+                                   text=True)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+        self.assertEqual(str(report / "dashboard.html"), opened.read_text())
+        (report / "dashboard.html").unlink()
+        completed = subprocess.run([str(viewer), "--report"], env=environment, capture_output=True, text=True)
+        self.assertEqual(before.decode(), completed.stdout)
+        self.assertEqual(before, (report / "dashboard.txt").read_bytes())
+        (report / "dashboard.txt").unlink()
+        completed = subprocess.run([str(viewer), "--report"], env=environment, capture_output=True, text=True)
+        self.assertEqual(1, completed.returncode)
+        self.assertIn("No viewable coverage report", completed.stderr)
+        completed = subprocess.run([str(viewer), "--help"], env=environment, capture_output=True, text=True)
+        self.assertEqual(0, completed.returncode)
+        self.assertIn("Usage:", completed.stdout)
+        self.assertFalse(capture.exists())
+
+    @unittest.skipUnless(os.name == "posix", "Generated Bash viewers run on the EDA/Linux host")
+    def test_viewer_checks_database_at_launch_without_invoking_tools(self):
+        directory, capture, environment = self._viewer_fixture()
+        Path(self.vcomp.merged_coverage_dir).rename(directory / "removed.vdb")
+        completed = subprocess.run([str(directory / "tb__run_coverage.sh")],
+                                   env=environment,
+                                   capture_output=True,
+                                   text=True)
+        self.assertEqual(1, completed.returncode)
+        self.assertIn("Merged coverage database is not available", completed.stderr)
+        self.assertFalse(capture.exists())
 
 
 if __name__ == "__main__":

@@ -509,6 +509,7 @@ py_test(
         "//bin:check_test.py",
         "//bin:simmer.py",
         "//bin:templates/rerun_template.sh.j2",
+        "//bin:templates/run_coverage_template.sh.j2",
         "//bin:templates/run_waves_template.sh.j2",
         "//bin:templates/sim_template.sh.j2",
         "//bin:templates/vcs_compile_template.sh.j2",

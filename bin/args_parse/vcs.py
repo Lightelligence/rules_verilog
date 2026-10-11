@@ -72,13 +72,42 @@ def add_vcs_arguments(parser):
                        help=('Pass an existing -cm_hier configuration file to VCS. Requires --vcs-cm; the path is '
                              'validated before Bazel starts and overrides the testbench vcs_cm_hier setting.'))
     add_child_argument(gvcs,
-                       '--vcs-coverage-profile',
+                       '--vcs-coverage-incremental',
                        parent='--vcs-cm',
                        default=False,
                        action='store_true',
-                       help=('Record logical input/merged VDB bytes and scan durations for each coverage merge. '
-                             'URG elapsed time is always logged; byte inventories are opt-in to avoid extra '
-                             'filesystem scans in routine regressions. Requires --vcs-cm.'))
+                       help=('Update this bench\'s previous merged VDB with new passing test datasets only. '
+                             'Requires compatible static coverage models; repeated identical datasets are skipped. '
+                             'Publishes the updated VDB/report after validation and preserves the previous result '
+                             'on failure. The first invocation establishes a baseline. Requires --vcs-cm.'))
+    add_child_argument(gvcs,
+                       '--vcs-coverage-profile',
+                       parent='--vcs-cm',
+                       default=False,
+                       nargs='?',
+                       const='bytes',
+                       choices=['bytes', 'phases'],
+                       help=('Inventory input/merged VDB bytes and scan time (default: bytes). Select phases '
+                             'to also time merge-only/report-only URG invocations. Report timing includes '
+                             'loading and aggregation. Routine runs use one URG invocation; phases adds '
+                             'startup and database loading overhead. Requires --vcs-cm.'))
+    add_child_argument(gvcs,
+                       '--vcs-urg-format',
+                       parent='--vcs-cm',
+                       choices=['summary', 'none', 'text', 'both'],
+                       default=None,
+                       help=('Coverage output: summary (default) writes the merged VDB and a small text summary '
+                             'in one URG call, then writes one HTML dashboard; none only writes the merged VDB. '
+                             'Explicit text/both request full URG text/text+HTML reports. Requires --vcs-cm; '
+                             'does not change compile or simulation coverage.'))
+    add_child_argument(gvcs,
+                       '--vcs-urg-summary-depth',
+                       parent='--vcs-cm',
+                       type=int,
+                       default=None,
+                       help=('Generate summary reports to this positive hierarchy depth with -show summary N. '
+                             'Defaults to 1 for summary output. For explicit text/both, omitting this option '
+                             'generates full reports. Requires --vcs-cm; incompatible with format none.'))
     add_child_argument(gvcs,
                        '--vcs-urg-parallel',
                        parent='--vcs-cm',
