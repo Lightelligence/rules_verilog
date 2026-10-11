@@ -913,9 +913,12 @@ loading and aggregation, so its phase times cannot be added or subtracted to
 derive internal phases of a normal combined URG run. Compare normal end-to-end
 runs when assessing speedup.
 
-Profiling also inventories input and merged VDB logical bytes, recording each
-scan's time separately. Scans are
-opt-in because they can be expensive on shared filesystems. For example:
+Profiling also inventories input and merged VDB logical bytes, following
+partition VDB links and counting each distinct regular file once. These are
+reachable file sizes, not allocated disk space. Each scan's time is recorded
+separately; unreadable or broken links make the inventory unavailable without
+failing coverage collection. Scans are opt-in because they can be expensive on
+shared filesystems. For example:
 
 ```bash
 simmer -t 'sys_tb:*@10' --simulator VCS --vcs-cm line+cond+tgl \

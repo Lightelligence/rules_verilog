@@ -788,21 +788,42 @@ class VcsSimulator(SimulatorInterface):
         """Opt-in logical byte inventory; diagnostics must not invalidate a merge."""
         started = time.perf_counter()
         size = None
+
+        def identity(path, metadata):
+            # Windows DirEntry.stat can omit inode numbers. Obtain the real
+            # identity there without adding stat calls on the EDA filesystem.
+            if not metadata.st_ino:
+                metadata = os.stat(path)
+            return ((metadata.st_dev, metadata.st_ino) if metadata.st_ino else os.path.normcase(os.path.realpath(path)))
+
         try:
-            if path and os.path.isdir(path):
+            metadata = os.stat(path) if path else None
+            if metadata and stat.S_ISDIR(metadata.st_mode):
                 size = 0
-
-                def scan_error(exc):
-                    raise exc
-
-                for directory, _subdirs, files in os.walk(path, onerror=scan_error):
-                    for filename in files:
-                        filename = os.path.join(directory, filename)
-                        if not os.path.islink(filename):
-                            size += os.path.getsize(filename)
+                pending = [(path, metadata)]
+                directories, files = set(), set()
+                while pending:
+                    directory, metadata = pending.pop()
+                    directory_id = identity(directory, metadata)
+                    if directory_id in directories:
+                        continue
+                    directories.add(directory_id)
+                    with os.scandir(directory) as entries:
+                        for entry in entries:
+                            metadata = entry.stat(follow_symlinks=True)
+                            if stat.S_ISDIR(metadata.st_mode):
+                                # Partition compilation links its VDB models
+                                # into the work VDB. Follow them once, including
+                                # aliases and cycles, without another stat.
+                                pending.append((entry.path, metadata))
+                            elif stat.S_ISREG(metadata.st_mode):
+                                file_id = identity(entry.path, metadata)
+                                if file_id not in files:
+                                    files.add(file_id)
+                                    size += metadata.st_size
         except OSError as exc:
             size = None
-            log.warning("Could not inventory VCS coverage %s at %s: %s", metric, path, exc)
+            log.info("Could not inventory VCS coverage %s at %s: %s", metric, path, exc)
         vcomp_job.coverage_merge_metrics[metric] = size
         vcomp_job.coverage_merge_metrics[metric + "_scan_s"] = time.perf_counter() - started
         log.info("VCS coverage %s for %s: %s (scan %.3fs)", metric, getattr(vcomp_job, "name", vcomp_job),

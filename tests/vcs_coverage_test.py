@@ -304,10 +304,55 @@ class VcsCoverageTest(unittest.TestCase):
         self.assertNotIn("urg_merge_duration_s", metrics)
 
     def test_byte_inventory_failure_does_not_invalidate_valid_merge(self):
+        self._model(self.vcomp.cov_work_dir)
+        self.options.vcs_coverage_profile = True
+        logger = CmnLogger("vcs-coverage-inventory-failure")
+        scandir = os.scandir
+
+        def scan(path):
+            if os.fspath(path) == self.vcomp.cov_work_dir:
+                raise PermissionError("inventory denied")
+            return scandir(path)
+
+        with mock.patch("lib.simulators.vcs.os.scandir", side_effect=scan), \
+             mock.patch("lib.simulators.vcs.log", logger), \
+             mock.patch("lib.simulators.vcs.run_bounded_process", side_effect=lambda *_a, **_k: self._outputs()):
+            self.assertFalse(self._merge())
+            logger.exit_if_warnings_or_errors("Optional inventory failed the regression")
+        self.assertIsNone(self.vcomp.coverage_merge_metrics["input_db_bytes"])
+        self.assertTrue(self.vcomp.coverage_merge_succeeded)
+
+    def _link(self, link, target, directory=True):
+        try:
+            link.symlink_to(target, target_is_directory=directory)
+        except OSError as exc:
+            if getattr(exc, "winerror", None) == 1314:
+                self.skipTest("Windows symlink privilege is unavailable")
+            raise
+
+    def test_byte_inventory_counts_linked_partition_models_and_file_aliases_once(self):
+        self.vcomp.coverage_merge_metrics = {}
+        model = self._model(self.vcomp.cov_work_dir)
+        partition_model = self._model(self.root / "partition.vdb")
+        partitions = Path(self.vcomp.cov_work_dir) / "partitionlib"
+        partitions.mkdir()
+        self._link(partitions / "partition.vdb", partition_model.parents[4])
+        self._link(partitions / "partition-alias.vdb", partition_model.parents[4])
+        self._link(partitions / "model-alias.xml", partition_model, directory=False)
+        os.link(partition_model, partitions / "model-hardlink.xml")
+        self._link(partition_model.parents[4] / "cycle", Path(self.vcomp.cov_work_dir))
+        self.simulator._record_coverage_size(self.vcomp, "input_db_bytes", self.vcomp.cov_work_dir)
+        self.assertEqual(model.stat().st_size + partition_model.stat().st_size,
+                         self.vcomp.coverage_merge_metrics["input_db_bytes"])
+
+    def test_byte_inventory_broken_partition_link_is_unavailable_without_failing_regression(self):
         self.vcomp.coverage_merge_metrics = {}
         self._model(self.vcomp.cov_work_dir)
-        with mock.patch("os.walk", side_effect=PermissionError("inventory denied")):
+        self._link(Path(self.vcomp.cov_work_dir) / "missing.vdb", self.root / "missing.vdb")
+        logger = CmnLogger("vcs-coverage-broken-partition")
+        with mock.patch("lib.simulators.vcs.log", logger):
             self.simulator._record_coverage_size(self.vcomp, "input_db_bytes", self.vcomp.cov_work_dir)
+            logger.exit_if_warnings_or_errors("Optional inventory failed the regression")
         self.assertIsNone(self.vcomp.coverage_merge_metrics["input_db_bytes"])
 
     def test_report_keys_follow_actual_slash_and_analog_job_names(self):
