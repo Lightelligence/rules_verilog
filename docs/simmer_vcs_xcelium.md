@@ -879,16 +879,33 @@ rule-provided coverage paths remain relative to the Bazel runfiles directory.
 
 VCS `--vcs-cm` writes one `.vdb` per vcomp and generates
 `<vcomp>_vcs_cov_merge.sh`. The same configured VCS runner is used for `urg`
-and Verdi. By default URG requests `-format both`, producing the text dashboard
-and HTML report. Use `--vcs-urg-format text` to omit HTML while retaining the
-dashboard used by simmer. `--vcs-urg-format both` explicitly selects the default.
-Both formats otherwise generate detailed reports. For routine regression summaries,
-use `--vcs-urg-summary-depth 1` to request `-show summary 1`: keep summary scores
-and test counts while omitting detailed object pages and limiting the displayed
-hierarchy depth. This does not exclude design objects from coverage calculations
-and does not change compilation or simulation instrumentation. Omit the option
-when detailed reports are needed. Combine it with `--vcs-urg-format text` to avoid
-HTML output as well.
+and Verdi. Individual simulation datasets have unique `-cm_name` directories
+under the shared VDB's `testdata`; they reuse the static design model instead
+of copying it for every case.
+
+The default `--vcs-urg-format summary` uses one URG invocation with `-dbname`,
+`-format text` and `-show summary 1`. It writes the final
+`<vcomp>__MERGED_COV.vdb` and small text summaries, without generating URG HTML
+object pages. Simmer then writes one self-contained `dashboard.html` and
+`summary.json` in `<vcomp>__vcs_cov_report`. The JSON records the coverage
+scores, original input-test identities/count and database paths. Existing
+regression reports consume the same text dashboard. The hierarchy depth limits
+displayed detail, not coverage calculations or instrumentation.
+
+Use `--vcs-urg-format none` for merge-only (`-noreport`) when only the final
+VDB is needed. No report is generated and simmer displays coverage as N/A.
+Detailed analysis uses the merged VDB directly:
+
+```bash
+verdi -cov -covdir '<vcomp>__MERGED_COV.vdb'
+```
+
+Full URG reports require an explicit request: `--vcs-urg-format text` generates
+full text reports and `--vcs-urg-format both` generates full text and HTML
+reports, which can contain many interlinked files. `--vcs-urg-summary-depth N`
+limits these reports to summary files. Summary output defaults to depth 1;
+merge-only output rejects this option. All these choices affect postprocessing
+only, so they do not require recompiling or rerunning completed simulations.
 
 URG stdout and stderr are streamed to `<vcomp>_vcs_cov_merge.log`, including output
 before cancellation or timeout. Failures print at most the final 64 KiB and link
@@ -919,14 +936,16 @@ Cleanup here means the old merged VDB/report, not per-test failure cleanup.
 
 With `--vcs-cm` enabled, `--vcs-coverage-profile phases` runs URG merge-only
 (`-noreport`, writing the merged VDB) and report-only (without `-dbname`)
-as separate processes and records each wall time. Both read the original VDB:
-reporting from a merged VDB would coalesce the original test identities and
-change the report's test count. Report time therefore includes loading and
-in-memory aggregation as well as rendering; it is not pure report file I/O.
-Both times include tool/runner startup. This diagnostic mode repeats database
-loading and aggregation, so its phase times cannot be added or subtracted to
-derive internal phases of a normal combined URG run. Compare normal end-to-end
-runs when assessing speedup.
+as separate processes and records each wall time. Full text/both reporting
+reads the original VDB to preserve the original test identities. Lightweight
+summary reporting instead reads the final merged VDB. URG normally coalesces
+these datasets into one merged test; `summary.json` and the HTML dashboard keep
+the original contributing-test count separately. That count records input
+datasets, not regression pass status. Report time includes loading and rendering;
+full reports also repeat in-memory aggregation. Both times include tool/runner
+startup. Diagnostic phase times cannot be added or subtracted to derive internal
+phases of the normal combined run. Compare normal end-to-end runs when assessing
+speedup. Merge-only output executes and times only the merge phase.
 
 Profiling also inventories input and merged VDB logical bytes, following
 partition VDB links and counting each distinct regular file once. These are
@@ -944,7 +963,7 @@ The existing `--vcs-coverage-profile` spelling (or explicit `bytes`) only adds
 byte inventories and keeps the normal single URG invocation.
 
 The generated script accepts `merge` or `report` to rerun an individual phase;
-without an argument it performs the normal combined merge/report. Run it only
+without an argument it performs the selected merge/report output. Run it only
 on a completed database using the same licensed compute environment.
 
 For a performance comparison, snapshot the same completed VDB and use fresh

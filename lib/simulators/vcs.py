@@ -1,6 +1,7 @@
 # lib/simulators/vcs.py
 import json
 import hashlib
+import html
 import os
 import stat
 import logging
@@ -645,6 +646,10 @@ class VcsSimulator(SimulatorInterface):
         merged_db_path = os.path.join(self.rcfg.regression_dir, "{}__MERGED_COV.vdb".format(vcomp_job.name))
         report_dir = os.path.join(self.rcfg.regression_dir, "{}__vcs_cov_report".format(vcomp_job.name))
         cov_db_path = vcomp_job.cov_work_dir
+        report_format = getattr(self.options, "vcs_urg_format", None) or "summary"
+        summary_depth = getattr(self.options, "vcs_urg_summary_depth", None)
+        if summary_depth is None and report_format == "summary":
+            summary_depth = 1
         merge_template = self.env.get_template('vcs_cov_merge_template.sh.j2')
 
         with open(merge_sh, 'w') as filep:
@@ -656,8 +661,8 @@ class VcsSimulator(SimulatorInterface):
                     urg_command=self.get_tool_command("urg"),
                     urg_parallel=self.options.vcs_urg_parallel,
                     urg_show_tests=self.options.vcs_urg_show_tests,
-                    urg_format=getattr(self.options, "vcs_urg_format", None) or "both",
-                    urg_summary_depth=getattr(self.options, "vcs_urg_summary_depth", None),
+                    urg_format=report_format,
+                    urg_summary_depth=summary_depth,
                     verdi_command=self.get_tool_command("verdi"),
                 ))
         st = os.stat(merge_sh)
@@ -699,6 +704,7 @@ class VcsSimulator(SimulatorInterface):
                             if output_dir and os.path.isdir(output_dir):
                                 shutil.rmtree(output_dir)
                     profile = getattr(self.options, "vcs_coverage_profile", False)
+                    report_format = getattr(self.options, "vcs_urg_format", None) or "summary"
                     if profile:
                         self._record_coverage_size(vcomp_job, "input_db_bytes",
                                                    getattr(vcomp_job, "cov_work_dir", None))
@@ -710,8 +716,9 @@ class VcsSimulator(SimulatorInterface):
                     # and large reports do not accumulate console output in RAM.
                     with self._coverage_phase(vcomp_job, "urg_duration_s"), open(merge_log, "w",
                                                                                  encoding="utf-8") as output:
-                        if profile == "phases":
-                            for phase in ("merge", "report"):
+                        if profile == "phases" or report_format == "none":
+                            phases = ("merge", ) if report_format == "none" else ("merge", "report")
+                            for phase in phases:
                                 output.write("=== URG {} ===\n".format(phase))
                                 output.flush()
                                 with self._coverage_phase(vcomp_job, "urg_{}_duration_s".format(phase)):
@@ -721,6 +728,8 @@ class VcsSimulator(SimulatorInterface):
                                                                  text=True)
                                 if result.returncode != 0:
                                     break
+                                if phase == "merge":
+                                    self._validate_coverage_model(getattr(vcomp_job, "merged_coverage_dir", None))
                         else:
                             result = run_bounded_process(["bash", merge_script],
                                                          stdout=output,
@@ -729,10 +738,16 @@ class VcsSimulator(SimulatorInterface):
                     if result.returncode == 0:
                         with self._coverage_phase(vcomp_job, "model_validation_duration_s"):
                             self._validate_coverage_model(getattr(vcomp_job, "merged_coverage_dir", None))
-                        with self._coverage_phase(vcomp_job, "dashboard_parse_duration_s"):
-                            report_dir = getattr(vcomp_job, "coverage_report_dir", None)
-                            if not report_dir or not parse_coverage_summary(os.path.join(report_dir, "dashboard.txt")):
-                                raise OSError("VCS coverage merge did not produce a complete dashboard.txt summary")
+                        if report_format != "none":
+                            with self._coverage_phase(vcomp_job, "dashboard_parse_duration_s"):
+                                report_dir = getattr(vcomp_job, "coverage_report_dir", None)
+                                metrics = parse_coverage_summary(os.path.join(report_dir,
+                                                                              "dashboard.txt")) if report_dir else {}
+                                if not metrics:
+                                    raise OSError("VCS coverage merge did not produce a complete dashboard.txt summary")
+                            if report_format == "summary":
+                                with self._coverage_phase(vcomp_job, "summary_write_duration_s"):
+                                    self._write_coverage_summary(vcomp_job, metrics)
                         if profile:
                             self._record_coverage_size(vcomp_job, "merged_db_bytes", vcomp_job.merged_coverage_dir)
             except (OSError, subprocess.TimeoutExpired) as exc:
@@ -747,6 +762,55 @@ class VcsSimulator(SimulatorInterface):
             else:
                 vcomp_job.coverage_merge_succeeded = True
         return failed
+
+    def _write_coverage_summary(self, job, metrics):
+        """Keep one HTML page and source-test provenance beside the final VDB."""
+        testdata = os.path.join(job.cov_work_dir, "snps", "coverage", "db", "testdata")
+        tests = None
+        if os.path.isdir(testdata):
+            with os.scandir(testdata) as entries:
+                tests = sorted(entry.name for entry in entries if entry.is_dir(follow_symlinks=False))
+        summary = {
+            "bench":
+            job.name,
+            "metrics":
+            metrics,
+            "input_vdb":
+            job.cov_work_dir,
+            "merged_vdb":
+            job.merged_coverage_dir,
+            "input_test_count":
+            len(tests) if tests is not None else None,
+            "input_tests":
+            tests,
+            "scores_from":
+            "merged_vdb" if getattr(self.options, "vcs_coverage_profile", False) == "phases" else "input_tests",
+        }
+        with open(os.path.join(job.coverage_report_dir, "summary.json"), "w", encoding="utf-8") as output:
+            json.dump(summary, output, indent=2)
+            output.write("\n")
+        rows = "".join("<tr><th>{}</th><td>{}</td></tr>".format(html.escape(metric), html.escape(value))
+                       for metric, value in metrics.items())
+        command = "{} -cov -covdir {}".format(self.get_tool_command("verdi"), shlex.quote(job.merged_coverage_dir))
+        contents = """<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{name} coverage summary</title>
+<style>body{{font:16px system-ui,sans-serif;max-width:800px;margin:40px auto;padding:0 20px;color:#17212b}}
+table{{border-collapse:collapse;width:100%}}th,td{{text-align:left;padding:10px;border-bottom:1px solid #ddd}}
+pre{{white-space:pre-wrap;overflow-wrap:anywhere;background:#f3f5f7;padding:16px}}p{{line-height:1.6}}</style>
+<h1>{name} coverage summary</h1>
+<p>Contributing test datasets: <strong>{count}</strong>. Scores below summarize their combined coverage.
+URG may represent these datasets as one merged test. This page does not establish regression pass status.</p>
+<table><caption>Coverage scores</caption>{rows}</table>
+<h2>Analyze the merged database</h2><pre>{command}</pre>
+<p>Original test identities and database paths are recorded in summary.json. Use Verdi for coverage holes,
+source annotation and hierarchy details.</p></html>
+""".format(name=html.escape(str(job.name)),
+           count=len(tests) if tests is not None else "N/A",
+           rows=rows,
+           command=html.escape(command))
+        with open(os.path.join(job.coverage_report_dir, "dashboard.html"), "w", encoding="utf-8") as output:
+            output.write(contents)
 
     @staticmethod
     def _coverage_log_tail(path, limit=65536):
@@ -855,7 +919,7 @@ class VcsSimulator(SimulatorInterface):
                  size if size is not None else "N/A", vcomp_job.coverage_merge_metrics[metric + "_scan_s"])
 
     def collect_coverage_data(self, vcomp_jobs):
-        if not self.options.cm:
+        if not self.options.cm or getattr(self.options, "vcs_urg_format", None) == "none":
             return {
                 getattr(job, "name",
                         vcomp.split(":")[-1]): aggregate_coverage_metrics({})

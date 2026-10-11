@@ -1,4 +1,5 @@
 import os
+import json
 import shlex
 import subprocess
 import sys
@@ -27,7 +28,8 @@ class VcsCoverageTest(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
-        self.options = parse_args(["--simulator", "VCS", "--vcs-cm", "line", "--no-vcs-partcomp"])
+        self.options = parse_args(
+            ["--simulator", "VCS", "--vcs-cm", "line", "--no-vcs-partcomp", "--vcs-urg-format", "both"])
         self.rcfg = SimpleNamespace(options=self.options,
                                     regression_dir=str(self.root),
                                     proj_dir=str(self.root),
@@ -238,7 +240,7 @@ class VcsCoverageTest(unittest.TestCase):
         self.assertEqual("80.00%", coverage["tb"]["cc"]["Overall"])
         self.assertGreaterEqual(self.vcomp.coverage_merge_metrics["urg_duration_s"], 0)
 
-    def test_default_times_cleanup_validation_parse_and_total_with_one_urg_call(self):
+    def test_full_report_times_cleanup_validation_parse_and_total_with_one_urg_call(self):
         with mock.patch("lib.simulators.vcs.run_bounded_process", side_effect=lambda *_a, **_k: self._outputs()) as run:
             self.assertFalse(self._merge())
         self.assertEqual(["bash", self.vcomp.coverage_merge_script], run.call_args.args[0])
@@ -439,12 +441,12 @@ class VcsCoverageTest(unittest.TestCase):
 
     def test_report_format_requires_coverage_and_is_vcs_only(self):
         for arguments in (["--simulator", "VCS"], ["--simulator", "XRUN"]):
-            for report_format in ("text", "both"):
+            for report_format in ("summary", "none", "text", "both"):
                 with self.subTest(arguments=arguments, report_format=report_format), self.assertRaises(ValueError):
                     options = parse_args(arguments + ["--vcs-urg-format", report_format])
                     backend = VcsSimulator if options.simulator == "VCS" else simmer.XceliumSimulator
                     backend(options, self.rcfg, None).validate_resolved_options()
-        for report_format in ("text", "both"):
+        for report_format in ("summary", "none", "text", "both"):
             options = parse_args(["--simulator", "VCS", "--vcs-cm", "line", "--vcs-urg-format", report_format])
             VcsSimulator(options, self.rcfg, None).validate_resolved_options()
             self.assertEqual(report_format, options.vcs_urg_format)
@@ -475,6 +477,69 @@ class VcsCoverageTest(unittest.TestCase):
         script = Path(self.vcomp.coverage_merge_script).read_text()
         self.assertEqual(2, script.count("-show summary 1"))
         self.assertIn("merge) merge_coverage -noreport ;;", script)
+
+    def test_default_summary_writes_one_html_and_vdb_in_one_call_with_original_test_count(self):
+        self.options.vcs_urg_format = None
+        self.simulator.env = jinja2.Environment(loader=jinja2.FileSystemLoader(REPO_ROOT / "bin/templates"),
+                                                undefined=jinja2.StrictUndefined)
+        self.simulator.env.filters['shell_quote'] = shlex.quote
+        self.simulator.setup_coverage_merge(self.vcomp)
+        script = Path(self.vcomp.coverage_merge_script).read_text()
+        self.assertIn("merge_coverage -noreport", script)
+        self.assertIn("-dir {} -format text".format(shlex.quote(self.vcomp.merged_coverage_dir)), script)
+        self.assertNotIn("-format both", script)
+        for name in ("first", "second"):
+            (Path(self.vcomp.cov_work_dir) / "snps/coverage/db/testdata" / name).mkdir(parents=True)
+        with mock.patch(
+                "lib.simulators.vcs.run_bounded_process",
+                side_effect=lambda *_a, **_k: self._outputs("Number of tests: 2\nSCORE LINE\n90.00 80.00\n")) as run:
+            self.assertFalse(self._merge())
+        self.assertEqual(1, run.call_count)
+        self.assertEqual(["bash", self.vcomp.coverage_merge_script], run.call_args.args[0])
+        report = Path(self.vcomp.coverage_report_dir)
+        self.assertEqual([report / "dashboard.html"], list(report.rglob("*.html")))
+        summary = json.loads((report / "summary.json").read_text())
+        self.assertEqual(2, summary["input_test_count"])
+        self.assertEqual(["first", "second"], summary["input_tests"])
+        self.assertEqual("input_tests", summary["scores_from"])
+        self.assertEqual("80.00%", summary["metrics"]["Line"])
+        self.assertIn("<strong>2</strong>", (report / "dashboard.html").read_text())
+        self.assertNotIn("urg_report_duration_s", self.vcomp.coverage_merge_metrics)
+        self.options.vcs_coverage_profile = "phases"
+        with mock.patch("lib.simulators.vcs.run_bounded_process",
+                        side_effect=lambda *_a, **_k: self._outputs("Number of tests: 1\nSCORE LINE\n90.00 80.00\n")):
+            self.assertFalse(self._merge())
+        summary = json.loads((report / "summary.json").read_text())
+        self.assertEqual(2, summary["input_test_count"])
+        self.assertEqual("merged_vdb", summary["scores_from"])
+
+    def test_merge_only_requires_model_and_never_requires_or_renders_report(self):
+        self.options.vcs_urg_format = "none"
+
+        def outputs(*_args, **_kwargs):
+            self._model(self.vcomp.merged_coverage_dir)
+            return SimpleNamespace(returncode=0)
+
+        with mock.patch("lib.simulators.vcs.run_bounded_process", side_effect=outputs) as run:
+            self.assertFalse(self._merge())
+        self.assertEqual(["bash", self.vcomp.coverage_merge_script, "merge"], run.call_args.args[0])
+        self.assertEqual(1, run.call_count)
+        self.assertFalse(Path(self.vcomp.coverage_report_dir).exists())
+        self.assertNotIn("dashboard_parse_duration_s", self.vcomp.coverage_merge_metrics)
+        self.assertIsNone(self.simulator.collect_coverage_data({"//bench:tb": self.vcomp})["tb"]["total"])
+        self.options.vcs_urg_summary_depth = 1
+        with self.assertRaises(ValueError):
+            self.simulator.validate_resolved_options()
+
+    def test_summary_page_escapes_bench_names_and_database_paths(self):
+        self._outputs()
+        self.vcomp.name = "<script>alert(1)</script>"
+        self.vcomp.merged_coverage_dir = "<unsafe path>"
+        self.simulator._write_coverage_summary(self.vcomp, {"Line": "80.00%"})
+        page = (Path(self.vcomp.coverage_report_dir) / "dashboard.html").read_text()
+        self.assertNotIn("<script>", page)
+        self.assertIn("&lt;script&gt;", page)
+        self.assertIn("&lt;unsafe path&gt;", page)
 
 
 if __name__ == "__main__":

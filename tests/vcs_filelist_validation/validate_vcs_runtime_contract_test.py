@@ -3417,7 +3417,7 @@ exit 0
         self.assertRegex(warning, r"\*W,DEAPF")
 
     def test_vcs_report_runs_generated_coverage_merge_script(self):
-        options = parse_args(["-t", "unit:test", "--simulator", "VCS", "--cm", "line"])
+        options = parse_args(["-t", "unit:test", "--simulator", "VCS", "--cm", "line", "--vcs-urg-format", "both"])
         simulator = VcsSimulator(options, DummyRegressionConfig(), None)
         root = Path(tempfile.mkdtemp(prefix="vcs merge outputs "))
         self.addCleanup(shutil.rmtree, root, ignore_errors=True)
@@ -3441,11 +3441,11 @@ exit 0
         with mock.patch("lib.simulators.vcs.run_bounded_process", side_effect=write_merged_outputs) as run:
             self.assertFalse(simulator.run_report_coverage_merge({"//unit:tb": vcomp}))
 
-        run.assert_called_once_with(
-            ["bash", vcomp.coverage_merge_script],
-            capture_output=True,
-            text=True,
-        )
+        self.assertEqual(1, run.call_count)
+        self.assertEqual(["bash", vcomp.coverage_merge_script], run.call_args.args[0])
+        self.assertEqual(vcomp.coverage_merge_log, run.call_args.kwargs["stdout"].name)
+        self.assertEqual(subprocess.STDOUT, run.call_args.kwargs["stderr"])
+        self.assertNotIn("capture_output", run.call_args.kwargs)
         self.assertTrue(vcomp.coverage_merge_succeeded)
 
     def test_vcs_failed_coverage_merge_is_reported(self):

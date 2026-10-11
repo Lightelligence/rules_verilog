@@ -80,24 +80,25 @@ def add_vcs_arguments(parser):
                        choices=['bytes', 'phases'],
                        help=('Inventory input/merged VDB bytes and scan time (default: bytes). Select phases '
                              'to also time merge-only/report-only URG invocations. Report timing includes '
-                             'loading and aggregating the original VDB to preserve test counts. This adds '
-                             'startup and repeated aggregation overhead. Routine runs '
-                             'keep one invocation and log combined URG time. Requires --vcs-cm.'))
+                             'loading and aggregation. Routine runs use one URG invocation; phases adds '
+                             'startup and database loading overhead. Requires --vcs-cm.'))
     add_child_argument(gvcs,
                        '--vcs-urg-format',
                        parent='--vcs-cm',
-                       choices=['text', 'both'],
+                       choices=['summary', 'none', 'text', 'both'],
                        default=None,
-                       help=('Select URG report output: text without HTML, both for text and HTML '
-                             '(default). Requires --vcs-cm; does not change compile or simulation coverage.'))
+                       help=('Coverage output: summary (default) writes the merged VDB and a small text summary '
+                             'in one URG call, then writes one HTML dashboard; none only writes the merged VDB. '
+                             'Explicit text/both request full URG text/text+HTML reports. Requires --vcs-cm; '
+                             'does not change compile or simulation coverage.'))
     add_child_argument(gvcs,
                        '--vcs-urg-summary-depth',
                        parent='--vcs-cm',
                        type=int,
                        default=None,
                        help=('Generate summary reports to this positive hierarchy depth with -show summary N. '
-                             'Omits detailed object pages while retaining coverage scores and test counts. '
-                             'Omit this option for full reports. Requires --vcs-cm.'))
+                             'Defaults to 1 for summary output. For explicit text/both, omitting this option '
+                             'generates full reports. Requires --vcs-cm; incompatible with format none.'))
     add_child_argument(gvcs,
                        '--vcs-urg-parallel',
                        parent='--vcs-cm',

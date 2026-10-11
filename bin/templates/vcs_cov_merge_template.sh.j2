@@ -15,11 +15,26 @@ merge_coverage() {
   "$@"
 }
 
-# Default to one combined invocation. Profiling invokes the two phases separately.
+# Routine coverage writes the final VDB and a small text summary in one call.
+# Full URG object reports require an explicit text/both selection.
 case "${1:-all}" in
+{% if urg_format == 'none' %}
+  all)
+    merge_coverage -noreport
+    ;;
+{% elif urg_format == 'summary' %}
+  all) merge_coverage -format text -report {{ report_dir|shell_quote }} -show summary {{ urg_summary_depth|string|shell_quote }} ;;
+{% else %}
   all) merge_coverage -format {{ urg_format|shell_quote }} -report {{ report_dir|shell_quote }}{% if urg_summary_depth|default(none) is not none %} -show summary {{ urg_summary_depth|string|shell_quote }}{% endif %} ;;
+{% endif %}
   merge) merge_coverage -noreport ;;
   report)
+{% if urg_format == 'none' %}
+    printf '%s\n' 'Report disabled; use the merged VDB in Verdi.'
+{% elif urg_format == 'summary' %}
+    {{ urg_command }} -full64 -dir {{ merged_db_path|shell_quote }} -format text \
+      -report {{ report_dir|shell_quote }} -show summary {{ urg_summary_depth|string|shell_quote }}
+{% else %}
     # Report from the original tests; a merged VDB coalesces their identities.
     {{ urg_command }} -full64 -dir {{ cov_db_path|shell_quote }} -flex_merge union \
 {% if urg_parallel -%}
@@ -29,6 +44,7 @@ case "${1:-all}" in
       -show tests \
 {% endif -%}
       -format {{ urg_format|shell_quote }} -report {{ report_dir|shell_quote }}{% if urg_summary_depth|default(none) is not none %} -show summary {{ urg_summary_depth|string|shell_quote }}{% endif %}
+{% endif %}
     ;;
   *) printf 'Unknown coverage phase: %s\n' "$1" >&2; exit 2 ;;
 esac
