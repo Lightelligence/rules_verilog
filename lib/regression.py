@@ -582,9 +582,13 @@ class RegressionConfig():
         return True
 
     def _should_use_cached_discovery(self):
+        self._discovery_refresh_manifest = None
         if not os.path.exists(self._discovery_cache_path()) and not self._have_legacy_discovery_cache():
             return False
         current_manifest = self._discovery_dependency_manifest()
+        # A rejected cache check already provides the pre-discovery snapshot.
+        # Reuse it once, then still rescan every dependency after Bazel runs.
+        self._discovery_refresh_manifest = current_manifest
         if not current_manifest["cacheable"]:
             self._report_discovery_cache_disabled(current_manifest)
             return False
@@ -601,6 +605,7 @@ class RegressionConfig():
             return False
 
         self._cached_discovery = (all_vcomp, tests_to_tags, tests_to_simulator)
+        self._discovery_refresh_manifest = None
         self.log.info("Using cached test discovery")
         return True
 
@@ -720,8 +725,11 @@ class RegressionConfig():
         return chunks
 
     def test_discovery_all(self):
+        manifest_before = getattr(self, "_discovery_refresh_manifest", None)
+        self._discovery_refresh_manifest = None
         for attempt in range(DISCOVERY_MAX_SOURCE_RETRIES + 1):
-            manifest_before = self._discovery_dependency_manifest()
+            if attempt or manifest_before is None:
+                manifest_before = self._discovery_dependency_manifest()
             self._discover_test_metadata()
             manifest_after = self._discovery_dependency_manifest()
             if manifest_before == manifest_after:
