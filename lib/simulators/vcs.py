@@ -663,7 +663,7 @@ class VcsSimulator(SimulatorInterface):
                     urg_show_tests=self.options.vcs_urg_show_tests,
                     urg_format=report_format,
                     urg_summary_depth=summary_depth,
-                    verdi_command=self.get_tool_command("verdi"),
+                    verdi_command=shlex.join(self._coverage_viewer_argv()),
                 ))
         st = os.stat(merge_sh)
         os.chmod(merge_sh, st.st_mode | stat.S_IEXEC)
@@ -788,6 +788,16 @@ class VcsSimulator(SimulatorInterface):
                     vcomp_job.coverage_view_script_path, vcomp_job.coverage_view_script_path))
         return failed
 
+    def _coverage_viewer_argv(self):
+        """Allow a coverage reader release independent of the VCS compiler."""
+        command = os.environ.get("RV_VCS_COVERAGE_VIEWER", "verdi")
+        if "\n" in command or "\r" in command:
+            raise ValueError("RV_VCS_COVERAGE_VIEWER cannot contain newlines")
+        argv = shlex.split(command)
+        if not argv:
+            raise ValueError("RV_VCS_COVERAGE_VIEWER cannot be empty")
+        return shlex.split(self.get_tool_runner()) + argv
+
     def _coverage_viewer_path(self, job):
         return os.path.join(self.rcfg.regression_dir, "{}__run_coverage.sh".format(job.name))
 
@@ -798,7 +808,7 @@ class VcsSimulator(SimulatorInterface):
         contents = template.render(
             merged_db_relative=os.path.relpath(job.merged_coverage_dir, directory),
             report_dir_relative=os.path.relpath(job.coverage_report_dir, directory),
-            viewer_argv=shlex.split(self.get_tool_runner()) + ["verdi"],
+            viewer_argv=self._coverage_viewer_argv(),
         )
         temporary = None
         try:
@@ -845,7 +855,8 @@ class VcsSimulator(SimulatorInterface):
             output.write("\n")
         rows = "".join("<tr><th>{}</th><td>{}</td></tr>".format(html.escape(metric), html.escape(value))
                        for metric, value in metrics.items())
-        command = "{} -cov -covdir {}".format(self.get_tool_command("verdi"), shlex.quote(job.merged_coverage_dir))
+        command = "{} -cov -covdir {}".format(shlex.join(self._coverage_viewer_argv()),
+                                              shlex.quote(job.merged_coverage_dir))
         viewer = shlex.quote(os.path.abspath(self._coverage_viewer_path(job)))
         contents = """<!doctype html>
 <html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">

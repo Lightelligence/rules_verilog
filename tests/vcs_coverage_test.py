@@ -589,7 +589,27 @@ class VcsCoverageTest(unittest.TestCase):
         self.assertIsNone(self.vcomp.coverage_view_script_path)
         self.assertTrue(Path(self.vcomp.merged_coverage_dir).is_dir())
 
-    def _viewer_fixture(self):
+    def test_viewer_command_override_updates_instructions_without_changing_compile_runner(self):
+        viewer = shlex.join(["env", "NOVAS_HOME=/tools/Verdi ' release", "/tools/Verdi ' release/bin/verdi"])
+        compiler = self.simulator.get_tool_command("vcs")
+        with mock.patch.dict(os.environ, {"RV_VCS_COVERAGE_VIEWER": viewer}):
+            self.simulator.setup_coverage_merge(self.vcomp)
+            self._outputs()
+            self.simulator._write_coverage_summary(self.vcomp, {"Line": "80.00%"})
+            self.assertIn("/tools/Verdi", Path(self.vcomp.coverage_merge_script).read_text())
+            page = (Path(self.vcomp.coverage_report_dir) / "dashboard.html").read_text()
+            self.assertIn("NOVAS_HOME=/tools/Verdi", page)
+            self.assertEqual(compiler, self.simulator.get_tool_command("vcs"))
+
+    def test_viewer_rejects_invalid_command_without_publishing_script(self):
+        self._outputs()
+        for command in ("", "   ", "unterminated '", "verdi\nother", "verdi\rother"):
+            with self.subTest(command=command), mock.patch.dict(os.environ, {"RV_VCS_COVERAGE_VIEWER": command}):
+                with self.assertRaises(ValueError):
+                    self.simulator._write_coverage_viewer(self.vcomp)
+                self.assertFalse((self.root / "tb__run_coverage.sh").exists())
+
+    def _viewer_fixture(self, viewer_command="verdi"):
         directory = self.root / "coverage output ' $;()"
         directory.mkdir()
         self.rcfg.regression_dir = str(directory)
@@ -602,11 +622,27 @@ class VcsCoverageTest(unittest.TestCase):
                           "pathlib.Path(sys.argv[1]).write_text(json.dumps({'argv':sys.argv[2:], 'cwd':os.getcwd()}))\n"
                           "sys.exit(int(os.environ.get('VIEWER_EXIT', '0')))\n")
         self.options.vcs_runner = shlex.join([sys.executable, str(runner), str(capture), "literal $(touch unwanted)"])
-        self.simulator._write_coverage_viewer(self.vcomp)
+        with mock.patch.dict(os.environ, {"RV_VCS_COVERAGE_VIEWER": viewer_command}):
+            self.simulator._write_coverage_viewer(self.vcomp)
         environment = dict(os.environ)
         environment.pop("SIMMER_COVERAGE_LAUNCHER", None)
         environment.pop("VIEWER_EXIT", None)
         return directory, capture, environment
+
+    @unittest.skipUnless(os.name == "posix", "Generated Bash viewers run on the EDA/Linux host")
+    def test_viewer_captures_reader_override_as_literal_arguments(self):
+        reader = ["env", "NOVAS_HOME=/tools/Verdi ' release", "/tools/Verdi ' $(touch unwanted)/bin/verdi"]
+        directory, capture, environment = self._viewer_fixture(shlex.join(reader))
+        environment["RV_VCS_COVERAGE_VIEWER"] = "another reader"
+        completed = subprocess.run([str(directory / "tb__run_coverage.sh")],
+                                   cwd=self.root,
+                                   env=environment,
+                                   capture_output=True,
+                                   text=True)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+        self.assertEqual(["literal $(touch unwanted)"] + reader + ["-cov", "-covdir", self.vcomp.merged_coverage_dir],
+                         json.loads(capture.read_text())["argv"])
+        self.assertFalse((directory / "unwanted").exists())
 
     @unittest.skipUnless(os.name == "posix", "Generated Bash viewers run on the EDA/Linux host")
     def test_viewer_executes_literal_arguments_from_another_directory_and_after_relocation(self):

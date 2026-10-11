@@ -924,6 +924,20 @@ SIMMER_COVERAGE_LAUNCHER="bsub -I -q syn" ./<vcomp>__run_coverage.sh
 ```
 
 The calling desktop session must provide a working display and tool licenses.
+To select a coverage reader separately from VCS compilation, set
+`RV_VCS_COVERAGE_VIEWER` before generating the coverage output. Its quoted
+command is captured in the script and report instructions; it does not change
+the compiler, simulation, URG command or compile cache. For example:
+
+```bash
+export RV_VCS_COVERAGE_VIEWER="env VERDI_HOME=/tools/verdi/Y-2026.03-1 NOVAS_HOME=/tools/verdi/Y-2026.03-1 /tools/verdi/Y-2026.03-1/bin/verdi"
+```
+
+The default is `verdi` from the configured VCS runner. Reader compatibility
+depends on the installed release and database; on the tested ETX dataset,
+Y-2026.03-1 loaded the complete merged VDB, while X-2025.06-SP2-4 crashed on
+both the original and merged VDB. This does not require recollecting coverage.
+
 Background regressions only generate the script; they never start a GUI or
 regenerate reports when it is opened. A failed new merge removes the previous
 viewer script, preventing a stale shortcut from representing the latest run.
