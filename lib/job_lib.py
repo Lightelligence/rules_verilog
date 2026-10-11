@@ -1321,6 +1321,7 @@ class BazelTBJob(Job):
 
         self.job_dir = self.vcomper.job_dir # Don't actually need a dir, but jobrunner/manager want it defined
         self.bazel_profile_path = None
+        self._requires_build = not self.rcfg.options.no_bazel and bool(self.bazel_targets)
         if self.rcfg.options.no_bazel:
             self.main_cmdline = "echo \"Bypassing {} due to --no-compile/--no-bazel\"".format(target)
         elif not self.bazel_targets:
@@ -1332,6 +1333,12 @@ class BazelTBJob(Job):
                 command.append("--profile={}".format(self.bazel_profile_path))
             command.extend(self.bazel_targets)
             self.main_cmdline = shlex.join(command)
+
+    @property
+    def execution_mode(self):
+        # Discovery-built outputs need no compute allocation. Keep real Bazel
+        # builds exclusive, including any remaining targets in a partial hit.
+        return "exclusive" if self._requires_build else "preparation"
 
     def pre_run(self):
         super(BazelTBJob, self).pre_run()
@@ -1376,12 +1383,17 @@ class BazelTestCfgJob(Job):
             self.add_dependency(vcomper)
 
         self.job_dir = self.vcomper.job_dir # Don't actually need a dir, but jobrunner/manager want it defined
+        self._requires_build = not self.rcfg.options.no_bazel and not prebuilt
         if self.rcfg.options.no_bazel:
             self.main_cmdline = "echo \"Bypassing test cfg build due to --no-bazel\""
         elif prebuilt:
             self.main_cmdline = "echo \"Using test cfg outputs from initial Bazel build\""
         else:
             self.main_cmdline = "bazel build {}".format(" ".join(self.bazel_targets))
+
+    @property
+    def execution_mode(self):
+        return "exclusive" if self._requires_build else "preparation"
 
     def post_run(self):
         super(BazelTestCfgJob, self).post_run()

@@ -248,6 +248,48 @@ class SchedulerResourceTest(unittest.TestCase):
         other = SimpleNamespace(execution_mode="preparation", exclusive_resource=None)
         self.assertFalse(manager._can_launch_locked(other))
 
+    def test_prebuilt_bazel_chain_releases_cached_bench_while_another_test_runs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            rcfg = SimpleNamespace(options=SimpleNamespace(timeout=1, no_compile=False, no_bazel=False), log=_Logger())
+            first = _PreparingCompileJob(rcfg, "running_test", cache_hit=True)
+            second = _PreparingCompileJob(rcfg, "next_test", cache_hit=True)
+            for job in (first, second):
+                job.prepared = True
+                job.mode = "parallel"
+            compile_job = _PreparingCompileJob(rcfg, "cached_compile", cache_hit=True)
+            compile_job.job_dir = directory
+            tb = BazelTBJob(rcfg, "//next:tb", compile_job, prebuilt_targets=["//next:tb"])
+            cfg = BazelTestCfgJob(rcfg, "//next/tests:cfg", compile_job, prebuilt=True)
+            second.add_dependency(cfg)
+            started = {job: threading.Event() for job in (first, tb, compile_job, cfg, second)}
+            runners = {}
+
+            def launch(job, manager):
+                runner = _PausableRunner(job, manager)
+                runner.returncode = 0
+                runners[job] = runner
+                if job not in (first, second):
+                    runner.finish.set()
+                started[job].set()
+                return runner
+
+            manager = JobManager({"idle_print_seconds": 60, "quit_count": 1, "active_job_limit": 2}, rcfg.log)
+            manager.job_lib_type = launch
+            try:
+                manager.add_job(first)
+                self.assertTrue(started[first].wait(1))
+                for job in (tb, compile_job, cfg, second):
+                    manager.add_job(job)
+                self.assertTrue(started[second].wait(2),
+                                "prebuilt Bazel jobs blocked the cached bench behind a simulation")
+                self.assertFalse(runners[first].finish.is_set())
+                self.assertEqual(1, compile_job.prepare_count)
+                self.assertTrue(all(started[job].is_set() for job in (tb, compile_job, cfg)))
+            finally:
+                for runner in runners.values():
+                    runner.finish.set()
+                manager.stop()
+
     def test_blocked_background_preparation_does_not_block_completion_polling(self):
         rcfg = SimpleNamespace(options=SimpleNamespace(timeout=1), log=_Logger())
         release = threading.Event()
@@ -665,6 +707,7 @@ class JobManagerLaunchTest(unittest.TestCase):
         job = BazelTBJob(rcfg, "//pkg:tb", vcomper)
 
         self.assertEqual("bazel build //pkg:tb", job.main_cmdline)
+        self.assertEqual("exclusive", job.execution_mode)
 
     def test_bazel_tb_job_batches_test_configs_in_initial_build(self):
         log = _Logger()
@@ -712,6 +755,7 @@ class JobManagerLaunchTest(unittest.TestCase):
         )
 
         self.assertEqual("bazel build //pkg/tests:second", job.main_cmdline)
+        self.assertEqual("exclusive", job.execution_mode)
 
     def test_cached_discovery_rebuilds_tb_and_existing_configs(self):
         project_dir = tempfile.mkdtemp()
@@ -756,6 +800,7 @@ class JobManagerLaunchTest(unittest.TestCase):
         job = BazelTBJob(rcfg, "//pkg:tb", vcomper, additional_targets=["//pkg/tests:first", "//pkg/tests:second"])
 
         self.assertEqual("bazel build //pkg/tests:first //pkg/tests:second", job.main_cmdline)
+        self.assertEqual("exclusive", job.execution_mode)
 
     def test_no_bazel_bypasses_bazel_build_jobs(self):
         log = _Logger()
@@ -772,6 +817,8 @@ class JobManagerLaunchTest(unittest.TestCase):
 
         self.assertIn("--no-compile/--no-bazel", tb_job.main_cmdline)
         self.assertIn("--no-bazel", cfg_job.main_cmdline)
+        self.assertEqual("preparation", tb_job.execution_mode)
+        self.assertEqual("preparation", cfg_job.execution_mode)
 
     def test_test_cfg_job_batches_targets_and_reads_each_dynamic_args_file(self):
         log = _Logger()
@@ -785,6 +832,7 @@ class JobManagerLaunchTest(unittest.TestCase):
         job = BazelTestCfgJob(rcfg, ["//pkg/tests:first", "//pkg/tests:second"], vcomper)
 
         self.assertEqual("bazel build //pkg/tests:first //pkg/tests:second", job.main_cmdline)
+        self.assertEqual("exclusive", job.execution_mode)
         with mock.patch("builtins.open", mock.mock_open(read_data="{'simulator': 'VCS'}")) as open_file:
             job.dynamic_args("//pkg/tests:second")
         open_file.assert_called_once_with(os.path.join("/repo", "bazel-bin", "pkg/tests", "second_dynamic_args.py"),
@@ -804,6 +852,7 @@ class JobManagerLaunchTest(unittest.TestCase):
 
         self.assertNotIn("bazel build", job.main_cmdline)
         self.assertIn("initial Bazel build", job.main_cmdline)
+        self.assertEqual("preparation", job.execution_mode)
 
     def test_add_job_wakes_idle_scheduler(self):
         log = _Logger()
