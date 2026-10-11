@@ -79,6 +79,7 @@ py_test(
     srcs = ["vcs_coverage_test.py"],
     data = [
         "//bin:simmer.py",
+        "//bin:templates/run_coverage_template.sh.j2",
         "//bin:templates/vcs_cov_merge_template.sh.j2",
     ],
     deps = [
@@ -217,6 +218,7 @@ py_test(
         "simmer_interrupt_probe.py",
         "//bin:simmer.py",
         "//bin:templates/rerun_template.sh.j2",
+        "//bin:templates/run_coverage_template.sh.j2",
         "//bin:templates/run_waves_template.sh.j2",
         "//bin:templates/sim_template.sh.j2",
         "//bin:templates/vcs_compile_template.sh.j2",

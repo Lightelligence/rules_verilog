@@ -672,7 +672,7 @@ class VcsSimulator(SimulatorInterface):
         vcomp_job.coverage_report_dir = report_dir
         vcomp_job.merged_coverage_dir = merged_db_path
         vcomp_job.coverage_merge_succeeded = False
-        self.rcfg.deferred_messages.append("Merge/Launch VCS coverage with {}".format(merge_sh))
+        self.rcfg.deferred_messages.append("VCS coverage merge script: {}".format(merge_sh))
 
     def run_report_coverage_merge(self, vcomp_jobs):
         if not self.options.cm:
@@ -681,6 +681,15 @@ class VcsSimulator(SimulatorInterface):
         for vcomp_job in vcomp_jobs.values():
             vcomp_job.coverage_merge_succeeded = False
             vcomp_job.coverage_merge_metrics = {}
+            viewer_path = self._coverage_viewer_path(vcomp_job)
+            vcomp_job.coverage_view_script_path = None
+            try:
+                if os.path.lexists(viewer_path):
+                    os.unlink(viewer_path)
+            except OSError as exc:
+                log.error("Cannot invalidate previous VCS coverage viewer %s: %s", viewer_path, exc)
+                failed = True
+                continue
             if getattr(vcomp_job, "coverage_cleanup_failed", False):
                 log.error("VCS coverage merge blocked after data cleanup failed for %s", vcomp_job)
                 failed = True
@@ -762,6 +771,8 @@ class VcsSimulator(SimulatorInterface):
                                                 os.unlink(entry.path)
                         if profile:
                             self._record_coverage_size(vcomp_job, "merged_db_bytes", vcomp_job.merged_coverage_dir)
+                        with self._coverage_phase(vcomp_job, "viewer_script_write_duration_s"):
+                            self._write_coverage_viewer(vcomp_job)
             except (OSError, subprocess.TimeoutExpired) as exc:
                 log.error("VCS coverage merge or output validation failed for %s: %s (log: %s)", vcomp_job, exc,
                           getattr(vcomp_job, "coverage_merge_log", "unavailable"))
@@ -773,7 +784,38 @@ class VcsSimulator(SimulatorInterface):
                 failed = True
             else:
                 vcomp_job.coverage_merge_succeeded = True
+                self.rcfg.deferred_messages.append("Open VCS coverage: {} (report: {} --report)".format(
+                    vcomp_job.coverage_view_script_path, vcomp_job.coverage_view_script_path))
         return failed
+
+    def _coverage_viewer_path(self, job):
+        return os.path.join(self.rcfg.regression_dir, "{}__run_coverage.sh".format(job.name))
+
+    def _write_coverage_viewer(self, job):
+        """Publish a viewer only after this run's merged outputs were validated."""
+        directory = os.path.abspath(self.rcfg.regression_dir)
+        template = self.env.get_template("run_coverage_template.sh.j2")
+        contents = template.render(
+            merged_db_relative=os.path.relpath(job.merged_coverage_dir, directory),
+            report_dir_relative=os.path.relpath(job.coverage_report_dir, directory),
+            viewer_argv=shlex.split(self.get_tool_runner()) + ["verdi"],
+        )
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", newline="\n", dir=directory,
+                                             delete=False) as output:
+                temporary = output.name
+                output.write(contents)
+                output.write("\n")
+            os.chmod(temporary, os.stat(temporary).st_mode | stat.S_IEXEC)
+            path = self._coverage_viewer_path(job)
+            os.replace(temporary, path)
+            job.coverage_view_script_path = path
+        finally:
+            if temporary and os.path.lexists(temporary):
+                os.unlink(temporary)
+        log.info("Open merged VCS coverage with %s", path)
+        log.info("View the existing coverage report with %s --report", path)
 
     def _write_coverage_summary(self, job, metrics):
         """Keep one HTML page and source-test provenance beside the final VDB."""
@@ -804,6 +846,7 @@ class VcsSimulator(SimulatorInterface):
         rows = "".join("<tr><th>{}</th><td>{}</td></tr>".format(html.escape(metric), html.escape(value))
                        for metric, value in metrics.items())
         command = "{} -cov -covdir {}".format(self.get_tool_command("verdi"), shlex.quote(job.merged_coverage_dir))
+        viewer = shlex.quote(os.path.abspath(self._coverage_viewer_path(job)))
         contents = """<!doctype html>
 <html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{name} coverage summary</title>
@@ -814,12 +857,14 @@ pre{{white-space:pre-wrap;overflow-wrap:anywhere;background:#f3f5f7;padding:16px
 <p>Contributing test datasets: <strong>{count}</strong>. Scores below summarize their combined coverage.
 URG may represent these datasets as one merged test. This page does not establish regression pass status.</p>
 <table><caption>Coverage scores</caption>{rows}</table>
-<h2>Analyze the merged database</h2><pre>{command}</pre>
+<h2>Analyze the merged database</h2><p>Run the generated viewer script:</p><pre>{viewer}</pre>
+<p>The script loads the merged database with this Verdi command:</p><pre>{command}</pre>
 <p>Original test identities and database paths are recorded in summary.json. Use Verdi for coverage holes,
 source annotation and hierarchy details.</p></html>
 """.format(name=html.escape(str(job.name)),
            count=len(tests) if tests is not None else "N/A",
            rows=rows,
+           viewer=html.escape(viewer),
            command=html.escape(command))
         with open(os.path.join(job.coverage_report_dir, "dashboard.html"), "w", encoding="utf-8") as output:
             output.write(contents)

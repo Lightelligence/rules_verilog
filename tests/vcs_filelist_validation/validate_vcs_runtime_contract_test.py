@@ -3421,6 +3421,9 @@ exit 0
         simulator = VcsSimulator(options, DummyRegressionConfig(), None)
         root = Path(tempfile.mkdtemp(prefix="vcs merge outputs "))
         self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+        simulator.rcfg.regression_dir = str(root)
+        simulator.env = jinja2.Environment(loader=jinja2.FileSystemLoader(REPO_ROOT / "bin/templates"))
+        simulator.env.filters['shell_quote'] = shlex.quote
         vcomp = SimpleNamespace(
             name="unit_vcomp",
             coverage_merge_script=str(root / "unit_vcs_cov_merge.sh"),
@@ -3451,7 +3454,7 @@ exit 0
     def test_vcs_failed_coverage_merge_is_reported(self):
         options = parse_args(["-t", "unit:test", "--simulator", "VCS", "--cm", "line"])
         simulator = VcsSimulator(options, DummyRegressionConfig(), None)
-        vcomp = SimpleNamespace(coverage_merge_script="/tmp/unit_vcs_cov_merge.sh")
+        vcomp = SimpleNamespace(name="unit_vcomp", coverage_merge_script="/tmp/unit_vcs_cov_merge.sh")
 
         with mock.patch("lib.simulators.vcs.run_bounded_process",
                         return_value=SimpleNamespace(returncode=1, stdout="", stderr="failed")):

@@ -904,6 +904,30 @@ Detailed analysis uses the merged VDB directly:
 verdi -cov -covdir '<vcomp>__MERGED_COV.vdb'
 ```
 
+After the merge and output validation succeed, simmer also creates an executable
+`<vcomp>__run_coverage.sh` beside the merged VDB. Run it from an ETX/Linux desktop
+terminal to open Verdi Coverage and automatically load that database:
+
+```bash
+./<vcomp>__run_coverage.sh
+./<vcomp>__run_coverage.sh --report  # Open the existing HTML, or print its text summary.
+```
+
+The script uses the configured VCS tool runner, locates the VDB/report relative
+to its own location and accepts extra Verdi arguments after `--verdi`. It works
+with merge-only output too; `--report` explains when no report was generated.
+For sites that launch GUI tools through LSF, configure a quoted launcher just
+as for `run_waves.sh`:
+
+```bash
+SIMMER_COVERAGE_LAUNCHER="bsub -I -q syn" ./<vcomp>__run_coverage.sh
+```
+
+The calling desktop session must provide a working display and tool licenses.
+Background regressions only generate the script; they never start a GUI or
+regenerate reports when it is opened. A failed new merge removes the previous
+viewer script, preventing a stale shortcut from representing the latest run.
+
 Full URG reports require an explicit request: `--vcs-urg-format text` generates
 full text reports and `--vcs-urg-format both` generates full text and HTML
 reports, which can contain many interlinked files. `--vcs-urg-summary-depth N`
