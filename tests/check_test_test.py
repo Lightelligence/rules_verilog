@@ -1,3 +1,5 @@
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -40,6 +42,32 @@ class CheckTestFastPathTest(unittest.TestCase):
 
         self.assertEqual(["UVM_ERROR :    1\n"], errors)
         self.assertTrue(finished)
+
+    def test_default_carriage_return_line_endings_match_streaming(self):
+        for ending in ("\r", "\r\n"):
+            with self.subTest(ending=repr(ending)):
+                path = self._log(ending.join(("--- UVM Report Summary ---", "UVM_ERROR : 1", "UVM_FATAL : 0", "")))
+                static_result = check_test.scan_static_log(path, 25)
+                self.assertEqual(check_test.scan_text_log(path, 25), static_result)
+                self.assertEqual(["UVM_ERROR : 1\n"], static_result[0])
+                self.assertTrue(static_result[3])
+
+    def test_checker_cli_uses_uvm_counts_with_all_line_endings(self):
+        for ending in ("\n", "\r\n", "\r"):
+            for errors in (0, 1):
+                with self.subTest(ending=repr(ending), errors=errors):
+                    path = self._log(
+                        ending.join(
+                            ("--- UVM Report Summary ---", "UVM_ERROR : {}".format(errors), "UVM_FATAL : 0", "")))
+                    result = subprocess.run([sys.executable, "-B", check_test.__file__,
+                                             str(path)],
+                                            cwd=path.parent,
+                                            capture_output=True,
+                                            text=True,
+                                            check=False)
+                    self.assertEqual(errors, result.returncode, result.stderr)
+                    self.assertEqual(bool(errors), path.with_suffix(".log.err").exists())
+                    self.assertEqual(not errors, path.with_suffix(".log.pass").exists())
 
     def test_ascii_default_signatures_retain_mmap_path(self):
         path = self._log("UVM_ERROR : 1\n--- UVM Report Summary ---\n")
