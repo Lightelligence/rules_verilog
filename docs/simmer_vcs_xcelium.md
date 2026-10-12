@@ -5,10 +5,18 @@ This repo supports one simulator per `simmer` invocation. Pick the backend with
 
 ## Normal commands
 
-Xcelium remains the default:
+VCS is the default when neither test-config metadata nor `SIM_PLATFORM`
+selects a backend. An explicit `--simulator` takes precedence and must match
+the selected test configurations:
 
 ```bash
 simmer -t <bench>:<test>
+simmer -t <bench>:<test> --simulator VCS
+```
+
+Select Xcelium explicitly, or use test configurations that resolve to XRUN:
+
+```bash
 simmer -t <bench>:<test> --simulator XRUN
 ```
 
@@ -718,7 +726,7 @@ file owns scopes, depths, timing, and `dump -glitch on`; keep its output at
 
 Xcelium batch defaults are:
 
-- default simulator remains XRUN
+- select XRUN through test-config metadata, `SIM_PLATFORM`, or `--simulator XRUN`
 - batch mode only
 - waves default to VWDB when `--waves` is used without `--wave-type`
 - FOX configuration is selected by default. `--xprop F` uses a bench

@@ -65,6 +65,29 @@ verilog_rtl_library(
 )
 
 verilog_dv_tb(
+    name = "dv_tb_default",
+    deps = [":unit_test_top"],
+)
+
+verilog_dv_test_cfg(
+    name = "dv_cfg_default",
+    tags = ["manual"],
+    tb = ":dv_tb_default",
+)
+
+verilog_dv_unit_test(
+    name = "dv_unit_default",
+    tags = ["manual"],
+    deps = [":unit_test_top"],
+)
+
+verilog_rtl_unit_test(
+    name = "rtl_unit_default",
+    tags = ["manual"],
+    deps = [":unit_test_top"],
+)
+
+verilog_dv_tb(
     name = "dv_tb_vcs_runfiles_contract",
     extra_compile_args = [
         "+optconfigfile+$(location :generated_compile_config)",
@@ -315,6 +338,12 @@ verilog_dv_tb(
 )
 
 verilog_dv_test_cfg(
+    name = "dv_cfg_inherit_xrun",
+    tags = ["manual"],
+    tb = ":dv_tb_xrun_ccf",
+)
+
+verilog_dv_test_cfg(
     name = "dv_cfg_vcs",
     timeout = 17,
     pre_run = "//tests:vcs_fixture_pre_run",
@@ -448,11 +477,14 @@ py_test(
     timeout = "short",
     srcs = ["validate_vcs_filelist_test.py"],
     data = [
+        ":dv_cfg_default",
+        ":dv_cfg_inherit_xrun",
         ":dv_cfg_vcs",
         ":dv_cfg_vcs_from_abstract",
         ":dv_cfg_vcs_inherited",
         ":dv_cfg_vcs_no_timeout",
         ":dv_makelib",
+        ":dv_tb_default",
         ":dv_tb_vcs",
         ":dv_tb_vcs_compile_args.f",
         ":dv_tb_vcs_digest_diamond",
@@ -472,10 +504,12 @@ py_test(
         ":dv_tb_xrun_ccf",
         ":dv_tb_xrun_ccf_compile_args.f",
         ":dv_tb_xrun_ccf_tb_options.py",
+        ":dv_unit_default",
         ":dv_unit_vcs",
         ":dv_unit_vcs_custom_template",
         ":dv_unit_xrun",
         ":no_synth_compat",
+        ":rtl_lint_configured_vcs",
         ":rtl_lint_custom_raw_waiver_argv",
         ":rtl_lint_vcs",
         ":rtl_lint_vcs_cmds.tcl",
@@ -487,6 +521,7 @@ py_test(
         ":rtl_lint_xrun_waiver_argv",
         ":rtl_svunit_explicit_xrun",
         ":rtl_svunit_vcs",
+        ":rtl_unit_default",
         ":rtl_unit_vcs",
         ":rtl_unit_xrun",
         ":synth_flist_compat",

@@ -1,11 +1,39 @@
 import contextlib
 import io
+import json
+import os
+import subprocess
+import sys
 import unittest
 
 from bin.args_parser import parse_args
 
 
 class ArgsParserValidationTest(unittest.TestCase):
+
+    def test_simulator_defaults_to_vcs_and_preserves_environment_and_cli_overrides(self):
+        script = ("import json, sys; from bin.args_parser import parse_args; "
+                  "options = parse_args(sys.argv[1:]); "
+                  "print(json.dumps([options.simulator, options.simulator_was_explicit]))")
+        for platform, argv, expected in (
+            (None, [], "VCS"),
+            (None, ["--simulator", "XRUN"], "XRUN"),
+            ("XRUN", [], "XRUN"),
+            ("XRUN", ["--simulator", "VCS"], "VCS"),
+            ("vcs", [], "VCS"),
+            ("VCS", ["--simulator", "XRUN"], "XRUN"),
+        ):
+            with self.subTest(platform=platform, argv=argv):
+                env = os.environ.copy()
+                env.pop("SIM_PLATFORM", None)
+                if platform is not None:
+                    env["SIM_PLATFORM"] = platform
+                result = subprocess.run([sys.executable, "-B", "-c", script, *argv],
+                                        env=env,
+                                        capture_output=True,
+                                        text=True,
+                                        check=True)
+                self.assertEqual([expected, bool(argv)], json.loads(result.stdout))
 
     def test_xrun_parallel_defaults_on_and_can_be_disabled(self):
         self.assertTrue(parse_args([]).xrun_parallel)

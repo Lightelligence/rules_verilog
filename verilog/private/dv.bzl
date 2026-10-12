@@ -162,7 +162,7 @@ def _verilog_dv_test_cfg_impl(ctx):
     elif tb_simulator:
         simulator = tb_simulator
     elif not ctx.attr.abstract:
-        simulator = "XRUN"
+        simulator = "VCS"
 
     if simulator != None and simulator not in ["XRUN", "VCS"]:
         fail("simulator must be one of ['XRUN', 'VCS'], got '{}'".format(simulator))
@@ -291,7 +291,7 @@ _verilog_dv_test_cfg_rule = rule(
         "simulator": attr.string(
             default = "",
             doc = "Simulator to use for this test configuration. Supported values are XRUN and VCS.\n" +
-                  "This attribute is inheritable. If unspecified across the inheritance chain, XRUN is used unless the associated tb already fixes the simulator.\n" +
+                  "This attribute is inheritable. If unspecified across the inheritance chain, VCS is used unless the associated tb already fixes the simulator.\n" +
                   "An abstract configuration without a testbench may leave the simulator unresolved.\n" +
                   "The resolved simulator must match the associated verilog_dv_tb.\n",
         ),
@@ -820,7 +820,7 @@ verilog_dv_tb = rule(
             doc = "DUT module name used to scope code coverage.",
         ),
         "simulator": attr.string(
-            default = "XRUN",
+            default = "VCS",
             doc = "Simulator to use for this DV testbench. Supported values are XRUN and VCS.\n" +
                   "The selected simulator determines the contents of the generated compile/runtime filelists.\n",
         ),
