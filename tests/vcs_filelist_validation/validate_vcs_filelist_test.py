@@ -82,6 +82,18 @@ def assert_lacks_legacy_filelist_flag(contents, relative_path):
 
 class VcsFilelistValidationTest(unittest.TestCase):
 
+    def test_default_rules_generate_vcs_and_explicit_xrun_is_inherited(self):
+        prefix = "tests/vcs_filelist_validation/"
+        config = ast.literal_eval(read_runfile(prefix + "dv_cfg_default_dynamic_args.py"))
+        xrun_config = ast.literal_eval(read_runfile(prefix + "dv_cfg_inherit_xrun_dynamic_args.py"))
+        self.assertEqual("VCS", config["simulator"])
+        self.assertEqual("XRUN", xrun_config["simulator"])
+        self.assertIn("-file " + prefix + "unit_test_top_vcs.f", read_runfile(prefix + "dv_tb_default_compile_args.f"))
+        for target in ("dv_unit_default_run.sh", "rtl_unit_default", "rtl_lint_configured_vcs"):
+            script = read_runfile(prefix + target)
+            self.assertIn("vcs ", script, target)
+            self.assertNotIn("xrun ", script, target)
+
     def test_generated_locations_are_available_to_compile_and_runtime_consumers(self):
         prefix = "tests/vcs_filelist_validation/dv_tb_vcs_runfiles_contract"
         compile_args = read_runfile(prefix + "_compile_args.f")

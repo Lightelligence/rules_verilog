@@ -64,7 +64,7 @@ verilog_tool_encapsulation(
 
 verilog_tool_encapsulation(
     name = "verilog_unit_test_simulator",
-    build_setting_default = "XRUN",
+    build_setting_default = "VCS",
 )
 
 verilog_tool_encapsulation(

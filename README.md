@@ -47,7 +47,13 @@ test --action_env=HOME
 test --action_env=LM_LICENSE_FILE
 ```
 
-For Synopsys VCS flows, you can add a named Bazel config in `.bazelrc` and invoke it explicitly. Example:
+VCS is the default simulator for `simmer`, DV testbenches, and one-step unit
+tests and RTL lint. Explicit rule values and `--simulator` still take
+precedence; `SIM_PLATFORM` overrides the `simmer` fallback. To select XRUN for
+one-step rules that omit `simulator`, set
+`--@rules_verilog//:verilog_unit_test_simulator=XRUN`.
+
+For site-specific Synopsys VCS launchers, you can add a named Bazel config in `.bazelrc` and invoke it explicitly. Example:
 
 ```bazelrc
 build:vcs --@rules_verilog//:verilog_unit_test_simulator=VCS
@@ -88,7 +94,7 @@ instead. Set `rulefile_vcs` when a target needs project-specific VCS lint
 options. Targets that explicitly set `simulator = "VCS"` may continue using
 `rulefile` for backward compatibility.
 
-For `simmer` VCS runs, `--simulator VCS` is enough. The VCS, `simv`, and Verdi launcher prefix defaults to `runmod vcs --`.
+For `simmer` VCS runs, no simulator flag is needed unless overriding `SIM_PLATFORM`. The VCS, `simv`, and Verdi launcher prefix defaults to `runmod vcs --`.
 
 ```bash
 simmer -t //hw/dv/project_benches/sys/tb:some_vcs_test --simulator VCS

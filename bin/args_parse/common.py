@@ -5,7 +5,7 @@ import re
 from lib import parser_actions
 
 PROJ_DIR = os.environ.get('PROJ_DIR', os.getcwd())
-SIM_PLATFORM = os.environ.get('SIM_PLATFORM', 'XRUN')
+SIM_PLATFORM = os.environ.get('SIM_PLATFORM', 'VCS')
 _COVFILE = os.environ.get('COVFILE', "coverage.ccf")
 COVFILE = _COVFILE if os.path.isabs(_COVFILE) else os.path.join(PROJ_DIR, _COVFILE)
 REPORT_DIR = os.environ.get("SIMMER_REPORT_DIR")
@@ -392,10 +392,10 @@ def add_basic_arguments(parser):
         help='Exclude this tag from every -t selector. Repeat the option for additional global exclusions.')
     parser.add_argument('--simulator',
                         type=str,
-                        default='XRUN',
+                        default=SIM_PLATFORM,
                         choices=['VCS', 'XRUN'],
                         help=('Select VCS or XRUN when test cfg metadata does not already determine the backend. '
-                              'Without an explicit option, SIM_PLATFORM is used (fallback: XRUN). A mismatch with '
+                              'Without an explicit option, SIM_PLATFORM is used (fallback: VCS). A mismatch with '
                               'selected test cfg rules is rejected before Bazel starts.'))
 
 

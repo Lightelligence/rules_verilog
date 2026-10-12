@@ -5,8 +5,9 @@ This checklist is for validating the recent XRUN/VCS split after moving back to 
 ## What changed
 
 - Simulator selection is now a rule attribute, not just a global runtime choice.
-- `XRUN` remains the default simulator.
-- `VCS` can be selected explicitly on supported rules with `simulator = "VCS"`.
+- `VCS` is the default simulator for `simmer`, DV testbenches, and one-step unit tests and RTL lint.
+- `XRUN` can be selected explicitly on supported rules with `simulator = "XRUN"`.
+- `SIM_PLATFORM` overrides the `simmer` fallback; explicit `--simulator` takes precedence. One-step rules can use `--@rules_verilog//:verilog_unit_test_simulator=XRUN` to change their configured default.
 - Mixed XRUN and VCS test runs are rejected by `simmer.py`.
 - Generated filelists are now simulator-specific, but use unified names:
   - `<tb_name>_compile_args.f`
@@ -35,15 +36,15 @@ bazel query //verilog/private:all
 ./tests/doc_test.sh
 ```
 
-3. Run one existing DV test that does not set `simulator`. It should resolve to `XRUN`.
+3. Run one existing DV test that does not set `simulator`. It should resolve to `VCS`.
 
-4. Add or select one DV test with `simulator = "VCS"` and run it through the normal `simmer` flow.
+4. Add or select one DV test with `simulator = "XRUN"` and run it through the normal `simmer` flow. Its test configurations should inherit XRUN from the testbench.
 
 5. Confirm the generated filelists for a testbench are the unified names above, and that their contents match the selected simulator only.
 
-6. Run one `verilog_dv_unit_test` target under `XRUN`. VCS simulations use `verilog_dv_tb` plus `simmer` instead.
+6. Run one `verilog_dv_unit_test` target with its VCS default, then select XRUN explicitly or through the configured default.
 
-7. Run one `verilog_rtl_unit_test` target under `XRUN`.
+7. Run one `verilog_rtl_unit_test` target with its VCS default, then select XRUN explicitly or through the configured default.
 
 ## Failure cases worth testing
 
@@ -67,10 +68,10 @@ These cases should fail fast and clearly:
 
 If you want quick confidence before broader regression:
 
-- One default XRUN DV regression target
-- One explicit VCS DV regression target
-- One DV unit test under XRUN
-- One RTL unit test under XRUN
+- One default VCS DV regression target
+- One explicit XRUN DV regression target
+- One DV unit test under the VCS default and explicit XRUN
+- One RTL unit test under the VCS default and explicit XRUN
 
 ## Notes
 
