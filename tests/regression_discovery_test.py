@@ -1062,6 +1062,41 @@ class RegressionDiscoveryTest(unittest.TestCase):
         self.assertEqual(2, config._discover_test_metadata.call_count)
         config._publish_discovery_cache.assert_called_once_with(second)
 
+    def test_rejected_cache_snapshot_brackets_discovery_without_duplicate_scan(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config = self._config(Path(directory))
+            config.dict_to_json({}, config._discovery_cache_relative_path())
+            manifest = {"cacheable": False, "uncacheable_reason": {"path": "WORKSPACE", "reason": "external override"}}
+            config._discovery_dependency_manifest = mock.Mock(return_value=manifest)
+            config._discover_test_metadata = mock.Mock()
+            config._publish_discovery_cache = mock.Mock()
+
+            self.assertFalse(config._should_use_cached_discovery())
+            config.test_discovery_all()
+
+            self.assertEqual(2, config._discovery_dependency_manifest.call_count)
+            config._publish_discovery_cache.assert_called_once_with(manifest)
+            self.assertIsNone(config._discovery_refresh_manifest)
+            config.test_discovery_all()
+            self.assertEqual(4, config._discovery_dependency_manifest.call_count)
+
+    def test_change_after_rejected_cache_check_still_retries_discovery(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config = self._config(Path(directory))
+            config.dict_to_json({}, config._discovery_cache_relative_path())
+            first = {"cacheable": False, "files": ["first"]}
+            second = {"cacheable": False, "files": ["second"]}
+            config._discovery_dependency_manifest = mock.Mock(side_effect=[first, second, second, second])
+            config._discover_test_metadata = mock.Mock()
+            config._publish_discovery_cache = mock.Mock()
+
+            self.assertFalse(config._should_use_cached_discovery())
+            config.test_discovery_all()
+
+            self.assertEqual(2, config._discover_test_metadata.call_count)
+            config._publish_discovery_cache.assert_called_once_with(second)
+            self.assertIsNone(config._discovery_refresh_manifest)
+
     @mock.patch("lib.regression.subprocess.run")
     def test_profiled_bazel_command_records_repositories_and_cleans_trace(self, run):
         proj_dir = Path(tempfile.mkdtemp())
