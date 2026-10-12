@@ -293,8 +293,9 @@ class SimmerRuntimeHardeningTest(unittest.TestCase):
             merged.mkdir()
             (report / "dashboard.txt").write_text("SCORE LINE COND\n99.00 99.00 99.00\n", encoding="utf-8")
             options = parse_args(["--simulator", "VCS", "--cm", "line"])
-            simulator = simmer.VcsSimulator(options, SimpleNamespace(), simmer.jinja2_env)
-            job = SimpleNamespace(coverage_merge_script=str(root / "merge.sh"),
+            simulator = simmer.VcsSimulator(options, SimpleNamespace(regression_dir=str(root)), simmer.jinja2_env)
+            job = SimpleNamespace(name="tb",
+                                  coverage_merge_script=str(root / "merge.sh"),
                                   coverage_report_dir=str(report),
                                   merged_coverage_dir=str(merged))
             completed = SimpleNamespace(returncode=1, stdout="", stderr="merge failed")

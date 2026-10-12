@@ -4,14 +4,50 @@ set -Eeuo pipefail
 trap 'rc=$?; printf "ERROR: VCS coverage merge failed at line %s (exit %s): %s\n" "$LINENO" "$rc" "$BASH_COMMAND" >&2' ERR
 
 # Merge the coverage database produced by VCS -cm_dir.
-{{ urg_command }} -full64 -dir {{ cov_db_path|shell_quote }} -dbname {{ merged_db_path|shell_quote }} -flex_merge union \
+merge_coverage() {
+{{ urg_command }} -full64 -dir {% for path in cov_db_paths|default([cov_db_path]) %}{{ path|shell_quote }} {% endfor %}-dbname {{ merged_db_path|shell_quote }} -flex_merge union \
 {% if urg_parallel -%}
   -parallel \
 {% endif -%}
 {% if urg_show_tests -%}
   -show tests \
 {% endif -%}
-  -format both -report {{ report_dir|shell_quote }}
+  "$@"
+}
+
+# Routine coverage writes the final VDB and a small text summary in one call.
+# Full URG object reports require an explicit text/both selection.
+case "${1:-all}" in
+{% if urg_format == 'none' %}
+  all)
+    merge_coverage -noreport
+    ;;
+{% elif urg_format == 'summary' %}
+  all) merge_coverage -format text -report {{ report_dir|shell_quote }} -show summary {{ urg_summary_depth|string|shell_quote }} ;;
+{% else %}
+  all) merge_coverage -format {{ urg_format|shell_quote }} -report {{ report_dir|shell_quote }}{% if urg_summary_depth|default(none) is not none %} -show summary {{ urg_summary_depth|string|shell_quote }}{% endif %} ;;
+{% endif %}
+  merge) merge_coverage -noreport ;;
+  report)
+{% if urg_format == 'none' %}
+    printf '%s\n' 'Report disabled; use the merged VDB in Verdi.'
+{% elif urg_format == 'summary' %}
+    {{ urg_command }} -full64 -dir {{ merged_db_path|shell_quote }} -format text \
+      -report {{ report_dir|shell_quote }} -show summary {{ urg_summary_depth|string|shell_quote }}
+{% else %}
+    # Report from the original tests; a merged VDB coalesces their identities.
+    {{ urg_command }} -full64 -dir {% for path in cov_db_paths|default([cov_db_path]) %}{{ path|shell_quote }} {% endfor %}-flex_merge union \
+{% if urg_parallel -%}
+      -parallel \
+{% endif -%}
+{% if urg_show_tests -%}
+      -show tests \
+{% endif -%}
+      -format {{ urg_format|shell_quote }} -report {{ report_dir|shell_quote }}{% if urg_summary_depth|default(none) is not none %} -show summary {{ urg_summary_depth|string|shell_quote }}{% endif %}
+{% endif %}
+    ;;
+  *) printf 'Unknown coverage phase: %s\n' "$1" >&2; exit 2 ;;
+esac
 
 # Launch Verdi for the merged database.
 printf '%s\n' {{ ('To view merged coverage: ' ~ verdi_command ~ ' -cov -covdir ' ~ merged_db_path)|shell_quote }}
