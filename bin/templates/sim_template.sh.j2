@@ -132,7 +132,7 @@ function run_test {
     cd "$PROJ_DIR"
  {%- endif %}
  {%- for socket_name, sidecar_command, socket_endpoint in sockets %}
-    echo "--- Handling Socket: {{ socket_name }} ---"
+    printf '%s\n' {{ ('--- Handling Socket: ' ~ socket_name ~ ' ---')|shell_quote }}
     rm -f {{ socket_endpoint|shell_quote }}
     rm -f "$SOCKET_SIDECAR_STARTED_{{ loop.index }}"
     printf 'Spawning: %s\n' {{ sidecar_command|shell_quote }}
@@ -278,7 +278,7 @@ function run_test {
         pre_sim_command_exit_code=$?
     fi
     if [ $pre_sim_command_exit_code -ne 0 ]; then
-        echo "%E- ERROR: Pre-sim command failed: {{ pre_sim_command }}"
+        printf '%%E- ERROR: Pre-sim command failed: %s\n' {{ pre_sim_command|shell_quote }}
         overall_exit_code=1
     fi
     {% endfor %}
@@ -330,7 +330,7 @@ function run_test {
         local sidecar_start_time
         local sidecar_stop_requested=0
         sidecar_start_time="$(awk -v pid="$sidecar_pid" '$1 == pid { print $2; exit }' "$SOCKET_SIDECAR_GROUPS_FILE")"
-        echo "Waiting up to 5 seconds for socket {{ socket_name }} (PID $sidecar_pid) to exit..."
+        printf 'Waiting up to 5 seconds for socket %s (PID %s) to exit...\n' {{ socket_name|shell_quote }} "$sidecar_pid"
         local graceful_wait_seconds=0
         while socket_sidecar_group_is_owned "$sidecar_pid" "$sidecar_start_time" && \
               [ "$graceful_wait_seconds" -lt 5 ]; do
@@ -367,8 +367,8 @@ function run_test {
             requested_signal_exit=1
         fi
         if [ "$sidecar_exit_code" -ne 0 ] && [ "$requested_signal_exit" -eq 0 ]; then
-            echo "%E- ERROR: Socket process {{ socket_name }} (PID $sidecar_pid) returned non-zero exit code $sidecar_exit_code."
-            echo "Check log: {{ job.job_dir }}/{{ socket_name }}.log"
+            printf '%%E- ERROR: Socket process %s (PID %s) returned non-zero exit code %s.\n' {{ socket_name|shell_quote }} "$sidecar_pid" "$sidecar_exit_code"
+            printf 'Check log: %s\n' {{ (job.job_dir ~ '/' ~ socket_name ~ '.log')|shell_quote }}
             sidecar_failure_detected=1
         fi
     else

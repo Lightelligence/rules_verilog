@@ -340,6 +340,9 @@ class SubprocessJobRunner(JobRunner):
     TERM_GRACE_SECONDS = 10
     KILL_GRACE_SECONDS = 2
     OWNERSHIP_GRACE_SECONDS = 30
+    # Longest a job may run without creating its timeout_start_path log before
+    # the timeout clock starts anyway.
+    LOG_CREATION_GRACE_SECONDS = 3600
 
     def __init__(self, job, manager):
         super(SubprocessJobRunner, self).__init__(job, manager)
@@ -606,8 +609,15 @@ class SubprocessJobRunner(JobRunner):
                 try:
                     timeout_start = datetime.datetime.fromtimestamp(os.path.getmtime(timeout_start_path))
                 except OSError:
-                    return False
-                self._timeout_start = timeout_start
+                    # The timeout normally counts from simulator log creation so
+                    # license/queue waits do not consume it. Bound that wait: a job
+                    # that never creates its log would otherwise never time out.
+                    fallback_start = self._start_time + datetime.timedelta(seconds=self.LOG_CREATION_GRACE_SECONDS)
+                    if now < fallback_start:
+                        return False
+                    timeout_start = fallback_start
+                else:
+                    self._timeout_start = timeout_start
         if timeout_start is None:
             return False
         timeout_start += self._paused_duration_since(timeout_start, now)
@@ -717,6 +727,8 @@ class SubprocessJobRunner(JobRunner):
 class JobManager():
     """Manages multiple concurrent jobs"""
     POLL_SLEEP_SECONDS = 0.25
+    # wait() wakes at this interval to notice a crashed scheduler thread.
+    WAIT_LIVENESS_SECONDS = 5.0
     STATE_SAMPLE_LIMIT = 16
     ACTIVE_KILL_JOIN_SECONDS = (SubprocessJobRunner.TERM_GRACE_SECONDS + 2 * SubprocessJobRunner.KILL_GRACE_SECONDS + 1)
     SHUTDOWN_JOIN_SECONDS = ACTIVE_KILL_JOIN_SECONDS
@@ -769,14 +781,19 @@ class JobManager():
         self._launching = []
         self._preparation_threads = []
 
+        self.job_lib_type = SubprocessJobRunner
+
+        self._last_done_or_idle_print = datetime.datetime.now()
+
+        # Set when the scheduler thread dies from an unexpected exception so
+        # wait() can fail instead of blocking forever.
+        self._scheduler_error = None
+
+        # Start the thread last: the loop reads the attributes assigned above.
         self._run_jobs_thread = threading.Thread(name="_run_jobs", target=self._run_jobs, daemon=True)
         self._run_jobs_thread.daemon = True
         self._run_jobs_thread_active = True
         self._run_jobs_thread.start()
-
-        self.job_lib_type = SubprocessJobRunner
-
-        self._last_done_or_idle_print = datetime.datetime.now()
 
     def _print_state(self, log_fn):
         with self._condition:
@@ -796,6 +813,25 @@ class JobManager():
             self._print_state_locked(self.log.debug)
 
     def _run_jobs(self):
+        """Thread entry point: never let an unexpected error end the thread silently."""
+        try:
+            self._run_jobs_loop()
+        except BaseException as exc: # Includes SystemExit raised by job hooks.
+            self.log.error("Scheduler thread crashed: %s", exc, exc_info=True)
+            with self._condition:
+                self._scheduler_error = exc
+                self._shutdown_incomplete = True
+                self._condition.notify_all()
+            try:
+                # Terminate running process groups; kill() tolerates being
+                # called from the scheduler thread itself.
+                self.kill()
+            except Exception as kill_exc:
+                self.log.error("Could not terminate jobs after scheduler crash: %s", kill_exc)
+            with self._condition:
+                self._condition.notify_all()
+
+    def _run_jobs_loop(self):
         while True:
             with self._condition:
                 if not self._run_jobs_thread_active:
@@ -1127,8 +1163,15 @@ class JobManager():
         self.log.info("Waiting until all jobs are completed.")
         with self._condition:
             while self._todo or self._ready or self._launching or self._active or self._finalizing:
+                if self._scheduler_error is not None:
+                    break
                 self.log.debug("still waiting")
-                self._condition.wait()
+                self._condition.wait(timeout=self.WAIT_LIVENESS_SECONDS)
+            # Re-check after the loop: the crash handler drains the queues, so the
+            # loop condition alone can go false without the run having completed.
+            if self._scheduler_error is not None:
+                raise RuntimeError("Scheduler thread crashed: {}".format(self._scheduler_error)) \
+                    from self._scheduler_error
 
     def stop(self):
         """Stop and join the scheduler thread."""
@@ -1389,7 +1432,7 @@ class BazelTestCfgJob(Job):
         elif prebuilt:
             self.main_cmdline = "echo \"Using test cfg outputs from initial Bazel build\""
         else:
-            self.main_cmdline = "bazel build {}".format(" ".join(self.bazel_targets))
+            self.main_cmdline = "bazel build {}".format(shlex.join(self.bazel_targets))
 
     @property
     def execution_mode(self):

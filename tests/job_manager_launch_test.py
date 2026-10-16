@@ -872,6 +872,23 @@ class JobManagerLaunchTest(unittest.TestCase):
 
         self.assertFalse(manager.exited_prematurely)
 
+    def test_scheduler_thread_crash_fails_wait_instead_of_hanging(self):
+        log = _Logger()
+        manager = JobManager({"idle_print_seconds": 60, "quit_count": 1}, log)
+
+        try:
+            # A pending job whose admission raises kills a naive scheduler loop.
+            with mock.patch.object(JobManager,
+                                   "_take_ready_job_locked",
+                                   side_effect=ValueError("unknown execution mode")):
+                manager.add_job(Job(SimpleNamespace(options=SimpleNamespace(timeout=1), log=log), "test"))
+                with self.assertRaisesRegex(RuntimeError, "Scheduler thread crashed"):
+                    manager.wait()
+        finally:
+            manager.stop()
+
+        self.assertTrue(manager.shutdown_incomplete)
+
     def test_subprocess_runner_uses_thread_safe_new_session_launch(self):
         log = _Logger()
         job = Job(SimpleNamespace(options=SimpleNamespace(timeout=1, no_stdout=False), log=log), "test")
@@ -1573,7 +1590,7 @@ class JobManagerLaunchTest(unittest.TestCase):
         runner.job = job
         runner.log = _Logger()
         runner._p = _RunningProcess()
-        runner._start_time = datetime.datetime.now() - datetime.timedelta(hours=1)
+        runner._start_time = datetime.datetime.now()
         runner._timed_out = False
         runner._orphaned_process_group = False
         runner._term_deadline = None
@@ -1588,6 +1605,41 @@ class JobManagerLaunchTest(unittest.TestCase):
         simulator_log.touch()
         old_timestamp = (datetime.datetime.now() - datetime.timedelta(hours=1)).timestamp()
         os.utime(simulator_log, (old_timestamp, old_timestamp))
+        with mock.patch("lib.job_lib.os.killpg", create=True) as killpg:
+            self.assertFalse(runner._check_for_done())
+
+        self.assertTrue(runner._timed_out)
+        killpg.assert_called_once_with(456, signal.SIGTERM)
+
+    def test_test_timeout_falls_back_when_simulator_log_never_appears(self):
+        job_dir = Path(tempfile.mkdtemp())
+        job = SimpleNamespace(
+            timeout=0.001,
+            timeout_start_path=str(job_dir / "stdout.log"),
+            suppress_output=False,
+            job_dir=str(job_dir),
+            rcfg=SimpleNamespace(options=SimpleNamespace(no_stdout=False)),
+        )
+        runner = SubprocessJobRunner.__new__(SubprocessJobRunner)
+        runner.job = job
+        runner.log = _Logger()
+        runner._p = _RunningProcess()
+        runner._timed_out = False
+        runner._orphaned_process_group = False
+        runner._term_deadline = None
+        runner._kill_deadline = None
+        runner._kill_sent = False
+        runner._timeout_start = None
+        runner._process_group_id = 456
+
+        # Within the grace period the log may still appear, so no timeout yet.
+        runner._start_time = datetime.datetime.now()
+        self.assertFalse(runner._check_for_done())
+        self.assertFalse(runner._timed_out)
+
+        # Past grace plus the job timeout, a job with no log must still time out.
+        runner._start_time = datetime.datetime.now() - datetime.timedelta(
+            seconds=SubprocessJobRunner.LOG_CREATION_GRACE_SECONDS, hours=1)
         with mock.patch("lib.job_lib.os.killpg", create=True) as killpg:
             self.assertFalse(runner._check_for_done())
 

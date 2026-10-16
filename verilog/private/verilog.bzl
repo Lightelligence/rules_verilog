@@ -283,6 +283,46 @@ def runfiles_relative_short_path(f):
         return "external/" + short_path[3:]
     return short_path
 
+def expand_runfiles_locations(ctx, value, targets):
+    """Expand $(location) expressions and rewrite the results to runfiles-relative paths.
+
+    simmer compiles from the Bazel runfiles tree, where execroot paths such as
+    bazel-out/.../bin/... for generated files do not resolve.
+
+    Args:
+      ctx: Rule context.
+      value: String that may contain $(location ...) / $(locations ...) expressions.
+      targets: Targets that the expressions may refer to.
+
+    Returns:
+      The expanded string with file paths rewritten to runfiles-relative paths.
+    """
+    runfile_paths = {}
+    for target in targets:
+        for file in target[DefaultInfo].files.to_list():
+            runfile_paths[file.path] = runfiles_relative_short_path(file)
+
+    # Longest first so a path that is a prefix of another is not replaced early.
+    ordered_paths = sorted(runfile_paths.keys(), key = len, reverse = True)
+
+    # Expand and normalize only actual location expressions. Literal argument
+    # text can contain execroot-like paths that must remain untouched.
+    segments = value.split("$(")
+    result = segments[0]
+    for segment in segments[1:]:
+        closing = segment.find(")")
+        expression = segment[:closing] if closing >= 0 else segment
+        words = expression.strip().replace("\t", " ").split(" ")
+        if words and words[0] in ["location", "locations"]:
+            macro = "$(" + expression + (")" if closing >= 0 else "")
+            expanded = ctx.expand_location(macro, targets = targets)
+            for path in ordered_paths:
+                expanded = expanded.replace(path, runfile_paths[path])
+            result += expanded + (segment[closing + 1:] if closing >= 0 else "")
+        else:
+            result += "$(" + segment
+    return result
+
 def merge_default_runfiles(ctx, files, targets, transitive_files = None):
     """Create runfiles and merge the default runfiles of dependency targets.
 
