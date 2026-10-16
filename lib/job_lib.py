@@ -364,18 +364,20 @@ class SubprocessJobRunner(JobRunner):
         self.log = job.log
 
         if self.job.suppress_output or self.job.rcfg.options.no_stdout:
-            self.stdout_log_path = self._get_stdout_capture_path()
+            # Redirect stdout to /dev/null to avoid writing the same simulator
+            # output twice (once via the simulator's own -l flag or tee, once
+            # via the wrapper's captured stdout). Stderr remains captured for
+            # diagnostics when the wrapper itself fails.
             self.stderr_log_path = os.path.join(self.job.job_dir, "stderr.log")
-            self.stdout_fp = open(self.stdout_log_path, 'w')
+            kwargs['stdout'] = subprocess.DEVNULL
             self.stderr_fp = open(self.stderr_log_path, 'w')
-            kwargs['stdout'] = self.stdout_fp
             kwargs['stderr'] = self.stderr_fp
         self._start_time = datetime.datetime.now()
         try:
             self._p = subprocess.Popen(self.job.main_cmdline, **kwargs)
             self._process_group_id = self._p.pid
         except Exception:
-            for stream in (getattr(self, "stdout_fp", None), getattr(self, "stderr_fp", None)):
+            for stream in (getattr(self, "stderr_fp", None), ):
                 if stream:
                     stream.close()
             raise
