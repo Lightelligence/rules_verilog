@@ -3704,6 +3704,34 @@ exit 0
         self.assertEqual(JobStatus.FAILED, vcomp.jobstatus)
         vcomp.write_compile_fingerprint.assert_not_called()
 
+    def test_vcs_ignored_compile_warning_prescreen_skips_clean_logs(self):
+        options = parse_args(["-t", "unit:test", "--simulator", "VCS"])
+        simulator = VcsSimulator(options, DummyRegressionConfig(), None)
+        root = Path(tempfile.mkdtemp(prefix="vcs_prescreen_"))
+        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+
+        clean_log = root / "clean.log"
+        clean_log.write_text(
+            "Chronologic VCS simulator\n"
+            "Parsing design file 'rtl.v'\n"
+            "RM-info: Running vcs command\n"
+            "CPU time: 1.234 seconds\n",
+            encoding="utf-8",
+        )
+        self.assertEqual(set(), simulator.get_ignored_compile_warning_line_numbers(str(clean_log)))
+
+        skew_log = root / "skew.log"
+        skew_log.write_text(
+            "make[1]: Warning: File 'obj' has modification time 0.005 s in the future\n"
+            "make[1]: warning:  Clock skew detected.  Your build may be incomplete.\n",
+            encoding="utf-8",
+        )
+        self.assertEqual({1, 2}, simulator.get_ignored_compile_warning_line_numbers(str(skew_log)))
+
+        no_make_log = root / "no_make.log"
+        no_make_log.write_text("Warning-[LCA-FEATURES-NOT-USED] Feature not enabled\n", encoding="utf-8")
+        self.assertEqual(set(), simulator.get_ignored_compile_warning_line_numbers(str(no_make_log)))
+
     def test_xcelium_warning_format_remains_compatible_with_tb_waivers(self):
         options = parse_args(["-t", "unit:test", "--simulator", "XRUN"])
         pattern = XceliumSimulator(options, DummyRegressionConfig(), None).get_log_parsing_info()["warning_regex"]
