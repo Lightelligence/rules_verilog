@@ -296,6 +296,13 @@ verilog_dv_tb(
 )
 
 verilog_dv_tb(
+    name = "dv_tb_vcs_debug_access_r",
+    simulator = "VCS",
+    vcs_debug_access = "r",
+    deps = [":unit_test_top"],
+)
+
+verilog_dv_tb(
     name = "dv_tb_vcs_runtime_only_runfile",
     extra_runtime_args = [
         "-f bazel_runfiles_main/$(location :runtime_only.data)",
@@ -487,6 +494,8 @@ py_test(
         ":dv_tb_default",
         ":dv_tb_vcs",
         ":dv_tb_vcs_compile_args.f",
+        ":dv_tb_vcs_debug_access_r",
+        ":dv_tb_vcs_debug_access_r_tb_options.py",
         ":dv_tb_vcs_digest_diamond",
         ":dv_tb_vcs_in_flist_only",
         ":dv_tb_vcs_runfiles_contract",

@@ -81,7 +81,10 @@ report_jinja2_env = regression_report.create_template_environment(os.path.join(d
 RERUN_TEMPLATE = jinja2_env.get_template('rerun_template.sh.j2')
 RUN_WAVE_TEMPLATE = jinja2_env.get_template('run_waves_template.sh.j2')
 _FILESYSTEM_COMPONENT_MAX_BYTES = 255
-_VCOMP_BACKEND_SUFFIX_MAX_BYTES = len("_HREF".encode("utf-8"))
+# Longest VCOMP directory suffix any backend appends to the shared compile
+# directory name: XRUN _HREF/_PRIM and VCS _WAVES/_GUI. The base name is
+# shortened by this budget so every backend keeps its full suffix.
+_VCOMP_BACKEND_SUFFIX_MAX_BYTES = len("_WAVES".encode("utf-8"))
 
 
 def _utf8_prefix(value, byte_limit):
@@ -609,6 +612,7 @@ class VCompJob(Job):
         compile_gen_opts = self.simulator.generate_compile_options(self)
         cov_opts = compile_gen_opts['cov_opts']
         partcomp_opts = compile_gen_opts.get('partcomp_opts', '')
+        make_jobs_opts = compile_gen_opts.get('make_jobs_opts', '')
         xprop_cmd = compile_gen_opts['xprop_cmd']
         additional_defines = compile_gen_opts['additional_defines']
 
@@ -656,6 +660,7 @@ class VCompJob(Job):
             'VCOMP_DIR': self.job_dir,
             'cov_opts': cov_opts,
             'partcomp_opts': partcomp_opts,
+            'make_jobs_opts': make_jobs_opts,
             'bazel_runfiles_main': self.bazel_runfiles_main,
             'bazel_compile_args': self.bazel_compile_args,
             'debug_mode': debug_mode,

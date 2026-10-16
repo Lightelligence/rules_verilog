@@ -894,6 +894,8 @@ run_bounded_process([
                     xprop_was_explicit=False,
                 ),
                 partcomp_opts="",
+                make_jobs_opts="",
+                vcs_debug_access_opt="-debug_access+r+w+f",
                 vcs_runner="vcs-runner",
                 vso_build_name="",
                 vso_workdir="",
@@ -1001,6 +1003,39 @@ run_bounded_process([
                 partcomp_args = shlex.split(simulator.generate_compile_options(vcomp)["partcomp_opts"])
 
                 self.assertIn("-partcomp_dir={}".format(os.path.join(vcomp.job_dir, dirname)), partcomp_args)
+
+    def test_vcs_debug_modes_claim_separate_compile_directories(self):
+        base = os.path.join(tempfile.gettempdir(), "unit_tb__VCS_VCOMP")
+        expected = {
+            None: base,
+            "--waves": base + "_WAVES",
+            "--gui": base + "_GUI",
+        }
+
+        for option, job_dir in expected.items():
+            with self.subTest(option=option):
+                argv = ["-t", "unit:test", "--simulator", "VCS"]
+                argv += [option] if option else []
+                simulator = VcsSimulator(parse_args(argv), DummyRegressionConfig(), None)
+
+                self.assertEqual(job_dir, simulator.get_vcomp_job_dir(base))
+
+        xrun = XceliumSimulator(parse_args(["-t", "unit:test", "--simulator", "XRUN"]), DummyRegressionConfig(), None)
+        self.assertEqual(base, xrun.get_vcomp_job_dir(base))
+
+    def test_vcomp_directory_name_budget_keeps_every_backend_suffix(self):
+        import simmer
+
+        backend_suffixes = ("_HREF", "_PRIM", "_WAVES", "_GUI")
+        self.assertGreaterEqual(simmer._VCOMP_BACKEND_SUFFIX_MAX_BYTES, max(len(item) for item in backend_suffixes))
+
+        budget = simmer._FILESYSTEM_COMPONENT_MAX_BYTES - simmer._VCOMP_BACKEND_SUFFIX_MAX_BYTES
+        for suffix in backend_suffixes + ("", ):
+            with self.subTest(suffix=suffix):
+                component = simmer._bounded_filesystem_component("t" * budget, suffix, budget)
+
+                self.assertLessEqual(len(component.encode("utf-8")), budget)
+                self.assertTrue(component.endswith(suffix))
 
     def test_vcs_custom_partition_directory_is_not_renamed_for_waves(self):
         custom_dir = os.path.join(tempfile.gettempdir(), "custom_partitionlib")
@@ -2674,6 +2709,263 @@ exit 0
             self.assertEqual("1", arguments[0])
             self.assertIn("first second", arguments[1])
 
+    def test_vcs_debug_access_levels_render_in_both_compile_templates(self):
+        environment = jinja2.Environment(undefined=jinja2.StrictUndefined)
+        environment.filters["shell_quote"] = shlex.quote
+
+        def render(template_name, debug_access_opt, debug_mode):
+            template = environment.from_string(self._read_repo_file("bin/templates/" + template_name))
+            return " ".join(
+                template.render(
+                    VCOMP_DIR="/tmp/vcomp",
+                    additional_defines=[],
+                    bazel_compile_args="/tmp/compile_args.f",
+                    bazel_runfiles_main="/tmp/runfiles",
+                    cov_opts="",
+                    debug_mode=debug_mode,
+                    options=SimpleNamespace(
+                        compile_args_file=None,
+                        dtl=False,
+                        fgp=None,
+                        gui=debug_mode == "gui",
+                        smartlog=False,
+                        vcs_profile=False,
+                        vso=False,
+                        vso_cbv=False,
+                        vso_ccex=False,
+                        waves=[] if debug_mode == "waves" else None,
+                        xprop_was_explicit=False,
+                    ),
+                    partcomp_opts="",
+                    make_jobs_opts="",
+                    vcs_analysis_work_dir="/tmp/vcomp/vlogan_work",
+                    vcs_debug_access_opt=debug_access_opt,
+                    vcs_elab_args="/tmp/elab_args.f",
+                    vcs_incr_vlogan_ignore_env="-vts_ignore_env=HOSTNAME",
+                    vcs_runner="vcs-runner",
+                    vcs_setup_file="/tmp/vcomp/synopsys_sim.setup",
+                    vcs_vlogan_args="/tmp/vlogan_args.f",
+                    vcs_vlogan_filelists="/tmp/vlogan_filelists.txt",
+                    vso_build_name="",
+                    vso_workdir="",
+                    xprop_cmd=None,
+                ).split())
+
+        for template_name in ("vcs_compile_template.sh.j2", "vcs_three_step_compile_template.sh.j2"):
+            with self.subTest(template=template_name, level="full"):
+                self.assertIn(" -debug_access+r+w+f ", render(template_name, "-debug_access+r+w+f", "default"))
+            with self.subTest(template=template_name, level="r"):
+                rendered = render(template_name, "-debug_access+r", "default")
+                self.assertIn(" -debug_access+r ", rendered)
+                self.assertNotIn("-debug_access+r+w+f", rendered)
+            with self.subTest(template=template_name, level="none"):
+                self.assertNotIn("-debug_access", render(template_name, "", "default"))
+            with self.subTest(template=template_name, level="waves keeps -kdb"):
+                rendered = render(template_name, "-debug_access+r", "waves")
+                self.assertIn(" -kdb ", rendered)
+                self.assertIn(" -debug_access+r ", rendered)
+            with self.subTest(template=template_name, level="gui ignores the knob"):
+                rendered = render(template_name, "-debug_access+r", "gui")
+                self.assertIn("-debug_access+all+reverse", rendered)
+                self.assertNotIn(" -debug_access+r ", rendered)
+
+    def test_vcs_debug_access_resolves_from_cli_then_bench_then_full(self):
+
+        def resolved(argv, bench_value=None):
+            _, simulator = self._validated(["-t", "unit:test", "--simulator", "VCS"] + argv)
+            job = DummyVcompJob()
+            if bench_value is not None:
+                job.tb_options["vcs_debug_access"] = bench_value
+            return simulator.get_compile_template_context(job)["vcs_debug_access_opt"]
+
+        self.assertEqual("-debug_access+r+w+f", resolved([]))
+        self.assertEqual("-debug_access+r+w+f", resolved([], "full"))
+        self.assertEqual("-debug_access+r", resolved([], "r"))
+        self.assertEqual("", resolved([], "none"))
+        self.assertEqual("-debug_access+r", resolved(["--vcs-debug-access", "r"]))
+        self.assertEqual("-debug_access+r+w+f", resolved(["--vcs-debug-access", "full"], "none"))
+        self.assertEqual("", resolved(["--vcs-debug-access", "none"], "r"))
+
+    def test_vcs_debug_access_none_is_rejected_with_waves_or_gui(self):
+        for argv in (["--waves"], ["--gui"]):
+            with self.subTest(argv=argv):
+                with self.assertRaisesRegex(ValueError, "vcs-debug-access"):
+                    self._validated(["-t", "unit:test", "--simulator", "VCS", "--vcs-debug-access", "none"] + argv)
+        # A bench-level none is only known once the compile job is prepared.
+        _, simulator = self._validated(["-t", "unit:test", "--simulator", "VCS", "--waves"])
+        job = DummyVcompJob()
+        job.tb_options["vcs_debug_access"] = "none"
+        with self.assertRaisesRegex(ValueError, "vcs_debug_access"):
+            simulator.get_compile_template_context(job)
+
+    def test_vcs_debug_access_is_vcs_only_and_part_of_the_compile_identity(self):
+        with self.assertRaises(ValueError):
+            self._validated(["-t", "unit:test", "--simulator", "XRUN", "--vcs-debug-access", "r"])
+
+        manifests = []
+        for argv in ([], ["--vcs-debug-access", "r"]):
+            _, simulator = self._validated(["-t", "unit:test", "--simulator", "VCS"] + argv)
+            job = DummyVcompJob()
+            job.compile_fingerprint = {}
+            with mock.patch.object(VcsSimulator, "get_tool_identity", return_value="vcs-test"):
+                manifests.append(simulator._partcomp_manifest_identity(job))
+        self.assertEqual("full", manifests[0]["configuration"]["debug_access"])
+        self.assertEqual("r", manifests[1]["configuration"]["debug_access"])
+        self.assertNotEqual(manifests[0], manifests[1])
+
+    def test_vcs_disabled_partcomp_parallelizes_csrc_with_allocated_slots(self):
+        options = parse_args(["-t", "unit:test", "--simulator", "VCS", "--no-vcs-partcomp"])
+        simulator = VcsSimulator(options, DummyRegressionConfig(), None)
+        vcomp = DummyVcompJob()
+
+        with mock.patch("lib.simulators.vcs.detect_allocated_cpus", return_value=(8, "unit test")):
+            generated = simulator.generate_compile_options(vcomp)
+
+        # -j parallelizes the generated C compile and link; it is not a
+        # Partition Compile option, so the two are reported separately.
+        self.assertEqual("", generated["partcomp_opts"])
+        self.assertEqual("-j8", generated["make_jobs_opts"])
+        self.assertEqual(8, simulator.get_make_jobs())
+
+    def test_vcs_make_jobs_rejects_invalid_counts_and_conflicting_partcomp_settings(self):
+        with self.assertRaises(ValueError):
+            self._validated(["--simulator", "VCS", "--vcs-make-jobs", "0"])
+        with self.assertRaises(ValueError):
+            self._validated(["--simulator", "VCS", "--vcs-make-jobs", "-3"])
+
+        # -fastpartcomp=jN already parallelizes an enabled partition build, so an
+        # explicit -j request alongside explicit partcomp control is a mistake.
+        for argv in (
+            ["--vcs-make-jobs", "4", "--vcs-partcomp"],
+            ["--vcs-make-jobs", "4", "--vcs-partcomp-jobs", "8"],
+            ["--no-vcs-make-jobs", "--vcs-partcomp-mode", "adaptive"],
+        ):
+            with self.subTest(argv=argv):
+                with self.assertRaises(ValueError):
+                    self._validated(["--simulator", "VCS"] + argv)
+
+    def test_vcs_make_jobs_is_accepted_with_default_and_disabled_partcomp(self):
+        # The default allocation may disable Partition Compile on a single slot,
+        # so --no-vcs-partcomp and the bare default are both legitimate pairings.
+        for argv, expected in (
+            (["--no-vcs-partcomp", "--vcs-make-jobs", "4"], 4),
+            (["--vcs-make-jobs", "4"], 4),
+            (["--no-vcs-partcomp"], "auto"),
+            ([], "auto"),
+            (["--no-vcs-make-jobs"], None),
+        ):
+            with self.subTest(argv=argv):
+                options, _ = self._validated(["--simulator", "VCS"] + argv)
+                self.assertEqual(expected, options.vcs_make_jobs)
+
+    def test_vcs_make_jobs_switch_is_documented_in_help(self):
+        help_text = create_parser().format_help()
+        self.assertIn("\n  --vcs-make-jobs N", help_text)
+        self.assertIn("\n  --no-vcs-make-jobs", help_text)
+        self.assertIn("[--vcs-make-jobs N | --no-vcs-make-jobs]", help_text)
+
+    def test_vcs_single_allocated_slot_omits_csrc_parallelism(self):
+        # The auto single-slot safeguard also disables Partition Compile, so the
+        # default settings on a one-CPU allocation must not emit -j1 or -jN.
+        options = parse_args(["-t", "unit:test", "--simulator", "VCS"])
+        simulator = VcsSimulator(options, DummyRegressionConfig(), None)
+
+        with mock.patch("lib.simulators.vcs.detect_allocated_cpus", return_value=(1, "unit test")):
+            generated = simulator.generate_compile_options(DummyVcompJob())
+
+        self.assertEqual("disabled", simulator.get_effective_partcomp_mode())
+        self.assertEqual("", generated["partcomp_opts"])
+        self.assertEqual("", generated["make_jobs_opts"])
+        self.assertIsNone(simulator.get_make_jobs())
+
+    def test_vcs_enabled_partcomp_owns_parallelism_without_csrc_jobs(self):
+        options = parse_args(["-t", "unit:test", "--simulator", "VCS", "--vcs-partcomp"])
+        simulator = VcsSimulator(options, DummyRegressionConfig(), None)
+
+        with mock.patch("lib.simulators.vcs.detect_allocated_cpus", return_value=(8, "unit test")):
+            generated = simulator.generate_compile_options(DummyVcompJob())
+
+        self.assertIn("-fastpartcomp=j8", shlex.split(generated["partcomp_opts"]))
+        # -fastpartcomp=jN already parallelizes the partition build; a second
+        # -jN would oversubscribe the same allocation.
+        self.assertEqual("", generated["make_jobs_opts"])
+        self.assertIsNone(simulator.get_make_jobs())
+
+    def test_vcs_make_jobs_switch_overrides_the_allocation_probe(self):
+        explicit = VcsSimulator(
+            parse_args(["-t", "unit:test", "--simulator", "VCS", "--no-vcs-partcomp", "--vcs-make-jobs", "3"]),
+            DummyRegressionConfig(),
+            None,
+        )
+        with mock.patch("lib.simulators.vcs.detect_allocated_cpus") as probe:
+            self.assertEqual("-j3", explicit.generate_compile_options(DummyVcompJob())["make_jobs_opts"])
+        probe.assert_not_called()
+
+        # An explicit count applies even when the allocation would be serial.
+        serial = VcsSimulator(
+            parse_args(["-t", "unit:test", "--simulator", "VCS", "--vcs-make-jobs", "4"]),
+            DummyRegressionConfig(),
+            None,
+        )
+        with mock.patch("lib.simulators.vcs.detect_allocated_cpus", return_value=(1, "unit test")):
+            self.assertEqual("-j4", serial.generate_compile_options(DummyVcompJob())["make_jobs_opts"])
+
+        disabled = VcsSimulator(
+            parse_args(["-t", "unit:test", "--simulator", "VCS", "--no-vcs-make-jobs"]),
+            DummyRegressionConfig(),
+            None,
+        )
+        with mock.patch("lib.simulators.vcs.detect_allocated_cpus", return_value=(8, "unit test")):
+            self.assertEqual("", disabled.generate_compile_options(DummyVcompJob())["make_jobs_opts"])
+
+    def test_vcs_make_jobs_resolves_the_allocation_once_per_simulator(self):
+        simulator = VcsSimulator(parse_args(["-t", "unit:test", "--simulator", "VCS"]), DummyRegressionConfig(), None)
+        with mock.patch("lib.simulators.vcs.detect_allocated_cpus", return_value=(8, "unit test")) as probe:
+            simulator.get_partcomp_jobs()
+            simulator.get_make_jobs()
+            simulator.get_make_jobs()
+            simulator.generate_compile_options(DummyVcompJob())
+
+        # A repeated probe could disagree with itself and emit -jN alongside an
+        # unrelated -fastpartcomp=jM.
+        self.assertEqual(1, probe.call_count)
+
+    def test_vcs_make_jobs_metrics_and_fingerprint_track_the_csrc_count(self):
+        options = parse_args(["-t", "unit:test", "--simulator", "VCS", "--no-vcs-partcomp", "--vcs-make-jobs", "6"])
+        simulator = VcsSimulator(options, DummyRegressionConfig(), None)
+        with mock.patch("lib.simulators.vcs.detect_allocated_cpus", return_value=(6, "unit test")):
+            metrics = simulator.collect_compile_metrics(SimpleNamespace(log_path="missing", compile_cache_hit=False))
+        self.assertEqual(6, metrics["make_jobs"])
+
+        reused = simulator.collect_compile_metrics(SimpleNamespace(log_path="missing", compile_cache_hit=True))
+        self.assertIsNone(reused["make_jobs"])
+
+    def test_vcs_compile_fingerprint_normalizes_only_standalone_csrc_jobs_argument(self):
+        simulator = VcsSimulator(parse_args(["--simulator", "VCS"]), DummyRegressionConfig(), None)
+        script = "vcs +define+OPTION=-j4 /tmp/-j5 -j3 -full64"
+        self.assertEqual(
+            "vcs +define+OPTION=-j4 /tmp/-j5 -jAUTO -full64",
+            simulator.compile_script_for_fingerprint(script),
+        )
+
+    def test_vcs_slot_count_change_preserves_an_identical_compile_fingerprint(self):
+        # The same compile rendered on a 4-slot and an 8-slot allocation must
+        # fingerprint identically, or every requeue on a different host rebuilds.
+        payloads = []
+        for slots in (4, 8):
+            simulator = VcsSimulator(
+                parse_args(["-t", "unit:test", "--simulator", "VCS", "--no-vcs-partcomp"]),
+                DummyRegressionConfig(),
+                None,
+            )
+            with mock.patch("lib.simulators.vcs.detect_allocated_cpus", return_value=(slots, "unit test")):
+                vcomp = DummyVcompJob()
+                generated = simulator.generate_compile_options(vcomp)
+                payloads.append(
+                    simulator.compile_script_for_fingerprint("vcs {} {}".format(generated["partcomp_opts"],
+                                                                                generated["make_jobs_opts"])).split())
+        self.assertEqual([["vcs", "-jAUTO"], ["vcs", "-jAUTO"]], payloads)
+
     def test_vcs_compile_template_defaults_to_incremental_compile(self):
         template = self._read_repo_file("bin/templates/vcs_compile_template.sh.j2")
         compile_args = self._read_repo_file("vendors/synopsys/verilog_dv_tb_compile_args.f.template")
@@ -2731,6 +3023,8 @@ exit 0
                 xprop_was_explicit=False,
             ),
             partcomp_opts="",
+            make_jobs_opts="",
+            vcs_debug_access_opt="-debug_access+r+w+f",
             vcs_runner=shlex.quote("../" + stub.name),
             vso_build_name="",
             vso_workdir="",
@@ -2828,7 +3122,9 @@ exit 0
                 xprop_was_explicit=False,
             ),
             partcomp_opts="-partcomp -fastpartcomp=j2",
+            make_jobs_opts="",
             vcs_analysis_work_dir=shell_path(vcomp_dir / "vlogan_work"),
+            vcs_debug_access_opt="-debug_access+r+w+f",
             vcs_elab_args=shell_path(elab_args),
             vcs_incr_vlogan_ignore_env="-vts_ignore_env=HOSTNAME,LSB_JOBID",
             vcs_runner=shlex.quote(shell_path(stub)),
@@ -3407,6 +3703,34 @@ exit 0
 
         self.assertEqual(JobStatus.FAILED, vcomp.jobstatus)
         vcomp.write_compile_fingerprint.assert_not_called()
+
+    def test_vcs_ignored_compile_warning_prescreen_skips_clean_logs(self):
+        options = parse_args(["-t", "unit:test", "--simulator", "VCS"])
+        simulator = VcsSimulator(options, DummyRegressionConfig(), None)
+        root = Path(tempfile.mkdtemp(prefix="vcs_prescreen_"))
+        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+
+        clean_log = root / "clean.log"
+        clean_log.write_text(
+            "Chronologic VCS simulator\n"
+            "Parsing design file 'rtl.v'\n"
+            "RM-info: Running vcs command\n"
+            "CPU time: 1.234 seconds\n",
+            encoding="utf-8",
+        )
+        self.assertEqual(set(), simulator.get_ignored_compile_warning_line_numbers(str(clean_log)))
+
+        skew_log = root / "skew.log"
+        skew_log.write_text(
+            "make[1]: Warning: File 'obj' has modification time 0.005 s in the future\n"
+            "make[1]: warning:  Clock skew detected.  Your build may be incomplete.\n",
+            encoding="utf-8",
+        )
+        self.assertEqual({1, 2}, simulator.get_ignored_compile_warning_line_numbers(str(skew_log)))
+
+        no_make_log = root / "no_make.log"
+        no_make_log.write_text("Warning-[LCA-FEATURES-NOT-USED] Feature not enabled\n", encoding="utf-8")
+        self.assertEqual(set(), simulator.get_ignored_compile_warning_line_numbers(str(no_make_log)))
 
     def test_xcelium_warning_format_remains_compatible_with_tb_waivers(self):
         options = parse_args(["-t", "unit:test", "--simulator", "XRUN"])

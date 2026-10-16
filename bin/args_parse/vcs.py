@@ -5,7 +5,7 @@ from lib import parser_actions
 from .common import add_child_argument
 
 
-def _partcomp_jobs(value):
+def _job_count(value):
     if str(value).lower() == 'auto':
         return 'auto'
     try:
@@ -161,7 +161,7 @@ def add_vcs_arguments(parser):
                        '--vcs-partcomp-jobs',
                        parent='--vcs-partcomp',
                        default='auto',
-                       type=_partcomp_jobs,
+                       type=_job_count,
                        help=('Maximum parallel partition compile processes passed as -fastpartcomp=jN (default: auto). '
                              'auto uses CPUs allocated to this job by LSF/Slurm or process affinity; it never scans '
                              'cluster idle CPUs. Cannot be combined with --no-vcs-partcomp.'))
@@ -171,6 +171,7 @@ def add_vcs_arguments(parser):
                        default=None,
                        help=('Override the writable -partcomp_dir. The default is '
                              '<regression>/<tb>__VCS_VCOMP/partitionlib and is removed by --recompile. '
+                             'The default already resolves under the selected --waves/--gui directory. '
                              'Use a versioned external path only when intentionally publishing a baseline. '
                              'Cannot be combined with --no-vcs-partcomp.'))
     add_child_argument(gvcs,
@@ -181,6 +182,26 @@ def add_vcs_arguments(parser):
                              'already exist, must differ from --vcs-partcomp-dir, and must match the VCS version, '
                              'Red Hat platform, source inventory, defines, coverage/debug mode, and compile arguments. '
                              'Cannot be combined with --no-vcs-partcomp.'))
+    make_control = gvcs.add_mutually_exclusive_group()
+    make_control.add_argument(
+        '--vcs-make-jobs',
+        dest='vcs_make_jobs',
+        type=_job_count,
+        default='auto',
+        metavar='N',
+        help=('Parallel C compile and link jobs for the VCS csrc phase, passed as -jN. Applies only when Partition '
+              'Compile is disabled: -fastpartcomp=jN already parallelizes an enabled partition build. auto (default) '
+              'uses the CPUs allocated to this job and passes nothing when only one is available. Accepted with '
+              '--no-vcs-partcomp, and with the default settings where a single allocated slot also disables '
+              'Partition Compile.'))
+    make_control.add_argument(
+        '--no-vcs-make-jobs',
+        dest='vcs_make_jobs',
+        action='store_const',
+        const=None,
+        help=('Do not pass -jN, keeping the VCS csrc compile and link single-process. Use this to reproduce a serial '
+              'link or to bound memory when the allocated host is shared.'))
+    gvcs.set_defaults(vcs_make_jobs='auto')
     compile_cache_control = gvcs.add_mutually_exclusive_group()
     compile_cache_control.add_argument(
         '--vcs-auto-compile-cache',
@@ -213,6 +234,16 @@ def add_vcs_arguments(parser):
                       help=('Enable the batch-only VCS Dynamic Test Loading static/base compile flow. It uses the '
                             'default Partition Compile flow, owns <VCOMP>/dtl_static, and cannot be combined with '
                             '--no-vcs-partcomp, --gui, or custom Partition Compile mode/directories.'))
+    gvcs.add_argument('--vcs-debug-access',
+                      dest='vcs_debug_access',
+                      choices=['full', 'r', 'none'],
+                      default=None,
+                      help=('Select the compile-time VCS debug access level. full (default) passes '
+                            '-debug_access+r+w+f, which UVM HDL deposit/force and DUT memory backdoor access need. '
+                            'r passes -debug_access+r (read-only) and none passes no -debug_access, both of which '
+                            'reduce compile, elaboration, and simulation cost for benches that do not need write '
+                            'access. none cannot be combined with --waves or --gui. Overrides the testbench '
+                            'vcs_debug_access setting; --gui always uses its own full debug flags.'))
     gvcs.add_argument('--fgp',
                       type=int,
                       default=None,

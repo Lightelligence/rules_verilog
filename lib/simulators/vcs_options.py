@@ -67,8 +67,20 @@ def validate_vcs_runtime_options(options, parser):
         parser.error("--fgp must be a positive integer thread count. Stopping before Bazel starts.")
     if options.vcs_runner is not None and not options.vcs_runner.strip():
         parser.error("--vcs-runner must not be empty. Stopping before Bazel starts.")
+    if options.vcs_debug_access == 'none' and (options.gui or options.waves is not None):
+        parser.error("--vcs-debug-access none cannot be combined with --waves or --gui because wave dumping and "
+                     "the GUI need debug access. Use r or full. Stopping before Bazel starts.")
     if options.vcs_partcomp_jobs != 'auto' and options.vcs_partcomp_jobs < 1:
         parser.error("--vcs-partcomp-jobs must be a positive integer. Stopping before Bazel starts.")
+    if options.vcs_make_jobs not in (None, 'auto') and options.vcs_make_jobs < 1:
+        parser.error("--vcs-make-jobs must be a positive integer. Stopping before Bazel starts.")
+    make_jobs_requested = bool({'--vcs-make-jobs', '--no-vcs-make-jobs'}.intersection(options.vcs_explicit_switches))
+    if make_jobs_requested and options.vcs_partcomp and any(
+            switch == '--vcs-partcomp' or switch.startswith('--vcs-partcomp-')
+            for switch in options.vcs_explicit_switches):
+        parser.error("--vcs-make-jobs controls the csrc build that runs only when Partition Compile is disabled. "
+                     "Do not combine it with an explicit --vcs-partcomp/--vcs-partcomp-* request; "
+                     "--fastpartcomp=jN already parallelizes that build. Stopping before Bazel starts.")
     if options.vcs_partcomp_dir is not None and not options.vcs_partcomp_dir.strip():
         parser.error("--vcs-partcomp-dir must not be empty. Stopping before Bazel starts.")
     if options.vcs_partcomp_sharedlib is not None and not options.vcs_partcomp_sharedlib.strip():
