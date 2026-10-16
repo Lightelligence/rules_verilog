@@ -441,6 +441,22 @@ Y-2026.03-1 frontend crash. Explicit `--vcs-partcomp` or `--vcs-partcomp-*`
 options opt back in, including `j1`; DTL retains its required partition flow.
 This is a conservative allocation guard, not a claim that other releases fail.
 
+A disabled Partition Compile build still parallelizes its generated C compile
+and link. `--vcs-make-jobs N` passes `-jN` for that phase, and `auto` (the
+default) sizes it from the same allocation detection used for
+`-fastpartcomp=jN`:
+
+```text
+-jN
+```
+
+With an enabled Partition Compile flow, `-fastpartcomp=jN` already parallelizes
+the partition build, so `-jN` is omitted and combining the two explicit requests
+is rejected. `auto` likewise passes nothing when only one CPU is allocated, so
+the default single-slot job stays serial. Use `--no-vcs-make-jobs` to force the
+serial csrc compile and link, for example to reproduce a link failure or to
+bound memory when the allocated host is shared.
+
 For an LSF wrapper such as `bs='bsub -I -q syn'`, omitting `-n` normally means
 the queue's default allocation, often one slot. Request parallel capacity from
 LSF when it is needed:
@@ -541,8 +557,8 @@ libraries, wrap testbench code in SystemVerilog packages, avoid `$unit` code and
 minimize cross-partition XMRs. Inspect `cmp.log` for `PC_SHARED`, `PC_RECOMPILE`
 and the `-pcmakeprof` timing table. Coverage and Verdi require the referenced
 partition database to remain available. With `--vcs-profile`, simmer also
-stores marker counts, selected partition mode/jobs, compile wall time and cache
-reuse state in the compile entry of `.simmer/results.json`.
+stores marker counts, selected partition mode/jobs, csrc `-j` count, compile wall
+time and cache reuse state in the compile entry of `.simmer/results.json`.
 
 Start with automatic partitioning. If profiling shows that stable third-party
 code shares a partition with frequently changing project code, add a VCS
@@ -652,6 +668,7 @@ retaining the access needed by every testbench:
 - no default xprop
 - no default smartlog
 - allocation-aware `-fastpartcomp=jN` (the detected LSF/Slurm or affinity allocation)
+- allocation-aware `-jN` for the csrc compile and link, passed only when Partition Compile is disabled
 
 Enable debug features explicitly:
 

@@ -35,6 +35,11 @@ _VCS_DEBUG_ACCESS_FLAGS = {
     "none": "",
 }
 _MAX_BENIGN_MAKE_CLOCK_SKEW_SECONDS = 0.1
+
+# Sentinel for "this cached value has not been resolved yet". None is a real
+# result for both partcomp and csrc job counts (meaning "do not pass a flag"),
+# so it cannot double as "unresolved".
+_UNRESOLVED = object()
 _INCR_VLOGAN_IGNORED_ENVIRONMENT = (
     "HOST",
     "HOSTNAME",
@@ -105,7 +110,9 @@ class VcsSimulator(SimulatorInterface):
         self.vso_workflow = VsoWorkflow(options, rcfg)
         self._vso_init_job = None
         self._vso_ask_job = None
-        self._resolved_partcomp_jobs = None
+        self._resolved_partcomp_jobs = _UNRESOLVED
+        self._resolved_make_jobs = _UNRESOLVED
+        self._allocation_and_source = None
         self._vcs_tool_identity = None
 
     def get_name(self):
@@ -277,7 +284,12 @@ class VcsSimulator(SimulatorInterface):
         return inputs
 
     def compile_script_for_fingerprint(self, compile_script):
-        return re.sub(r"(?<!\S)-fastpartcomp=j\d+(?=\s|$)", "-fastpartcomp=jAUTO", compile_script)
+        # Both job counts are re-derived from the current allocation on every
+        # run, so a slot change must not invalidate an otherwise identical
+        # script. Only a standalone option token is normalized: a path or a
+        # +define+ value that merely ends in -jN is a real compile input.
+        normalized = re.sub(r"(?<!\S)-fastpartcomp=j\d+(?=\s|$)", "-fastpartcomp=jAUTO", compile_script)
+        return re.sub(r"(?<!\S)-j\d+(?=\s|$)", "-jAUTO", normalized)
 
     def should_auto_reuse_compile(self):
         return self.options.vcs_auto_compile_cache
@@ -409,6 +421,7 @@ class VcsSimulator(SimulatorInterface):
         opts = {
             'cov_opts': '',
             'partcomp_opts': self.get_partition_compile_options(vcomp_job),
+            'make_jobs_opts': self.get_make_jobs_options(),
             'xprop_cmd': None,
             'additional_defines': [],
         }
@@ -471,6 +484,8 @@ class VcsSimulator(SimulatorInterface):
     def get_partition_compile_options(self, vcomp_job):
         effective_mode = self.get_effective_partcomp_mode()
         if effective_mode == 'disabled':
+            # -Mupdate comes from the vendored .f template, and any csrc
+            # parallelism is carried separately by get_make_jobs_options().
             log.info("VCS Partition Compile is disabled; using -Mupdate")
             return ''
 
@@ -513,14 +528,61 @@ class VcsSimulator(SimulatorInterface):
         return self.options.vcs_partcomp_mode
 
     def get_partcomp_jobs(self):
-        if self._resolved_partcomp_jobs is not None:
+        if self._resolved_partcomp_jobs is not _UNRESOLVED:
             return self._resolved_partcomp_jobs
         if self.options.vcs_partcomp_jobs != 'auto':
             self._resolved_partcomp_jobs = self.options.vcs_partcomp_jobs
-            return self._resolved_partcomp_jobs
-        self._resolved_partcomp_jobs, source = detect_allocated_cpus()
-        log.info("VCS Partition Compile auto-selected j%d from %s", self._resolved_partcomp_jobs, source)
+        else:
+            self._resolved_partcomp_jobs = self.get_allocation_and_source()[0]
         return self._resolved_partcomp_jobs
+
+    def get_allocation_and_source(self):
+        """Return (slots, source) for the CPUs allocated to this job.
+
+        Resolved once per simulator instance. -fastpartcomp=jN and -jN both size
+        themselves from this, so a single probe keeps them consistent.
+        """
+        if self._allocation_and_source is None:
+            self._allocation_and_source = detect_allocated_cpus()
+            log.info("VCS auto-selected %d allocated CPUs from %s", self._allocation_and_source[0],
+                     self._allocation_and_source[1])
+        return self._allocation_and_source
+
+    def get_make_jobs(self):
+        """Return the csrc -jN worker count, or None when -j must not be passed.
+
+        The count shares the allocation resolver with Partition Compile so both
+        paths respect LSF/Slurm slots and CPU affinity. -j parallelizes the
+        generated C compile and the link; with Partition Compile enabled
+        -fastpartcomp=jN already owns that parallelism, so -j is omitted.
+        """
+        if self._resolved_make_jobs is not _UNRESOLVED:
+            return self._resolved_make_jobs
+        self._resolved_make_jobs = self._resolve_make_jobs()
+        return self._resolved_make_jobs
+
+    def _resolve_make_jobs(self):
+        if self.options.vcs_make_jobs is None:
+            log.info("VCS csrc -j is disabled by --no-vcs-make-jobs")
+            return None
+        if self.get_effective_partcomp_mode() != 'disabled':
+            return None
+        request = self.options.vcs_make_jobs
+        if request == 'auto':
+            # Resolve the allocation once and reuse it, so -fastpartcomp and -j
+            # never disagree about how many slots this job actually owns.
+            jobs, source = self.get_allocation_and_source()
+        else:
+            jobs, source = request, "--vcs-make-jobs"
+        if jobs <= 1:
+            log.info("VCS csrc -j is omitted; %s reports a single allocated CPU", source)
+            return None
+        log.info("VCS csrc compile and link selected -j%d from %s", jobs, source)
+        return jobs
+
+    def get_make_jobs_options(self):
+        jobs = self.get_make_jobs()
+        return '-j{}'.format(jobs) if jobs else ''
 
     def get_partition_compile_dir(self, vcomp_job):
         partition_dir = self.options.vcs_partcomp_dir or os.path.join(
@@ -1291,6 +1353,7 @@ source annotation and hierarchy details.</p></html>
             "compile_reused": reused,
             "partcomp_mode": effective_partcomp_mode,
             "partcomp_jobs": self.get_partcomp_jobs() if effective_partcomp_mode != 'disabled' and not reused else None,
+            "make_jobs": self.get_make_jobs() if not reused else None,
         }
         if reused or not self.options.vcs_profile or not os.path.isfile(vcomp_job.log_path):
             return metrics
