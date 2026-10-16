@@ -1195,6 +1195,16 @@ source annotation and hierarchy details.</p></html>
         return {'warning_regex': r"(?i)^(?:\s*(?:Warning|Error)(?:-|\s*:)|.+:\s*(?:warning|error):).*"}
 
     def get_ignored_compile_warning_line_numbers(self, log_path):
+        # Pre-screen with cheap substring checks: the common case (no make
+        # clock-skew warnings) avoids the full regex pass and early-exits.
+        try:
+            with open(log_path, 'rb') as probe:
+                content = probe.read()
+        except (OSError, IOError):
+            return set()
+        if b"make" not in content or b"warning" not in content:
+            return set()
+        # At least one "make" and one "warning" → run the regex pass.
         future_mtime_regex = re.compile(r"(?i)\bmake(?:\[\d+\])?:\s*warning:\s*file .+ has modification time "
                                         r"([0-9]+(?:\.[0-9]+)?)\s+s in the(?:\s+future\b|(?P<continued>\s*\\\s*$))")
         future_mtime_continuation_regex = re.compile(r"(?i)^\s*future\b")
