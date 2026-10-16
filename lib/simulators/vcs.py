@@ -317,7 +317,21 @@ class VcsSimulator(SimulatorInterface):
         return os.path.join(bazel_runfiles_main, relpath, "{}_compile_args.f".format(bazel_target))
 
     def get_vcomp_job_dir(self, default_job_dir):
-        return default_job_dir
+        # --waves and --gui need their own -kdb options, which invalidate the
+        # default csrc database. Give each mode a sibling compile directory so a
+        # debug rerun keeps the batch simv, fingerprint, and partition database
+        # instead of evicting them. get_debug_mode_dir_suffix() reports which of
+        # these directories belongs to the current run.
+        suffix = self.get_debug_mode_dir_suffix()
+        return default_job_dir + suffix if suffix else default_job_dir
+
+    def get_debug_mode_dir_suffix(self):
+        """Return the compile-directory suffix for the active debug mode."""
+        if self.options.gui:
+            return "_GUI"
+        if self.options.waves is not None:
+            return "_WAVES"
+        return ""
 
     def get_bazel_runtime_args_file(self, bazel_runfiles_main, relpath, bazel_target):
         return os.path.join(bazel_runfiles_main, relpath, "{}_runtime_args.f".format(bazel_target))

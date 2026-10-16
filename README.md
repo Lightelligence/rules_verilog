@@ -240,9 +240,10 @@ default. An unchanged fingerprint bypasses VCS; a changed build uses the
 allocation-aware partition flow (automatic single-worker allocations use
 regular `-Mupdate` as a crash safeguard; explicit partition options opt in).
 The writable partition database is
-`<tb>__VCS_VCOMP/partitionlib`; `--waves` and `--gui` use sibling
-`partitionlib_waves` and `partitionlib_gui` databases so incompatible KDB
-options do not invalidate each other. Stable third-party IP/VIP
+`<tb>__VCS_VCOMP/partitionlib`; `--waves` and `--gui` compile into the sibling
+`<tb>__VCS_VCOMP_WAVES` and `<tb>__VCS_VCOMP_GUI` directories, so a debug rerun
+keeps the batch `simv`, fingerprint, and partition database instead of
+rebuilding them. Stable third-party IP/VIP
 partitions are reused while changed project RTL and testbench partitions are
 rebuilt. Tune parallel compilation after measuring the workstation:
 

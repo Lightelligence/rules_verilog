@@ -178,6 +178,14 @@ The default VCS flow automatically reuses unchanged builds:
    does not invalidate VCS reuse.
 3. A match bypasses VCS. A miss compiles with Partition Compile by default.
 
+`--waves` and `--gui` compile into the sibling `<tb>__VCS_VCOMP_WAVES` and
+`<tb>__VCS_VCOMP_GUI` directories. Each mode owns its `simv`, `csrc`,
+fingerprint, and log, so a debug rerun neither rebuilds the batch build nor is
+reused in place of it. The first run of a mode after a batch build compiles once
+in its own directory, and later batch runs still hit the batch cache.
+`--no-compile --waves` therefore requires a previous `--waves` compile. Each
+mode you use costs one extra compile directory per testbench.
+
 The normal command performs this automatic hit-or-compile decision:
 
 ```bash
@@ -379,7 +387,10 @@ semantics.
 
 The persistent analysis library is `<tb>__VCS_VCOMP/vlogan_work`.
 GUI-specific UVM recorder defines use the sibling `vlogan_work_gui` so switching
-GUI mode does not invalidate the batch analysis database. Simmer ignores only
+GUI mode does not invalidate the batch analysis database. `--waves` and `--gui`
+already compile under their own `<tb>__VCS_VCOMP_WAVES` and `<tb>__VCS_VCOMP_GUI`
+directories, so this split only matters when a GUI run is pointed back at the
+batch directory with a custom `--vcs-partcomp-dir`. Simmer ignores only
 volatile LSF host/job variables during VCS incremental-environment checks;
 tool, source, define and stable environment changes remain compile inputs.
 `--recompile` removes the analysis library along with the rest of the VCOMP
