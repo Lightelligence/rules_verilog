@@ -81,7 +81,10 @@ report_jinja2_env = regression_report.create_template_environment(os.path.join(d
 RERUN_TEMPLATE = jinja2_env.get_template('rerun_template.sh.j2')
 RUN_WAVE_TEMPLATE = jinja2_env.get_template('run_waves_template.sh.j2')
 _FILESYSTEM_COMPONENT_MAX_BYTES = 255
-_VCOMP_BACKEND_SUFFIX_MAX_BYTES = len("_HREF".encode("utf-8"))
+# Longest VCOMP directory suffix any backend appends to the shared compile
+# directory name: XRUN _HREF/_PRIM and VCS _WAVES/_GUI. The base name is
+# shortened by this budget so every backend keeps its full suffix.
+_VCOMP_BACKEND_SUFFIX_MAX_BYTES = len("_WAVES".encode("utf-8"))
 
 
 def _utf8_prefix(value, byte_limit):

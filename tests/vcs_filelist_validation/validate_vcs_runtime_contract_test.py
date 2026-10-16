@@ -1003,6 +1003,39 @@ run_bounded_process([
 
                 self.assertIn("-partcomp_dir={}".format(os.path.join(vcomp.job_dir, dirname)), partcomp_args)
 
+    def test_vcs_debug_modes_claim_separate_compile_directories(self):
+        base = os.path.join(tempfile.gettempdir(), "unit_tb__VCS_VCOMP")
+        expected = {
+            None: base,
+            "--waves": base + "_WAVES",
+            "--gui": base + "_GUI",
+        }
+
+        for option, job_dir in expected.items():
+            with self.subTest(option=option):
+                argv = ["-t", "unit:test", "--simulator", "VCS"]
+                argv += [option] if option else []
+                simulator = VcsSimulator(parse_args(argv), DummyRegressionConfig(), None)
+
+                self.assertEqual(job_dir, simulator.get_vcomp_job_dir(base))
+
+        xrun = XceliumSimulator(parse_args(["-t", "unit:test", "--simulator", "XRUN"]), DummyRegressionConfig(), None)
+        self.assertEqual(base, xrun.get_vcomp_job_dir(base))
+
+    def test_vcomp_directory_name_budget_keeps_every_backend_suffix(self):
+        import simmer
+
+        backend_suffixes = ("_HREF", "_PRIM", "_WAVES", "_GUI")
+        self.assertGreaterEqual(simmer._VCOMP_BACKEND_SUFFIX_MAX_BYTES, max(len(item) for item in backend_suffixes))
+
+        budget = simmer._FILESYSTEM_COMPONENT_MAX_BYTES - simmer._VCOMP_BACKEND_SUFFIX_MAX_BYTES
+        for suffix in backend_suffixes + ("", ):
+            with self.subTest(suffix=suffix):
+                component = simmer._bounded_filesystem_component("t" * budget, suffix, budget)
+
+                self.assertLessEqual(len(component.encode("utf-8")), budget)
+                self.assertTrue(component.endswith(suffix))
+
     def test_vcs_custom_partition_directory_is_not_renamed_for_waves(self):
         custom_dir = os.path.join(tempfile.gettempdir(), "custom_partitionlib")
         options = parse_args([

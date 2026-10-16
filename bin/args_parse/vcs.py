@@ -171,6 +171,7 @@ def add_vcs_arguments(parser):
                        default=None,
                        help=('Override the writable -partcomp_dir. The default is '
                              '<regression>/<tb>__VCS_VCOMP/partitionlib and is removed by --recompile. '
+                             'The default already resolves under the selected --waves/--gui directory. '
                              'Use a versioned external path only when intentionally publishing a baseline. '
                              'Cannot be combined with --no-vcs-partcomp.'))
     add_child_argument(gvcs,

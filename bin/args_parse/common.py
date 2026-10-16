@@ -322,9 +322,10 @@ def add_flow_control_arguments(parser):
         '--recompile',
         default=False,
         action="store_true",
-        help=(
-            'Delete the selected simulator VCOMP directory before compiling. For VCS this removes simv, csrc, '
-            'and the default local partition database; custom external partcomp/sharedlib directories are preserved.'))
+        help=('Delete the selected simulator VCOMP directory before compiling. For VCS this removes simv, csrc, '
+              'and the default local partition database; a debug waveform or GUI rerun uses its own VCOMP '
+              'directory, so --recompile only clears the directory of the current mode; '
+              'custom external partcomp/sharedlib directories are preserved.'))
     flow_control_group.add_argument(
         '--discovery-only',
         default=False,
