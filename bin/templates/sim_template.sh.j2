@@ -19,6 +19,14 @@ function record_simulation_duration {
     fi
 }
 
+# Wrapper-side failures report on stdout, which is discarded when output is
+# suppressed (`--no-stdout` or multi-test runs). Duplicate them to stderr, which
+# the job runner always captures, so a suppressed failure leaves a trail.
+function report_wrapper_error {
+    printf '%s\n' "$1"
+    printf '%s\n' "$1" >&2
+}
+
 {%- if sockets %}
 SOCKET_SIDECAR_GROUPS_FILE={{ job.sidecar_process_groups_path|shell_quote }}
 : > "$SOCKET_SIDECAR_GROUPS_FILE"
@@ -150,7 +158,7 @@ function run_test {
     local socket_registration_max_attempts=3000
     while ! awk -v pid="$SOCKET_SIDECAR_{{ loop.index }}_PID" '$1 == pid { found = 1 } END { exit !found }' "$SOCKET_SIDECAR_GROUPS_FILE"; do
         if ! kill -0 "$SOCKET_SIDECAR_{{ loop.index }}_PID" 2>/dev/null; then
-            printf '%%E- ERROR: Socket wrapper %s exited before registration.\n' {{ socket_name|shell_quote }}
+            report_wrapper_error "$(printf '%%E- ERROR: Socket wrapper %s exited before registration.' {{ socket_name|shell_quote }})"
             return 1
         fi
         if [ "$socket_registration_attempts" -ge "$socket_registration_max_attempts" ]; then
@@ -163,7 +171,7 @@ function run_test {
                [ "${SOCKET_PROCESS_STAT_FIELDS[3]}" = "$SIMMER_SESSION_ID" ]; then
                 printf '%s %s\n' "$SOCKET_SIDECAR_{{ loop.index }}_PID" "${SOCKET_PROCESS_STAT_FIELDS[19]}" >> "$SOCKET_SIDECAR_GROUPS_FILE"
             fi
-            printf '%%E- ERROR: Timeout waiting for socket wrapper %s to register.\n' {{ socket_name|shell_quote }}
+            report_wrapper_error "$(printf '%%E- ERROR: Timeout waiting for socket wrapper %s to register.' {{ socket_name|shell_quote }})"
             return 1
         fi
         sleep 0.01
@@ -190,13 +198,13 @@ function run_test {
                [ "$started_pid" = "$SOCKET_SIDECAR_{{ loop.index }}_PID" ] && [ "$started_time" = "$sidecar_start_time" ]; then
                 break
             fi
-            printf '%%E- ERROR: Socket wrapper %s exited before startup acknowledgement.\n' {{ socket_name|shell_quote }}
+            report_wrapper_error "$(printf '%%E- ERROR: Socket wrapper %s exited before startup acknowledgement.' {{ socket_name|shell_quote }})"
             return 1
         fi
         if [ "${SOCKET_PROCESS_STAT_FIELDS[2]}" != "$SOCKET_SIDECAR_{{ loop.index }}_PID" ] || \
            [ "${SOCKET_PROCESS_STAT_FIELDS[3]}" != "$SIMMER_SESSION_ID" ] || \
            [ "${SOCKET_PROCESS_STAT_FIELDS[19]}" != "$sidecar_start_time" ]; then
-            printf '%%E- ERROR: Socket wrapper %s process identity changed before startup acknowledgement.\n' {{ socket_name|shell_quote }}
+            report_wrapper_error "$(printf '%%E- ERROR: Socket wrapper %s process identity changed before startup acknowledgement.' {{ socket_name|shell_quote }})"
             return 1
         fi
         # Sending CONT before the child actually stops loses the wakeup.
@@ -204,7 +212,7 @@ function run_test {
             kill -CONT -- "-$SOCKET_SIDECAR_{{ loop.index }}_PID" 2>/dev/null || true
         fi
         if [ "$socket_registration_attempts" -ge "$socket_registration_max_attempts" ]; then
-            printf '%%E- ERROR: Timeout waiting for socket wrapper %s to start.\n' {{ socket_name|shell_quote }}
+            report_wrapper_error "$(printf '%%E- ERROR: Timeout waiting for socket wrapper %s to start.' {{ socket_name|shell_quote }})"
             return 1
         fi
         sleep 0.01
@@ -219,14 +227,14 @@ function run_test {
         printf 'Waiting for %s (PID %s) to create %s...\n' {{ socket_name|shell_quote }} "$SOCKET_SIDECAR_{{ loop.index }}_PID" {{ socket_endpoint|shell_quote }}
         sleep 1
         if ! kill -0 "$SOCKET_SIDECAR_{{ loop.index }}_PID" 2>/dev/null; then
-           printf '%%E- ERROR: Socket process %s (PID %s) exited prematurely without creating %s.\n' {{ socket_name|shell_quote }} "$SOCKET_SIDECAR_{{ loop.index }}_PID" {{ socket_endpoint|shell_quote }}
+           report_wrapper_error "$(printf '%%E- ERROR: Socket process %s (PID %s) exited prematurely without creating %s.' {{ socket_name|shell_quote }} "$SOCKET_SIDECAR_{{ loop.index }}_PID" {{ socket_endpoint|shell_quote }})"
            printf 'Check log: %s\n' {{ (job.job_dir ~ '/' ~ socket_name ~ '.log')|shell_quote }}
            overall_exit_code=1
            break
         fi
         socket_start_wait_seconds=$((socket_start_wait_seconds + 1))
         if [ "$socket_start_wait_seconds" -ge "$socket_start_timeout_seconds" ]; then
-            printf '%%E- ERROR: Timeout waiting for socket %s (PID %s) to create %s.\n' {{ socket_name|shell_quote }} "$SOCKET_SIDECAR_{{ loop.index }}_PID" {{ socket_endpoint|shell_quote }}
+            report_wrapper_error "$(printf '%%E- ERROR: Timeout waiting for socket %s (PID %s) to create %s.' {{ socket_name|shell_quote }} "$SOCKET_SIDECAR_{{ loop.index }}_PID" {{ socket_endpoint|shell_quote }})"
             overall_exit_code=1
             kill -TERM -- "-$SOCKET_SIDECAR_{{ loop.index }}_PID" 2>/dev/null || true
             break
@@ -251,7 +259,7 @@ function run_test {
     fi
     echo "Pre-simulation command finished with exit code: $pre_run_exit_code"
     if [ $pre_run_exit_code -ne 0 ]; then
-        echo "%E- ERROR: Pre-simulation command failed."
+        report_wrapper_error "%E- ERROR: Pre-simulation command failed."
         overall_exit_code=1
     fi
     echo "-------------------------------------"
@@ -278,13 +286,13 @@ function run_test {
         pre_sim_command_exit_code=$?
     fi
     if [ $pre_sim_command_exit_code -ne 0 ]; then
-        printf '%%E- ERROR: Pre-sim command failed: %s\n' {{ pre_sim_command|shell_quote }}
+        report_wrapper_error "$(printf '%%E- ERROR: Pre-sim command failed: %s' {{ pre_sim_command|shell_quote }})"
         overall_exit_code=1
     fi
     {% endfor %}
 
     if [ "$overall_exit_code" -ne 0 ]; then
-        echo "%E- ERROR: Simulation preparation failed; skipping main simulation."
+        report_wrapper_error "%E- ERROR: Simulation preparation failed; skipping main simulation."
         OVERALL_EXIT_CODE=$overall_exit_code
         return
     fi
@@ -367,7 +375,7 @@ function run_test {
             requested_signal_exit=1
         fi
         if [ "$sidecar_exit_code" -ne 0 ] && [ "$requested_signal_exit" -eq 0 ]; then
-            printf '%%E- ERROR: Socket process %s (PID %s) returned non-zero exit code %s.\n' {{ socket_name|shell_quote }} "$sidecar_pid" "$sidecar_exit_code"
+            report_wrapper_error "$(printf '%%E- ERROR: Socket process %s (PID %s) returned non-zero exit code %s.' {{ socket_name|shell_quote }} "$sidecar_pid" "$sidecar_exit_code")"
             printf 'Check log: %s\n' {{ (job.job_dir ~ '/' ~ socket_name ~ '.log')|shell_quote }}
             sidecar_failure_detected=1
         fi
@@ -377,7 +385,7 @@ function run_test {
     rm -f {{ socket_endpoint|shell_quote }}
  {% endfor %}
     if [ $sidecar_failure_detected -ne 0 ]; then
-       echo "%E- At least one socket process failed."
+       report_wrapper_error "%E- At least one socket process failed."
        if [ $overall_exit_code -eq 0 ]; then overall_exit_code=1; fi
     fi
 
@@ -401,13 +409,13 @@ function run_test {
             fi
         fi
     elif [ ! -x "$log_check_python" ]; then
-        echo "%E- ERROR: Python interpreter not found or not executable at $log_check_python. Skipping log parsing."
+        report_wrapper_error "%E- ERROR: Python interpreter not found or not executable at $log_check_python. Skipping log parsing."
         overall_exit_code=1
     elif [ ! -f "$log_check_script" ]; then
-        echo "%E- ERROR: check_test script not found at $log_check_script. Skipping log parsing."
+        report_wrapper_error "%E- ERROR: check_test script not found at $log_check_script. Skipping log parsing."
         overall_exit_code=1
     else
-         echo "%E- ERROR: Simulation log file not found at $simulation_log_file. Cannot parse."
+         report_wrapper_error "%E- ERROR: Simulation log file not found at $simulation_log_file. Cannot parse."
          if [ $simulation_exit_code -eq 0 ]; then overall_exit_code=1; fi
     fi
  {% endif %}

@@ -1311,6 +1311,11 @@ class TestJob(Job):
                     self.error_message = errors.read()
             else:
                 self.error_message = f"Sim failed (return code {self.job_lib.returncode}), no {self.LOG_NAME}.err found."
+
+            # When output was suppressed the wrapper's own diagnostics went to
+            # stderr.log instead of stdout, so point the user at it if it has
+            # content. Nothing else surfaces this file for test jobs.
+            self._report_wrapper_stderr()
         else: # PASSED
             if self.rcfg.tidy:
                 log_path = ""
@@ -1412,6 +1417,24 @@ class TestJob(Job):
 
     def _get_job_time_str(self):
         return self._format_duration(self.job_time)
+
+    def _report_wrapper_stderr(self):
+        """Surface the job wrapper's captured stderr after a test failure.
+
+        When output is suppressed (`--no-stdout` or a multi-test run) the wrapper
+        writes its own diagnostics to stderr, which the runner captures in
+        `stderr.log`. Report that path when the file exists so the failure has a
+        pointer to the wrapper's side of the story alongside the simulator log.
+        """
+        stderr_log_path = os.path.join(self.job_dir, "stderr.log")
+        if not os.path.exists(stderr_log_path):
+            return
+        try:
+            if os.path.getsize(stderr_log_path) == 0:
+                return
+        except OSError:
+            return
+        log.error("%s wrapper stderr in %s", self, stderr_log_path)
 
     def _read_simulation_duration(self):
         return self._read_simulation_statistics()[2]
