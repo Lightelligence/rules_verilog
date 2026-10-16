@@ -1,6 +1,6 @@
 """VCS backend helpers for DV rules."""
 
-load("//verilog/private:verilog.bzl", "ToolEncapsulationInfo", "VerilogInfo", "flists_to_arguments", "get_transitive_srcs", "merge_default_runfiles", "normalize_vcs_unit_test_compile_args", "partition_vcs_unit_test_args", "runfiles_relative_short_path")
+load("//verilog/private:verilog.bzl", "ToolEncapsulationInfo", "VerilogInfo", "expand_runfiles_locations", "flists_to_arguments", "get_transitive_srcs", "merge_default_runfiles", "normalize_vcs_unit_test_compile_args", "partition_vcs_unit_test_args", "runfiles_relative_short_path")
 
 def _use_vcs_default(selected_file, xrun_default_file, vcs_default_file):
     if selected_file.short_path == xrun_default_file.short_path:
@@ -204,9 +204,10 @@ def _extra_compile_outputs(ctx, defines, selected_compile_args, compile_config):
             output = vlogan_args_file,
             substitutions = {
                 "{DEFINES}": "\n".join(["+define+{}{}".format(key, value) for key, value in _sanitize_defines(defines).items()]),
-                "{VLOGAN_ARGS}": ctx.expand_location(
+                "{VLOGAN_ARGS}": expand_runfiles_locations(
+                    ctx,
                     "\n".join(ctx.attr.vcs_vlogan_args),
-                    targets = ctx.attr.extra_runfiles,
+                    ctx.attr.extra_runfiles,
                 ),
             },
         )
@@ -224,9 +225,10 @@ def _extra_compile_outputs(ctx, defines, selected_compile_args, compile_config):
             template = ctx.file._elab_args_template_vcs,
             output = elab_args_file,
             substitutions = {
-                "{ELAB_ARGS}": ctx.expand_location(
+                "{ELAB_ARGS}": expand_runfiles_locations(
+                    ctx,
                     "\n".join(ctx.attr.vcs_elab_args),
-                    targets = ctx.attr.extra_runfiles,
+                    ctx.attr.extra_runfiles,
                 ),
             },
         )

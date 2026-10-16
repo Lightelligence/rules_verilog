@@ -340,7 +340,9 @@ def record_compile_job(run, vcomp_job, status=None):
         "error_message": getattr(vcomp_job, "error_message", None),
     }
     _record_job_interval(compile_record, vcomp_job, stopped_at=stopped_at)
-    _upsert_by_key(run["compile"], "vcomp_target", compile_record)
+    # Key by compile directory: analog variants of one bench share vcomp_target
+    # but compile into distinct libraries and must not overwrite each other.
+    _upsert_by_key(run["compile"], "compile_dir", compile_record)
 
 
 def record_test_job(run, test_job, waves_script=None, waves_path=None, status=None, simulation_started=None):

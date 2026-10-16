@@ -75,7 +75,8 @@ def create_flist_content(ctx, gumi_path, allow_library_discovery, makelib = "", 
     # Using dirname may result in bazel-out included in path
     incdir = depset([runfiles_relative_short_path(f)[:-len(f.basename) - 1] for f in ctx.files.headers]).to_list()
     for d in incdir:
-        flist_content.append("+incdir+{}".format(d))
+        # A header in the root package has an empty directory; "+incdir+" alone is invalid.
+        flist_content.append("+incdir+{}".format(d or "."))
 
     # Using dirname may result in bazel-out included in path
     libdir = depset([runfiles_relative_short_path(f)[:-len(f.basename) - 1] for f in ctx.files.modules]).to_list()
@@ -728,7 +729,10 @@ def _verilog_rtl_lint_test_impl(ctx):
     # See github issue #24
     shell_defines_string = "-define {}{}"
     attr_defines_string = "-define {}{}"
-    if simulator == "VCS" or str(ctx.attr.run_template.label) == "@rules_verilog//vendors/real_intent:verilog_rtl_lint_test.sh.template":
+    if simulator == "VCS" or _label_matches_default(
+        ctx.attr.run_template.label,
+        "@rules_verilog//vendors/real_intent:verilog_rtl_lint_test.sh.template",
+    ):
         shell_defines_string = "+define+{}{}"
         attr_defines_string = "+define+{}{}"
 

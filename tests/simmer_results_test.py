@@ -509,6 +509,30 @@ class SimmerResultsTest(unittest.TestCase):
         simmer_results.record_compile_job(run, vcomp, status="INTERRUPTED")
         self.assertEqual("INTERRUPTED", run["compile"][0]["status"])
 
+    def test_analog_variants_sharing_a_target_keep_separate_compile_records(self):
+        run = simmer_results.create_run(["simmer", "-t", "tb:*"], self.rcfg, 2)
+
+        def make_variant(suffix):
+            return SimpleNamespace(
+                name="tb__analog_" + suffix,
+                bazel_vcomp_target="//tb:tb",
+                jobstatus=SimpleNamespace(name="PASSED"),
+                job_dir="compile/tb__analog_{}_VCOMP".format(suffix),
+                log_path="compile/tb__analog_{}_VCOMP/cmp.log".format(suffix),
+                duration_s=1.0,
+                compile_metrics={},
+                error_message=None,
+            )
+
+        first, second = make_variant("dc"), make_variant("step")
+        simmer_results.record_compile_job(run, first)
+        simmer_results.record_compile_job(run, second)
+        # A later update of the same variant replaces only its own record.
+        simmer_results.record_compile_job(run, first, status="INTERRUPTED")
+
+        self.assertEqual(["tb__analog_dc", "tb__analog_step"], [record["bench"] for record in run["compile"]])
+        self.assertEqual(["INTERRUPTED", "PASSED"], [record["status"] for record in run["compile"]])
+
     def test_history_formats_single_run_elapsed_times(self):
         started_at = datetime.datetime(2026, 8, 6, 10, 30, 0)
         run = simmer_results.create_run(["simmer", "-t", "tb:test"], self.rcfg, 1)
