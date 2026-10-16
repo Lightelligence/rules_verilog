@@ -214,6 +214,8 @@ def parse_args(argv):
             '--vcs-partcomp-jobs',
             '--vcs-partcomp-dir',
             '--vcs-partcomp-sharedlib',
+            '--vcs-make-jobs',
+            '--no-vcs-make-jobs',
             '--vcs-auto-compile-cache',
             '--no-vcs-auto-compile-cache',
             '--smartlog',

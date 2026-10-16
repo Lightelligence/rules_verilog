@@ -19,6 +19,9 @@ cd {{ bazel_runfiles_main|shell_quote }}
   {% if partcomp_opts -%}
     {{ partcomp_opts }} \
   {% endif -%}
+  {% if make_jobs_opts -%}
+    {{ make_jobs_opts }} \
+  {% endif -%}
   {% if options.dtl -%}
     -enable_dynamic_tb \
   {% endif -%}

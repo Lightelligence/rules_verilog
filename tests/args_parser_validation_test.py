@@ -69,6 +69,28 @@ class ArgsParserValidationTest(unittest.TestCase):
         self.assert_parse_error(["--vcs-debug-access", "all"])
         self.assert_parse_error(["--vcs-debug-access", ""])
 
+    def test_vcs_make_jobs_defaults_to_auto_and_accepts_an_explicit_count(self):
+        default = parse_args([])
+        self.assertEqual("auto", default.vcs_make_jobs)
+        self.assertNotIn("--vcs-make-jobs", default.vcs_explicit_switches)
+
+        explicit = parse_args(["--vcs-make-jobs", "4"])
+        self.assertEqual(4, explicit.vcs_make_jobs)
+        self.assertIn("--vcs-make-jobs", explicit.vcs_explicit_switches)
+        self.assertIn("--vcs-make-jobs", explicit.reproduce_args)
+        self.assertEqual("auto", parse_args(["--vcs-make-jobs", "auto"]).vcs_make_jobs)
+
+        serial = parse_args(["--no-vcs-make-jobs"])
+        self.assertIsNone(serial.vcs_make_jobs)
+        self.assertIn("--no-vcs-make-jobs", serial.vcs_explicit_switches)
+        self.assertIn("--no-vcs-make-jobs", serial.reproduce_args)
+
+    def test_vcs_make_jobs_rejects_malformed_counts(self):
+        # A non-negative range check and the conflicting partcomp request live in
+        # the VCS option validator, covered by the runtime contract test.
+        self.assert_parse_error(["--vcs-make-jobs", "many"])
+        self.assert_parse_error(["--vcs-make-jobs", "2", "--no-vcs-make-jobs"])
+
     def test_tag_filter_requires_preceding_test_selector(self):
         self.assert_parse_error(["--tag", "smoke"])
         self.assert_parse_error(["--ntag", "slow"])
