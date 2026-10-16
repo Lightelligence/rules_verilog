@@ -26,6 +26,14 @@ from .vcs_jobs import IcoInitJob, VsoAskJob, VsoInitJob
 log = logging.getLogger(__name__)
 
 PARTCOMP_MANIFEST_FILENAME = ".rules_verilog_partcomp.json"
+
+# Compile-time -debug_access flag for each --vcs-debug-access / vcs_debug_access level.
+# "full" keeps UVM HDL deposit/force and DUT memory backdoor access working.
+_VCS_DEBUG_ACCESS_FLAGS = {
+    "full": "-debug_access+r+w+f",
+    "r": "-debug_access+r",
+    "none": "",
+}
 _MAX_BENIGN_MAKE_CLOCK_SKEW_SECONDS = 0.1
 _INCR_VLOGAN_IGNORED_ENVIRONMENT = (
     "HOST",
@@ -213,12 +221,24 @@ class VcsSimulator(SimulatorInterface):
     def coverage_enabled(self):
         return bool(self.options.cm)
 
+    def get_debug_access(self, vcomp_job):
+        """Resolve the compile debug-access level: CLI, then bench attribute, then full."""
+        level = self.options.vcs_debug_access or getattr(vcomp_job, "tb_options", {}).get("vcs_debug_access") or "full"
+        if level not in _VCS_DEBUG_ACCESS_FLAGS:
+            raise ValueError("Unsupported vcs_debug_access '{}'; expected one of {}.".format(
+                level, ", ".join(sorted(_VCS_DEBUG_ACCESS_FLAGS))))
+        if level == "none" and (self.options.gui or self.options.waves is not None):
+            raise ValueError("vcs_debug_access 'none' cannot be combined with --waves or --gui because wave dumping "
+                             "and the GUI need debug access. Use 'r' or 'full'.")
+        return level
+
     def get_compile_template_context(self, vcomp_job):
         vso_workdir = self.vso_workflow.workdir() if self.options.vso_cbv else ''
         if vso_workdir:
             os.makedirs(vso_workdir, exist_ok=True)
         context = {
             'vcs_runner': self.get_tool_runner(),
+            'vcs_debug_access_opt': _VCS_DEBUG_ACCESS_FLAGS[self.get_debug_access(vcomp_job)],
             'vso_build_name': self.vso_workflow.build_name(vcomp_job) if self.options.vso else '',
             'vso_workdir': vso_workdir,
         }
@@ -1161,6 +1181,7 @@ source annotation and hierarchy details.</p></html>
                 "partcomp_mode": self.options.vcs_partcomp_mode,
                 "three_step": bool(getattr(vcomp_job, "vcs_three_step", False)),
                 "debug_mode": "gui" if self.options.gui else "waves" if self.options.waves is not None else "default",
+                "debug_access": self.get_debug_access(vcomp_job),
                 "coverage": self.options.cm,
                 "coverage_line": self.options.vcs_cm_line,
                 "coverage_report": self.options.vcs_cm_report or [],

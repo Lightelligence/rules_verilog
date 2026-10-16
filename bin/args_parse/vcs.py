@@ -213,6 +213,16 @@ def add_vcs_arguments(parser):
                       help=('Enable the batch-only VCS Dynamic Test Loading static/base compile flow. It uses the '
                             'default Partition Compile flow, owns <VCOMP>/dtl_static, and cannot be combined with '
                             '--no-vcs-partcomp, --gui, or custom Partition Compile mode/directories.'))
+    gvcs.add_argument('--vcs-debug-access',
+                      dest='vcs_debug_access',
+                      choices=['full', 'r', 'none'],
+                      default=None,
+                      help=('Select the compile-time VCS debug access level. full (default) passes '
+                            '-debug_access+r+w+f, which UVM HDL deposit/force and DUT memory backdoor access need. '
+                            'r passes -debug_access+r (read-only) and none passes no -debug_access, both of which '
+                            'reduce compile, elaboration, and simulation cost for benches that do not need write '
+                            'access. none cannot be combined with --waves or --gui. Overrides the testbench '
+                            'vcs_debug_access setting; --gui always uses its own full debug flags.'))
     gvcs.add_argument('--fgp',
                       type=int,
                       default=None,

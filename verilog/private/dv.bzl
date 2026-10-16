@@ -29,6 +29,7 @@ DVTBInfo = provider("Simulator configuration for a DV testbench.", fields = {
     "run_pass_patterns": "Project-specific simulation pass regexes.",
     "simulator": "Simulator selected for this DV testbench.",
     "vcs_cm_hier": "VCS coverage hierarchy configuration file.",
+    "vcs_debug_access": "Testbench VCS compile debug-access level.",
     "xcelium_covfile": "Xcelium coverage configuration file.",
 })
 
@@ -730,6 +731,7 @@ def _verilog_dv_tb_impl(ctx):
             run_pass_patterns = ctx.attr.run_pass_patterns,
             simulator = simulator,
             vcs_cm_hier = ctx.file.vcs_cm_hier,
+            vcs_debug_access = ctx.attr.vcs_debug_access,
             xcelium_covfile = xcelium_covfile,
         ),
     ]
@@ -828,6 +830,16 @@ verilog_dv_tb = rule(
         "vcs_cm_hier": attr.label(
             allow_single_file = True,
             doc = "VCS -cm_hier coverage configuration file.",
+        ),
+        "vcs_debug_access": attr.string(
+            default = "",
+            doc = (
+                "Compile-time VCS -debug_access level for this testbench: full, r, or none. Empty uses the " +
+                "regression default, which is full (+r+w+f) so UVM HDL deposit/force and DUT memory backdoor " +
+                "access keep working. r drops write access and none drops -debug_access entirely, which lowers " +
+                "compile, elaboration, and simulation cost for testbenches that do not need it. The " +
+                "--vcs-debug-access switch overrides this attribute, and --waves/--gui require r or full."
+            ),
         ),
         "vcs_three_step": attr.bool(
             default = False,

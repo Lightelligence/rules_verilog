@@ -67,6 +67,9 @@ def validate_vcs_runtime_options(options, parser):
         parser.error("--fgp must be a positive integer thread count. Stopping before Bazel starts.")
     if options.vcs_runner is not None and not options.vcs_runner.strip():
         parser.error("--vcs-runner must not be empty. Stopping before Bazel starts.")
+    if options.vcs_debug_access == 'none' and (options.gui or options.waves is not None):
+        parser.error("--vcs-debug-access none cannot be combined with --waves or --gui because wave dumping and "
+                     "the GUI need debug access. Use r or full. Stopping before Bazel starts.")
     if options.vcs_partcomp_jobs != 'auto' and options.vcs_partcomp_jobs < 1:
         parser.error("--vcs-partcomp-jobs must be a positive integer. Stopping before Bazel starts.")
     if options.vcs_partcomp_dir is not None and not options.vcs_partcomp_dir.strip():

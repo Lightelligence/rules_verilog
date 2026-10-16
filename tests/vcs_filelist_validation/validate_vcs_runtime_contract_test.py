@@ -894,6 +894,7 @@ run_bounded_process([
                     xprop_was_explicit=False,
                 ),
                 partcomp_opts="",
+                vcs_debug_access_opt="-debug_access+r+w+f",
                 vcs_runner="vcs-runner",
                 vso_build_name="",
                 vso_workdir="",
@@ -2674,6 +2675,109 @@ exit 0
             self.assertEqual("1", arguments[0])
             self.assertIn("first second", arguments[1])
 
+    def test_vcs_debug_access_levels_render_in_both_compile_templates(self):
+        environment = jinja2.Environment(undefined=jinja2.StrictUndefined)
+        environment.filters["shell_quote"] = shlex.quote
+
+        def render(template_name, debug_access_opt, debug_mode):
+            template = environment.from_string(self._read_repo_file("bin/templates/" + template_name))
+            return " ".join(
+                template.render(
+                    VCOMP_DIR="/tmp/vcomp",
+                    additional_defines=[],
+                    bazel_compile_args="/tmp/compile_args.f",
+                    bazel_runfiles_main="/tmp/runfiles",
+                    cov_opts="",
+                    debug_mode=debug_mode,
+                    options=SimpleNamespace(
+                        compile_args_file=None,
+                        dtl=False,
+                        fgp=None,
+                        gui=debug_mode == "gui",
+                        smartlog=False,
+                        vcs_profile=False,
+                        vso=False,
+                        vso_cbv=False,
+                        vso_ccex=False,
+                        waves=[] if debug_mode == "waves" else None,
+                        xprop_was_explicit=False,
+                    ),
+                    partcomp_opts="",
+                    vcs_analysis_work_dir="/tmp/vcomp/vlogan_work",
+                    vcs_debug_access_opt=debug_access_opt,
+                    vcs_elab_args="/tmp/elab_args.f",
+                    vcs_incr_vlogan_ignore_env="-vts_ignore_env=HOSTNAME",
+                    vcs_runner="vcs-runner",
+                    vcs_setup_file="/tmp/vcomp/synopsys_sim.setup",
+                    vcs_vlogan_args="/tmp/vlogan_args.f",
+                    vcs_vlogan_filelists="/tmp/vlogan_filelists.txt",
+                    vso_build_name="",
+                    vso_workdir="",
+                    xprop_cmd=None,
+                ).split())
+
+        for template_name in ("vcs_compile_template.sh.j2", "vcs_three_step_compile_template.sh.j2"):
+            with self.subTest(template=template_name, level="full"):
+                self.assertIn(" -debug_access+r+w+f ", render(template_name, "-debug_access+r+w+f", "default"))
+            with self.subTest(template=template_name, level="r"):
+                rendered = render(template_name, "-debug_access+r", "default")
+                self.assertIn(" -debug_access+r ", rendered)
+                self.assertNotIn("-debug_access+r+w+f", rendered)
+            with self.subTest(template=template_name, level="none"):
+                self.assertNotIn("-debug_access", render(template_name, "", "default"))
+            with self.subTest(template=template_name, level="waves keeps -kdb"):
+                rendered = render(template_name, "-debug_access+r", "waves")
+                self.assertIn(" -kdb ", rendered)
+                self.assertIn(" -debug_access+r ", rendered)
+            with self.subTest(template=template_name, level="gui ignores the knob"):
+                rendered = render(template_name, "-debug_access+r", "gui")
+                self.assertIn("-debug_access+all+reverse", rendered)
+                self.assertNotIn(" -debug_access+r ", rendered)
+
+    def test_vcs_debug_access_resolves_from_cli_then_bench_then_full(self):
+
+        def resolved(argv, bench_value=None):
+            _, simulator = self._validated(["-t", "unit:test", "--simulator", "VCS"] + argv)
+            job = DummyVcompJob()
+            if bench_value is not None:
+                job.tb_options["vcs_debug_access"] = bench_value
+            return simulator.get_compile_template_context(job)["vcs_debug_access_opt"]
+
+        self.assertEqual("-debug_access+r+w+f", resolved([]))
+        self.assertEqual("-debug_access+r+w+f", resolved([], "full"))
+        self.assertEqual("-debug_access+r", resolved([], "r"))
+        self.assertEqual("", resolved([], "none"))
+        self.assertEqual("-debug_access+r", resolved(["--vcs-debug-access", "r"]))
+        self.assertEqual("-debug_access+r+w+f", resolved(["--vcs-debug-access", "full"], "none"))
+        self.assertEqual("", resolved(["--vcs-debug-access", "none"], "r"))
+
+    def test_vcs_debug_access_none_is_rejected_with_waves_or_gui(self):
+        for argv in (["--waves"], ["--gui"]):
+            with self.subTest(argv=argv):
+                with self.assertRaisesRegex(ValueError, "vcs-debug-access"):
+                    self._validated(["-t", "unit:test", "--simulator", "VCS", "--vcs-debug-access", "none"] + argv)
+        # A bench-level none is only known once the compile job is prepared.
+        _, simulator = self._validated(["-t", "unit:test", "--simulator", "VCS", "--waves"])
+        job = DummyVcompJob()
+        job.tb_options["vcs_debug_access"] = "none"
+        with self.assertRaisesRegex(ValueError, "vcs_debug_access"):
+            simulator.get_compile_template_context(job)
+
+    def test_vcs_debug_access_is_vcs_only_and_part_of_the_compile_identity(self):
+        with self.assertRaises(ValueError):
+            self._validated(["-t", "unit:test", "--simulator", "XRUN", "--vcs-debug-access", "r"])
+
+        manifests = []
+        for argv in ([], ["--vcs-debug-access", "r"]):
+            _, simulator = self._validated(["-t", "unit:test", "--simulator", "VCS"] + argv)
+            job = DummyVcompJob()
+            job.compile_fingerprint = {}
+            with mock.patch.object(VcsSimulator, "get_tool_identity", return_value="vcs-test"):
+                manifests.append(simulator._partcomp_manifest_identity(job))
+        self.assertEqual("full", manifests[0]["configuration"]["debug_access"])
+        self.assertEqual("r", manifests[1]["configuration"]["debug_access"])
+        self.assertNotEqual(manifests[0], manifests[1])
+
     def test_vcs_compile_template_defaults_to_incremental_compile(self):
         template = self._read_repo_file("bin/templates/vcs_compile_template.sh.j2")
         compile_args = self._read_repo_file("vendors/synopsys/verilog_dv_tb_compile_args.f.template")
@@ -2731,6 +2835,7 @@ exit 0
                 xprop_was_explicit=False,
             ),
             partcomp_opts="",
+            vcs_debug_access_opt="-debug_access+r+w+f",
             vcs_runner=shlex.quote("../" + stub.name),
             vso_build_name="",
             vso_workdir="",
@@ -2829,6 +2934,7 @@ exit 0
             ),
             partcomp_opts="-partcomp -fastpartcomp=j2",
             vcs_analysis_work_dir=shell_path(vcomp_dir / "vlogan_work"),
+            vcs_debug_access_opt="-debug_access+r+w+f",
             vcs_elab_args=shell_path(elab_args),
             vcs_incr_vlogan_ignore_env="-vts_ignore_env=HOSTNAME,LSB_JOBID",
             vcs_runner=shlex.quote(shell_path(stub)),

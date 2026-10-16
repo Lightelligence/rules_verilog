@@ -53,6 +53,22 @@ class ArgsParserValidationTest(unittest.TestCase):
                 parse_args(argv)
         self.assertEqual(2, raised.exception.code)
 
+    def test_vcs_debug_access_is_unset_by_default_and_accepts_known_levels(self):
+        default = parse_args([])
+        self.assertIsNone(default.vcs_debug_access)
+        self.assertNotIn("--vcs-debug-access", default.vcs_explicit_switches)
+        for level in ("full", "r", "none"):
+            with self.subTest(level=level):
+                options = parse_args(["--vcs-debug-access", level])
+                self.assertEqual(level, options.vcs_debug_access)
+                self.assertIn("--vcs-debug-access", options.vcs_explicit_switches)
+                self.assertIn("--vcs-debug-access", options.reproduce_args)
+        self.assertEqual("r", parse_args(["--vcs-debug-access=r"]).vcs_debug_access)
+
+    def test_vcs_debug_access_rejects_unknown_levels(self):
+        self.assert_parse_error(["--vcs-debug-access", "all"])
+        self.assert_parse_error(["--vcs-debug-access", ""])
+
     def test_tag_filter_requires_preceding_test_selector(self):
         self.assert_parse_error(["--tag", "smoke"])
         self.assert_parse_error(["--ntag", "slow"])

@@ -425,6 +425,14 @@ class VcsFilelistValidationTest(unittest.TestCase):
         self.assertNotIn("runtime_only.data", compile_inputs)
         self.assertTrue(runfile_exists("tests/vcs_filelist_validation/runtime_only.data"))
 
+    def test_vcs_debug_access_attribute_is_exported_to_tb_options(self):
+        default_options = ast.literal_eval(read_runfile("tests/vcs_filelist_validation/dv_tb_vcs_tb_options.py"))
+        read_only_options = ast.literal_eval(
+            read_runfile("tests/vcs_filelist_validation/dv_tb_vcs_debug_access_r_tb_options.py"))
+
+        self.assertEqual("", default_options["vcs_debug_access"])
+        self.assertEqual("r", read_only_options["vcs_debug_access"])
+
     def test_vcs_three_step_separates_analysis_filelists_from_elaboration(self):
         options_path = "tests/vcs_filelist_validation/dv_tb_vcs_three_step_tb_options.py"
         options = ast.literal_eval(read_runfile(options_path))
