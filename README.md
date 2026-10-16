@@ -153,9 +153,11 @@ simmer -t 'sys_tb:smoke_test@1' --simulator VCS --waves \
 
 The generated FSDB controls are:
 
-All standard VCS compile paths use `-debug_access+r+w+f`, providing signal
-read/write/force access required by UVM HDL deposit/force calls and DUT memory
-backdoor loads without requiring waves. Wave builds additionally enable KDB and
+All standard VCS compile paths use `-debug_access+r+w+f` by default, providing
+signal read/write/force access required by UVM HDL deposit/force calls and DUT
+memory backdoor loads without requiring waves. Benches that need none of that
+can lower the level with `--vcs-debug-access {r,none}` or
+`verilog_dv_tb(vcs_debug_access = ...)` to cut compile and simulation cost. Wave builds additionally enable KDB and
 FSDB capture; they do not enable VPI or UVM transaction recording.
 
 | simmer argument | Effect |

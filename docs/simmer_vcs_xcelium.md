@@ -636,7 +636,7 @@ VCS compile filelists use `-file`. Runtime `simv` invocations use `-f`.
 Batch VCS defaults keep waveform and transaction-debug features off while
 retaining the access needed by every testbench:
 
-- default `-debug_access+r+w+f` for UVM HDL deposit/force and DUT memory backdoor access
+- default `-debug_access+r+w+f` (`--vcs-debug-access full`) for UVM HDL deposit/force and DUT memory backdoor access
 - no default `+vpi`
 - no default xprop
 - no default smartlog
@@ -666,6 +666,26 @@ The signal-only mode avoids the callback, driver, class, and VPI capabilities
 used for transaction-aware debug. GUI mode keeps VPI and UVM recording. Add
 interface instances such as `hdl_top.spi_apb_if` and `hdl_top.mcp_axi_if` to
 `--waves` when they are outside a narrower RTL probe scope.
+
+### Compile debug access level
+
+`--vcs-debug-access {full,r,none}` selects the compile-time `-debug_access`
+flag for batch and `--waves` builds:
+
+| Level | Compile flag | Use when |
+|-------|--------------|----------|
+| `full` (default) | `-debug_access+r+w+f` | UVM HDL deposit/force or DUT memory backdoor access is used. |
+| `r` | `-debug_access+r` | Signals are read (for example by waves) but never written or forced. |
+| `none` | no `-debug_access` | The bench needs no HDL access at all; lowest compile, elaboration, and simulation cost. |
+
+A testbench can set its own level with `verilog_dv_tb(vcs_debug_access = ...)`;
+the CLI switch overrides that attribute, and an empty attribute keeps `full`.
+`none` cannot be combined with `--waves` or `--gui`, and `--gui` always uses its
+own `-debug_access+all+reverse`. The level is part of the compile identity, so
+changing it forces a recompile and never reuses a cached `simv` built at another
+level. The switch is VCS-only; XRUN rejects it, and `verilog_dv_tb` rejects the
+attribute for Xcelium testbenches. Switching a bench to `r` or `none` can break
+tests that deposit or force HDL paths, so validate on a licensed host first.
 
 `--xprop` remains a compatibility spelling for VCS. Use `--vcs-xprop` in new
 VCS commands so simulator-specific controls stay grouped in `simmer -h`.

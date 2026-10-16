@@ -218,6 +218,7 @@ def parse_args(argv):
             '--no-vcs-auto-compile-cache',
             '--smartlog',
             '--vcs-runner',
+            '--vcs-debug-access',
             '--dtl',
             '--fgp',
             '--vcs-xprop',
