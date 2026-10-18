@@ -81,7 +81,10 @@ report_jinja2_env = regression_report.create_template_environment(os.path.join(d
 RERUN_TEMPLATE = jinja2_env.get_template('rerun_template.sh.j2')
 RUN_WAVE_TEMPLATE = jinja2_env.get_template('run_waves_template.sh.j2')
 _FILESYSTEM_COMPONENT_MAX_BYTES = 255
-_VCOMP_BACKEND_SUFFIX_MAX_BYTES = len("_HREF".encode("utf-8"))
+# Longest VCOMP directory suffix any backend appends to the shared compile
+# directory name: XRUN _HREF/_PRIM and VCS _WAVES/_GUI. The base name is
+# shortened by this budget so every backend keeps its full suffix.
+_VCOMP_BACKEND_SUFFIX_MAX_BYTES = len("_WAVES".encode("utf-8"))
 
 
 def _utf8_prefix(value, byte_limit):
@@ -627,6 +630,7 @@ class VCompJob(Job):
         compile_gen_opts = self.simulator.generate_compile_options(self)
         cov_opts = compile_gen_opts['cov_opts']
         partcomp_opts = compile_gen_opts.get('partcomp_opts', '')
+        make_jobs_opts = compile_gen_opts.get('make_jobs_opts', '')
         xprop_cmd = compile_gen_opts['xprop_cmd']
         additional_defines = compile_gen_opts['additional_defines']
 
@@ -679,6 +683,7 @@ class VCompJob(Job):
             'VCOMP_DIR': self.job_dir,
             'cov_opts': cov_opts,
             'partcomp_opts': partcomp_opts,
+            'make_jobs_opts': make_jobs_opts,
             'bazel_runfiles_main': self.bazel_runfiles_main,
             'bazel_compile_args': self.bazel_compile_args,
             'debug_mode': debug_mode,
@@ -1306,6 +1311,11 @@ class TestJob(Job):
                     self.error_message = errors.read()
             else:
                 self.error_message = f"Sim failed (return code {self.job_lib.returncode}), no {self.LOG_NAME}.err found."
+
+            # When output was suppressed the wrapper's own diagnostics went to
+            # stderr.log instead of stdout, so point the user at it if it has
+            # content. Nothing else surfaces this file for test jobs.
+            self._report_wrapper_stderr()
         else: # PASSED
             if self.rcfg.tidy:
                 log_path = ""
@@ -1407,6 +1417,24 @@ class TestJob(Job):
 
     def _get_job_time_str(self):
         return self._format_duration(self.job_time)
+
+    def _report_wrapper_stderr(self):
+        """Surface the job wrapper's captured stderr after a test failure.
+
+        When output is suppressed (`--no-stdout` or a multi-test run) the wrapper
+        writes its own diagnostics to stderr, which the runner captures in
+        `stderr.log`. Report that path when the file exists so the failure has a
+        pointer to the wrapper's side of the story alongside the simulator log.
+        """
+        stderr_log_path = os.path.join(self.job_dir, "stderr.log")
+        if not os.path.exists(stderr_log_path):
+            return
+        try:
+            if os.path.getsize(stderr_log_path) == 0:
+                return
+        except OSError:
+            return
+        log.error("%s wrapper stderr in %s", self, stderr_log_path)
 
     def _read_simulation_duration(self):
         return self._read_simulation_statistics()[2]

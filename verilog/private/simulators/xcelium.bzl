@@ -5,6 +5,8 @@ load("//verilog/private:verilog.bzl", "ToolEncapsulationInfo", "VerilogInfo", "f
 def _validate_tb(ctx, has_msie_primary, has_msie_extras):
     if ctx.file.vcs_cm_hier:
         fail("verilog_dv_tb {} vcs_cm_hier cannot be used with Xcelium".format(ctx.label))
+    if ctx.attr.vcs_debug_access:
+        fail("verilog_dv_tb {} vcs_debug_access cannot be used with Xcelium".format(ctx.label))
     if (
         ctx.attr.vcs_three_step or
         ctx.attr.vcs_vlogan_args or

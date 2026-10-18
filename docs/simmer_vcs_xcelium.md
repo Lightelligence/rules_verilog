@@ -178,6 +178,14 @@ The default VCS flow automatically reuses unchanged builds:
    does not invalidate VCS reuse.
 3. A match bypasses VCS. A miss compiles with Partition Compile by default.
 
+`--waves` and `--gui` compile into the sibling `<tb>__VCS_VCOMP_WAVES` and
+`<tb>__VCS_VCOMP_GUI` directories. Each mode owns its `simv`, `csrc`,
+fingerprint, and log, so a debug rerun neither rebuilds the batch build nor is
+reused in place of it. The first run of a mode after a batch build compiles once
+in its own directory, and later batch runs still hit the batch cache.
+`--no-compile --waves` therefore requires a previous `--waves` compile. Each
+mode you use costs one extra compile directory per testbench.
+
 The normal command performs this automatic hit-or-compile decision:
 
 ```bash
@@ -379,7 +387,10 @@ semantics.
 
 The persistent analysis library is `<tb>__VCS_VCOMP/vlogan_work`.
 GUI-specific UVM recorder defines use the sibling `vlogan_work_gui` so switching
-GUI mode does not invalidate the batch analysis database. Simmer ignores only
+GUI mode does not invalidate the batch analysis database. `--waves` and `--gui`
+already compile under their own `<tb>__VCS_VCOMP_WAVES` and `<tb>__VCS_VCOMP_GUI`
+directories, so this split only matters when a GUI run is pointed back at the
+batch directory with a custom `--vcs-partcomp-dir`. Simmer ignores only
 volatile LSF host/job variables during VCS incremental-environment checks;
 tool, source, define and stable environment changes remain compile inputs.
 `--recompile` removes the analysis library along with the rest of the VCOMP
@@ -429,6 +440,22 @@ regular `-Mupdate`, protecting the default single-slot flow from the observed
 Y-2026.03-1 frontend crash. Explicit `--vcs-partcomp` or `--vcs-partcomp-*`
 options opt back in, including `j1`; DTL retains its required partition flow.
 This is a conservative allocation guard, not a claim that other releases fail.
+
+A disabled Partition Compile build still parallelizes its generated C compile
+and link. `--vcs-make-jobs N` passes `-jN` for that phase, and `auto` (the
+default) sizes it from the same allocation detection used for
+`-fastpartcomp=jN`:
+
+```text
+-jN
+```
+
+With an enabled Partition Compile flow, `-fastpartcomp=jN` already parallelizes
+the partition build, so `-jN` is omitted and combining the two explicit requests
+is rejected. `auto` likewise passes nothing when only one CPU is allocated, so
+the default single-slot job stays serial. Use `--no-vcs-make-jobs` to force the
+serial csrc compile and link, for example to reproduce a link failure or to
+bound memory when the allocated host is shared.
 
 For an LSF wrapper such as `bs='bsub -I -q syn'`, omitting `-n` normally means
 the queue's default allocation, often one slot. Request parallel capacity from
@@ -530,8 +557,8 @@ libraries, wrap testbench code in SystemVerilog packages, avoid `$unit` code and
 minimize cross-partition XMRs. Inspect `cmp.log` for `PC_SHARED`, `PC_RECOMPILE`
 and the `-pcmakeprof` timing table. Coverage and Verdi require the referenced
 partition database to remain available. With `--vcs-profile`, simmer also
-stores marker counts, selected partition mode/jobs, compile wall time and cache
-reuse state in the compile entry of `.simmer/results.json`.
+stores marker counts, selected partition mode/jobs, csrc `-j` count, compile wall
+time and cache reuse state in the compile entry of `.simmer/results.json`.
 
 Start with automatic partitioning. If profiling shows that stable third-party
 code shares a partition with frequently changing project code, add a VCS
@@ -636,11 +663,12 @@ VCS compile filelists use `-file`. Runtime `simv` invocations use `-f`.
 Batch VCS defaults keep waveform and transaction-debug features off while
 retaining the access needed by every testbench:
 
-- default `-debug_access+r+w+f` for UVM HDL deposit/force and DUT memory backdoor access
+- default `-debug_access+r+w+f` (`--vcs-debug-access full`) for UVM HDL deposit/force and DUT memory backdoor access
 - no default `+vpi`
 - no default xprop
 - no default smartlog
 - allocation-aware `-fastpartcomp=jN` (the detected LSF/Slurm or affinity allocation)
+- allocation-aware `-jN` for the csrc compile and link, passed only when Partition Compile is disabled
 
 Enable debug features explicitly:
 
@@ -666,6 +694,26 @@ The signal-only mode avoids the callback, driver, class, and VPI capabilities
 used for transaction-aware debug. GUI mode keeps VPI and UVM recording. Add
 interface instances such as `hdl_top.spi_apb_if` and `hdl_top.mcp_axi_if` to
 `--waves` when they are outside a narrower RTL probe scope.
+
+### Compile debug access level
+
+`--vcs-debug-access {full,r,none}` selects the compile-time `-debug_access`
+flag for batch and `--waves` builds:
+
+| Level | Compile flag | Use when |
+|-------|--------------|----------|
+| `full` (default) | `-debug_access+r+w+f` | UVM HDL deposit/force or DUT memory backdoor access is used. |
+| `r` | `-debug_access+r` | Signals are read (for example by waves) but never written or forced. |
+| `none` | no `-debug_access` | The bench needs no HDL access at all; lowest compile, elaboration, and simulation cost. |
+
+A testbench can set its own level with `verilog_dv_tb(vcs_debug_access = ...)`;
+the CLI switch overrides that attribute, and an empty attribute keeps `full`.
+`none` cannot be combined with `--waves` or `--gui`, and `--gui` always uses its
+own `-debug_access+all+reverse`. The level is part of the compile identity, so
+changing it forces a recompile and never reuses a cached `simv` built at another
+level. The switch is VCS-only; XRUN rejects it, and `verilog_dv_tb` rejects the
+attribute for Xcelium testbenches. Switching a bench to `r` or `none` can break
+tests that deposit or force HDL paths, so validate on a licensed host first.
 
 `--xprop` remains a compatibility spelling for VCS. Use `--vcs-xprop` in new
 VCS commands so simulator-specific controls stay grouped in `simmer -h`.

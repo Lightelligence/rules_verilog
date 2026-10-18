@@ -108,6 +108,11 @@ def _sanitize_compile_args(compile_args):
     return sanitized
 
 def _validate_tb(ctx, has_msie_primary, has_msie_extras):
+    if ctx.attr.vcs_debug_access not in ["", "full", "r", "none"]:
+        fail("verilog_dv_tb {} vcs_debug_access must be one of full, r, or none, got '{}'".format(
+            ctx.label,
+            ctx.attr.vcs_debug_access,
+        ))
     if ctx.files.ccf:
         fail("verilog_dv_tb {} ccf is Xcelium-only; use VCS -cm options instead".format(ctx.label))
     if ctx.file.xcelium_covfile:
@@ -273,6 +278,7 @@ def _runtime_config(ctx):
 def _tb_options(ctx, extra_compile_outputs, unused_xcelium_covfile):
     options = {
         "vcs_cm_hier": runfiles_relative_short_path(ctx.file.vcs_cm_hier) if ctx.file.vcs_cm_hier else "",
+        "vcs_debug_access": ctx.attr.vcs_debug_access,
         "vcs_three_step": ctx.attr.vcs_three_step,
     }
     if ctx.attr.vcs_three_step:

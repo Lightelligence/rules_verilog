@@ -135,6 +135,9 @@ run_vlogan_group \
   {% if partcomp_opts -%}
     {{ partcomp_opts }} \
   {% endif -%}
+  {% if make_jobs_opts -%}
+    {{ make_jobs_opts }} \
+  {% endif -%}
   {% if options.dtl -%}
     -enable_dynamic_tb \
   {% endif -%}
@@ -155,8 +158,8 @@ run_vlogan_group \
       -kdb \
     {% endif -%}
   {% endif -%}
-  {% if debug_mode != "gui" -%}
-    -debug_access+r+w+f \
+  {% if debug_mode != "gui" and vcs_debug_access_opt -%}
+    {{ vcs_debug_access_opt }} \
   {% endif -%}
   {% if debug_mode == "gui" -%}
     -kdb \

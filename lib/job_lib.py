@@ -364,20 +364,23 @@ class SubprocessJobRunner(JobRunner):
         self.log = job.log
 
         if self.job.suppress_output or self.job.rcfg.options.no_stdout:
-            self.stdout_log_path = self._get_stdout_capture_path()
+            # Redirect stdout to /dev/null to avoid writing the same simulator
+            # output twice (once via the simulator's own -l flag or tee, once
+            # via the wrapper's captured stdout). Stderr remains captured for
+            # diagnostics when the wrapper itself fails.
             self.stderr_log_path = os.path.join(self.job.job_dir, "stderr.log")
-            self.stdout_fp = open(self.stdout_log_path, 'w')
+            kwargs['stdout'] = subprocess.DEVNULL
             self.stderr_fp = open(self.stderr_log_path, 'w')
-            kwargs['stdout'] = self.stdout_fp
             kwargs['stderr'] = self.stderr_fp
         self._start_time = datetime.datetime.now()
         try:
             self._p = subprocess.Popen(self.job.main_cmdline, **kwargs)
             self._process_group_id = self._p.pid
         except Exception:
-            for stream in (getattr(self, "stdout_fp", None), getattr(self, "stderr_fp", None)):
-                if stream:
-                    stream.close()
+            # stderr_fp exists only when the output was suppressed above.
+            stderr_fp = getattr(self, "stderr_fp", None)
+            if stderr_fp:
+                stderr_fp.close()
             raise
 
     def _signal_process_group(self, sig):
@@ -475,9 +478,9 @@ class SubprocessJobRunner(JobRunner):
         return not self._managed_process_groups_exist()
 
     def _close_output_streams(self):
-        for stream in (getattr(self, "stdout_fp", None), getattr(self, "stderr_fp", None)):
-            if stream and not stream.closed:
-                stream.close()
+        stderr_fp = getattr(self, "stderr_fp", None)
+        if stderr_fp and not stderr_fp.closed:
+            stderr_fp.close()
         if not getattr(self, "shutdown_incomplete", False) and not self._sidecar_process_group_exists():
             path = getattr(self.job, "sidecar_process_groups_path", None)
             if path:
@@ -522,20 +525,6 @@ class SubprocessJobRunner(JobRunner):
             if overlap_end > overlap_start:
                 duration += overlap_end - overlap_start
         return duration
-
-    def _get_stdout_capture_path(self):
-        """Avoid clobbering simulator-owned stdout.log files.
-
-        Test jobs can ask the simulator itself to write `stdout.log` via its own
-        logging switch (for example VCS `-l stdout.log`). In that case, keep the
-        subprocess wrapper output separate so the simulator log remains
-        authoritative.
-        """
-        simulator_log_path = getattr(self.job, "_log_path", None)
-        default_stdout_log_path = os.path.join(self.job.job_dir, "stdout.log")
-        if simulator_log_path == default_stdout_log_path:
-            return os.path.join(self.job.job_dir, "job_runner.stdout.log")
-        return default_stdout_log_path
 
     def check_for_done(self):
         if self.done:
@@ -629,11 +618,20 @@ class SubprocessJobRunner(JobRunner):
             self._signal_process_group(signal.SIGTERM)
             self._signal_sidecar_process_groups(signal.SIGTERM)
             stderr_log_path = getattr(self, "stderr_log_path", os.path.join(self.job.job_dir, "stderr.log"))
-            stdout_log_path = getattr(self, "stdout_log_path", os.path.join(self.job.job_dir, "stdout.log"))
             with open(stderr_log_path, 'a') as filep:
-                filep.write("%%E- %s exceeded timeout value of %s (SIGTERM sent)" % (self.job, self.job.timeout))
-            with open(stdout_log_path, 'a') as filep:
-                filep.write("%%E- %s exceeded timeout value of %s (SIGTERM sent)" % (self.job, self.job.timeout))
+                filep.write("%%E- %s exceeded timeout value of %s (SIGTERM sent)\n" % (self.job, self.job.timeout))
+            # Also mark the simulator's own log when the simulator owns one.
+            # Never synthesize job_dir/stdout.log: that path belongs to the
+            # simulator's -l flag, and writing it here would both invent a file
+            # for jobs that have none and interleave with a live writer.
+            simulator_log_path = getattr(self.job, "_log_path", None)
+            if simulator_log_path:
+                try:
+                    with open(simulator_log_path, 'a') as filep:
+                        filep.write("%%E- %s exceeded timeout value of %s (SIGTERM sent)\n" %
+                                    (self.job, self.job.timeout))
+                except OSError:
+                    pass
             return False
         return False
 
@@ -647,9 +645,9 @@ class SubprocessJobRunner(JobRunner):
 
     def flush_output_streams(self):
         """Flush parent-owned output streams before an interactive state change."""
-        for stream in (getattr(self, "stdout_fp", None), getattr(self, "stderr_fp", None)):
-            if stream and not stream.closed:
-                stream.flush()
+        stderr_fp = getattr(self, "stderr_fp", None)
+        if stderr_fp and not stderr_fp.closed:
+            stderr_fp.flush()
 
     def pause(self):
         """Pause the subprocess group without consuming its timeout budget."""

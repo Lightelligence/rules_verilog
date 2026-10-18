@@ -26,7 +26,20 @@ from .vcs_jobs import IcoInitJob, VsoAskJob, VsoInitJob
 log = logging.getLogger(__name__)
 
 PARTCOMP_MANIFEST_FILENAME = ".rules_verilog_partcomp.json"
+
+# Compile-time -debug_access flag for each --vcs-debug-access / vcs_debug_access level.
+# "full" keeps UVM HDL deposit/force and DUT memory backdoor access working.
+_VCS_DEBUG_ACCESS_FLAGS = {
+    "full": "-debug_access+r+w+f",
+    "r": "-debug_access+r",
+    "none": "",
+}
 _MAX_BENIGN_MAKE_CLOCK_SKEW_SECONDS = 0.1
+
+# Sentinel for "this cached value has not been resolved yet". None is a real
+# result for both partcomp and csrc job counts (meaning "do not pass a flag"),
+# so it cannot double as "unresolved".
+_UNRESOLVED = object()
 _INCR_VLOGAN_IGNORED_ENVIRONMENT = (
     "HOST",
     "HOSTNAME",
@@ -97,7 +110,9 @@ class VcsSimulator(SimulatorInterface):
         self.vso_workflow = VsoWorkflow(options, rcfg)
         self._vso_init_job = None
         self._vso_ask_job = None
-        self._resolved_partcomp_jobs = None
+        self._resolved_partcomp_jobs = _UNRESOLVED
+        self._resolved_make_jobs = _UNRESOLVED
+        self._allocation_and_source = None
         self._vcs_tool_identity = None
 
     def get_name(self):
@@ -213,12 +228,24 @@ class VcsSimulator(SimulatorInterface):
     def coverage_enabled(self):
         return bool(self.options.cm)
 
+    def get_debug_access(self, vcomp_job):
+        """Resolve the compile debug-access level: CLI, then bench attribute, then full."""
+        level = self.options.vcs_debug_access or getattr(vcomp_job, "tb_options", {}).get("vcs_debug_access") or "full"
+        if level not in _VCS_DEBUG_ACCESS_FLAGS:
+            raise ValueError("Unsupported vcs_debug_access '{}'; expected one of {}.".format(
+                level, ", ".join(sorted(_VCS_DEBUG_ACCESS_FLAGS))))
+        if level == "none" and (self.options.gui or self.options.waves is not None):
+            raise ValueError("vcs_debug_access 'none' cannot be combined with --waves or --gui because wave dumping "
+                             "and the GUI need debug access. Use 'r' or 'full'.")
+        return level
+
     def get_compile_template_context(self, vcomp_job):
         vso_workdir = self.vso_workflow.workdir() if self.options.vso_cbv else ''
         if vso_workdir:
             os.makedirs(vso_workdir, exist_ok=True)
         context = {
             'vcs_runner': self.get_tool_runner(),
+            'vcs_debug_access_opt': _VCS_DEBUG_ACCESS_FLAGS[self.get_debug_access(vcomp_job)],
             'vso_build_name': self.vso_workflow.build_name(vcomp_job) if self.options.vso else '',
             'vso_workdir': vso_workdir,
         }
@@ -257,7 +284,12 @@ class VcsSimulator(SimulatorInterface):
         return inputs
 
     def compile_script_for_fingerprint(self, compile_script):
-        return re.sub(r"(?<!\S)-fastpartcomp=j\d+(?=\s|$)", "-fastpartcomp=jAUTO", compile_script)
+        # Both job counts are re-derived from the current allocation on every
+        # run, so a slot change must not invalidate an otherwise identical
+        # script. Only a standalone option token is normalized: a path or a
+        # +define+ value that merely ends in -jN is a real compile input.
+        normalized = re.sub(r"(?<!\S)-fastpartcomp=j\d+(?=\s|$)", "-fastpartcomp=jAUTO", compile_script)
+        return re.sub(r"(?<!\S)-j\d+(?=\s|$)", "-jAUTO", normalized)
 
     def should_auto_reuse_compile(self):
         return self.options.vcs_auto_compile_cache
@@ -297,7 +329,21 @@ class VcsSimulator(SimulatorInterface):
         return os.path.join(bazel_runfiles_main, relpath, "{}_compile_args.f".format(bazel_target))
 
     def get_vcomp_job_dir(self, default_job_dir):
-        return default_job_dir
+        # --waves and --gui need their own -kdb options, which invalidate the
+        # default csrc database. Give each mode a sibling compile directory so a
+        # debug rerun keeps the batch simv, fingerprint, and partition database
+        # instead of evicting them. get_debug_mode_dir_suffix() reports which of
+        # these directories belongs to the current run.
+        suffix = self.get_debug_mode_dir_suffix()
+        return default_job_dir + suffix if suffix else default_job_dir
+
+    def get_debug_mode_dir_suffix(self):
+        """Return the compile-directory suffix for the active debug mode."""
+        if self.options.gui:
+            return "_GUI"
+        if self.options.waves is not None:
+            return "_WAVES"
+        return ""
 
     def get_bazel_runtime_args_file(self, bazel_runfiles_main, relpath, bazel_target):
         return os.path.join(bazel_runfiles_main, relpath, "{}_runtime_args.f".format(bazel_target))
@@ -375,6 +421,7 @@ class VcsSimulator(SimulatorInterface):
         opts = {
             'cov_opts': '',
             'partcomp_opts': self.get_partition_compile_options(vcomp_job),
+            'make_jobs_opts': self.get_make_jobs_options(),
             'xprop_cmd': None,
             'additional_defines': [],
         }
@@ -437,6 +484,8 @@ class VcsSimulator(SimulatorInterface):
     def get_partition_compile_options(self, vcomp_job):
         effective_mode = self.get_effective_partcomp_mode()
         if effective_mode == 'disabled':
+            # -Mupdate comes from the vendored .f template, and any csrc
+            # parallelism is carried separately by get_make_jobs_options().
             log.info("VCS Partition Compile is disabled; using -Mupdate")
             return ''
 
@@ -479,14 +528,61 @@ class VcsSimulator(SimulatorInterface):
         return self.options.vcs_partcomp_mode
 
     def get_partcomp_jobs(self):
-        if self._resolved_partcomp_jobs is not None:
+        if self._resolved_partcomp_jobs is not _UNRESOLVED:
             return self._resolved_partcomp_jobs
         if self.options.vcs_partcomp_jobs != 'auto':
             self._resolved_partcomp_jobs = self.options.vcs_partcomp_jobs
-            return self._resolved_partcomp_jobs
-        self._resolved_partcomp_jobs, source = detect_allocated_cpus()
-        log.info("VCS Partition Compile auto-selected j%d from %s", self._resolved_partcomp_jobs, source)
+        else:
+            self._resolved_partcomp_jobs = self.get_allocation_and_source()[0]
         return self._resolved_partcomp_jobs
+
+    def get_allocation_and_source(self):
+        """Return (slots, source) for the CPUs allocated to this job.
+
+        Resolved once per simulator instance. -fastpartcomp=jN and -jN both size
+        themselves from this, so a single probe keeps them consistent.
+        """
+        if self._allocation_and_source is None:
+            self._allocation_and_source = detect_allocated_cpus()
+            log.info("VCS auto-selected %d allocated CPUs from %s", self._allocation_and_source[0],
+                     self._allocation_and_source[1])
+        return self._allocation_and_source
+
+    def get_make_jobs(self):
+        """Return the csrc -jN worker count, or None when -j must not be passed.
+
+        The count shares the allocation resolver with Partition Compile so both
+        paths respect LSF/Slurm slots and CPU affinity. -j parallelizes the
+        generated C compile and the link; with Partition Compile enabled
+        -fastpartcomp=jN already owns that parallelism, so -j is omitted.
+        """
+        if self._resolved_make_jobs is not _UNRESOLVED:
+            return self._resolved_make_jobs
+        self._resolved_make_jobs = self._resolve_make_jobs()
+        return self._resolved_make_jobs
+
+    def _resolve_make_jobs(self):
+        if self.options.vcs_make_jobs is None:
+            log.info("VCS csrc -j is disabled by --no-vcs-make-jobs")
+            return None
+        if self.get_effective_partcomp_mode() != 'disabled':
+            return None
+        request = self.options.vcs_make_jobs
+        if request == 'auto':
+            # Resolve the allocation once and reuse it, so -fastpartcomp and -j
+            # never disagree about how many slots this job actually owns.
+            jobs, source = self.get_allocation_and_source()
+        else:
+            jobs, source = request, "--vcs-make-jobs"
+        if jobs <= 1:
+            log.info("VCS csrc -j is omitted; %s reports a single allocated CPU", source)
+            return None
+        log.info("VCS csrc compile and link selected -j%d from %s", jobs, source)
+        return jobs
+
+    def get_make_jobs_options(self):
+        jobs = self.get_make_jobs()
+        return '-j{}'.format(jobs) if jobs else ''
 
     def get_partition_compile_dir(self, vcomp_job):
         partition_dir = self.options.vcs_partcomp_dir or os.path.join(
@@ -1099,6 +1195,16 @@ source annotation and hierarchy details.</p></html>
         return {'warning_regex': r"(?i)^(?:\s*(?:Warning|Error)(?:-|\s*:)|.+:\s*(?:warning|error):).*"}
 
     def get_ignored_compile_warning_line_numbers(self, log_path):
+        # Pre-screen with cheap substring checks: the common case (no make
+        # clock-skew warnings) avoids the full regex pass and early-exits.
+        try:
+            with open(log_path, 'rb') as probe:
+                content = probe.read()
+        except (OSError, IOError):
+            return set()
+        if b"make" not in content or b"warning" not in content:
+            return set()
+        # At least one "make" and one "warning" → run the regex pass.
         future_mtime_regex = re.compile(r"(?i)\bmake(?:\[\d+\])?:\s*warning:\s*file .+ has modification time "
                                         r"([0-9]+(?:\.[0-9]+)?)\s+s in the(?:\s+future\b|(?P<continued>\s*\\\s*$))")
         future_mtime_continuation_regex = re.compile(r"(?i)^\s*future\b")
@@ -1161,6 +1267,7 @@ source annotation and hierarchy details.</p></html>
                 "partcomp_mode": self.options.vcs_partcomp_mode,
                 "three_step": bool(getattr(vcomp_job, "vcs_three_step", False)),
                 "debug_mode": "gui" if self.options.gui else "waves" if self.options.waves is not None else "default",
+                "debug_access": self.get_debug_access(vcomp_job),
                 "coverage": self.options.cm,
                 "coverage_line": self.options.vcs_cm_line,
                 "coverage_report": self.options.vcs_cm_report or [],
@@ -1256,6 +1363,7 @@ source annotation and hierarchy details.</p></html>
             "compile_reused": reused,
             "partcomp_mode": effective_partcomp_mode,
             "partcomp_jobs": self.get_partcomp_jobs() if effective_partcomp_mode != 'disabled' and not reused else None,
+            "make_jobs": self.get_make_jobs() if not reused else None,
         }
         if reused or not self.options.vcs_profile or not os.path.isfile(vcomp_job.log_path):
             return metrics

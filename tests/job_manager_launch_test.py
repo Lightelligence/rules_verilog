@@ -902,6 +902,121 @@ class JobManagerLaunchTest(unittest.TestCase):
         self.assertTrue(popen.call_args.kwargs["start_new_session"])
         self.assertNotIn("preexec_fn", popen.call_args.kwargs)
 
+    def test_suppressed_runner_sends_stdout_to_devnull_and_captures_stderr(self):
+        log = _Logger()
+        job = Job(SimpleNamespace(options=SimpleNamespace(timeout=1, no_stdout=False), log=log), "test")
+        job.job_dir = tempfile.mkdtemp()
+        job.main_cmdline = "echo test"
+        job.suppress_output = True
+        process = _ExitedProcess()
+
+        with mock.patch("lib.job_lib.subprocess.Popen", return_value=process) as popen:
+            runner = SubprocessJobRunner(job, SimpleNamespace())
+
+        # Suppressed jobs discard stdout (the simulator owns its own log) rather
+        # than capturing a duplicate copy of it.
+        self.assertIs(subprocess.DEVNULL, popen.call_args.kwargs["stdout"])
+        self.assertNotEqual(subprocess.DEVNULL, popen.call_args.kwargs["stderr"])
+        self.assertFalse(popen.call_args.kwargs["stderr"].closed)
+        self.assertEqual(os.path.join(job.job_dir, "stderr.log"), runner.stderr_log_path)
+
+        # Closing the runner releases the captured stderr handle.
+        runner._close_output_streams()
+        self.assertTrue(popen.call_args.kwargs["stderr"].closed)
+
+    def test_no_stdout_option_also_redirects_stdout_to_devnull(self):
+        log = _Logger()
+        job = Job(SimpleNamespace(options=SimpleNamespace(timeout=1, no_stdout=True), log=log), "test")
+        job.job_dir = tempfile.mkdtemp()
+        job.main_cmdline = "echo test"
+        job.suppress_output = False
+        process = _ExitedProcess()
+
+        with mock.patch("lib.job_lib.subprocess.Popen", return_value=process) as popen:
+            SubprocessJobRunner(job, SimpleNamespace())
+
+        self.assertIs(subprocess.DEVNULL, popen.call_args.kwargs["stdout"])
+
+    def test_unsuppressed_runner_leaves_stdout_inherited(self):
+        log = _Logger()
+        job = Job(SimpleNamespace(options=SimpleNamespace(timeout=1, no_stdout=False), log=log), "test")
+        job.job_dir = tempfile.mkdtemp()
+        job.main_cmdline = "echo test"
+        job.suppress_output = False
+        process = _ExitedProcess()
+
+        with mock.patch("lib.job_lib.subprocess.Popen", return_value=process) as popen:
+            runner = SubprocessJobRunner(job, SimpleNamespace())
+
+        # No redirection at all: the child shares the parent's terminal stdout.
+        self.assertNotIn("stdout", popen.call_args.kwargs)
+        self.assertNotIn("stderr", popen.call_args.kwargs)
+        self.assertFalse(hasattr(runner, "stderr_log_path"))
+
+    def test_timeout_marker_never_synthesizes_stdout_log(self):
+        job_dir = Path(tempfile.mkdtemp())
+        job = SimpleNamespace(
+            timeout=0.001,
+            suppress_output=True,
+            job_dir=str(job_dir),
+            rcfg=SimpleNamespace(options=SimpleNamespace(no_stdout=False)),
+        )
+        runner = SubprocessJobRunner.__new__(SubprocessJobRunner)
+        runner.job = job
+        runner.log = _Logger()
+        runner._p = _RunningProcess()
+        runner._process_group_id = 456
+        runner._start_time = datetime.datetime.now() - datetime.timedelta(hours=1)
+        runner._timed_out = False
+        runner._orphaned_process_group = False
+        runner._term_deadline = None
+        runner._kill_deadline = None
+        runner._kill_sent = False
+
+        with mock.patch.object(runner, "_signal_process_group"), \
+             mock.patch.object(runner, "_signal_sidecar_process_groups"):
+            self.assertFalse(runner._check_for_done())
+
+        # job_dir/stdout.log belongs to the simulator's own -l flag; a job with
+        # no simulator log must not have one fabricated on timeout.
+        self.assertFalse((job_dir / "stdout.log").exists())
+        marker = (job_dir / "stderr.log").read_text(encoding="utf-8")
+        self.assertIn("exceeded timeout value", marker)
+        self.assertTrue(marker.endswith("\n"), "timeout marker must end in a newline")
+
+    def test_timeout_marker_appends_to_owned_simulator_log(self):
+        job_dir = Path(tempfile.mkdtemp())
+        simulator_log = job_dir / "stdout.log"
+        simulator_log.write_text("simulator output\n", encoding="utf-8")
+        job = SimpleNamespace(
+            timeout=0.001,
+            suppress_output=True,
+            job_dir=str(job_dir),
+            _log_path=str(simulator_log),
+            rcfg=SimpleNamespace(options=SimpleNamespace(no_stdout=False)),
+        )
+        runner = SubprocessJobRunner.__new__(SubprocessJobRunner)
+        runner.job = job
+        runner.log = _Logger()
+        runner._p = _RunningProcess()
+        runner._process_group_id = 456
+        runner._start_time = datetime.datetime.now() - datetime.timedelta(hours=1)
+        runner._timed_out = False
+        runner._orphaned_process_group = False
+        runner._term_deadline = None
+        runner._kill_deadline = None
+        runner._kill_sent = False
+
+        with mock.patch.object(runner, "_signal_process_group"), \
+             mock.patch.object(runner, "_signal_sidecar_process_groups"):
+            self.assertFalse(runner._check_for_done())
+
+        content = simulator_log.read_text(encoding="utf-8")
+        self.assertIn("simulator output", content)
+        self.assertIn("exceeded timeout value", content)
+        # Appending must not run into the previous line.
+        self.assertIn("simulator output\n%E-", content)
+
     def test_wait_and_add_are_race_safe_while_pre_run_is_unlocked(self):
         log = _Logger()
         rcfg = SimpleNamespace(options=SimpleNamespace(timeout=1), log=log)

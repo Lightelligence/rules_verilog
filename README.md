@@ -153,9 +153,11 @@ simmer -t 'sys_tb:smoke_test@1' --simulator VCS --waves \
 
 The generated FSDB controls are:
 
-All standard VCS compile paths use `-debug_access+r+w+f`, providing signal
-read/write/force access required by UVM HDL deposit/force calls and DUT memory
-backdoor loads without requiring waves. Wave builds additionally enable KDB and
+All standard VCS compile paths use `-debug_access+r+w+f` by default, providing
+signal read/write/force access required by UVM HDL deposit/force calls and DUT
+memory backdoor loads without requiring waves. Benches that need none of that
+can lower the level with `--vcs-debug-access {r,none}` or
+`verilog_dv_tb(vcs_debug_access = ...)` to cut compile and simulation cost. Wave builds additionally enable KDB and
 FSDB capture; they do not enable VPI or UVM transaction recording.
 
 | simmer argument | Effect |
@@ -238,9 +240,10 @@ default. An unchanged fingerprint bypasses VCS; a changed build uses the
 allocation-aware partition flow (automatic single-worker allocations use
 regular `-Mupdate` as a crash safeguard; explicit partition options opt in).
 The writable partition database is
-`<tb>__VCS_VCOMP/partitionlib`; `--waves` and `--gui` use sibling
-`partitionlib_waves` and `partitionlib_gui` databases so incompatible KDB
-options do not invalidate each other. Stable third-party IP/VIP
+`<tb>__VCS_VCOMP/partitionlib`; `--waves` and `--gui` compile into the sibling
+`<tb>__VCS_VCOMP_WAVES` and `<tb>__VCS_VCOMP_GUI` directories, so a debug rerun
+keeps the batch `simv`, fingerprint, and partition database instead of
+rebuilding them. Stable third-party IP/VIP
 partitions are reused while changed project RTL and testbench partitions are
 rebuilt. Tune parallel compilation after measuring the workstation:
 
