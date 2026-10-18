@@ -379,7 +379,16 @@ def _load_analog_profiles(rcfg, options):
     prebuilt = set(getattr(rcfg, "discovery_prebuilt_targets", ()))
     missing = [target for target in targets if target not in prebuilt]
     if missing and not (options.no_bazel or options.no_compile):
-        subprocess.run(["bazel", "build"] + missing, cwd=rcfg.proj_dir, check=True)
+        # Chunk the target list so a large regression cannot exceed the OS argument limit.
+        # Build output streams to the terminal, so a failure needs only a clear summary.
+        chunk_size = 200
+        for start in range(0, len(missing), chunk_size):
+            chunk = missing[start:start + chunk_size]
+            build = subprocess.run(["bazel", "build"] + chunk, cwd=rcfg.proj_dir)
+            if build.returncode != 0:
+                raise RuntimeError("bazel build of analog test metadata failed with exit code {} "
+                                   "(targets: {}{})".format(build.returncode, ", ".join(chunk[:3]),
+                                                            ", ..." if len(chunk) > 3 else ""))
     bazel_bin = get_bazel_bin(rcfg.proj_dir)
     profiles = {}
     execution_root = None
@@ -400,8 +409,9 @@ def _load_analog_profiles(rcfg, options):
             result = subprocess.run(["bazel", "info", "execution_root"],
                                     cwd=rcfg.proj_dir,
                                     capture_output=True,
-                                    text=True,
-                                    check=True)
+                                    text=True)
+            if result.returncode != 0:
+                raise RuntimeError("bazel info execution_root failed:\n{}\n{}".format(result.stdout, result.stderr))
             execution_root = result.stdout.strip()
         profiles[target] = _analog_profile(config, execution_root)
     return profiles
@@ -460,6 +470,7 @@ class VCompJob(Job):
         self._prepared_launch_pending = False
         self._preparation_needs_refresh = False
         self._in_compile_preparation = False
+        self._prepared_analog_files = {}
 
     @property
     def execution_mode(self):
@@ -557,6 +568,12 @@ class VCompJob(Job):
         self.bazel_runfiles_main = os.path.join(bazel_bin, relpath, "{}.runfiles".format(bazel_target), "__main__")
         return self.bazel_runfiles_main
 
+    def _write_prepared_analog_files(self):
+        """Write analog wrapper files generated during preparation into job_dir."""
+        for path, text in getattr(self, "_prepared_analog_files", {}).items():
+            with open(path, "w", encoding="utf-8") as stream:
+                stream.write(text)
+
     def pre_run(self):
         if self._prepared_launch_pending:
             self._prepared_launch_pending = False
@@ -565,6 +582,7 @@ class VCompJob(Job):
             if self.rcfg.options.recompile:
                 shutil.rmtree(self.job_dir, ignore_errors=True)
                 os.makedirs(self.job_dir, exist_ok=True)
+                self._write_prepared_analog_files()
                 sim_artifacts.write_executable_script(os.path.join(self.job_dir, "vcomp.sh"),
                                                       self._prepared_compile_script)
             if not self.rcfg.options.no_compile and not self.compile_cache_hit:
@@ -638,12 +656,17 @@ class VCompJob(Job):
             wrapper = os.path.join(self.job_dir, "analog_compile_args.f")
             # Preserve the common filelist and append exactly one selected SCS.
             # JSON quoting supplies double-quoted paths without shell evaluation.
-            with open(wrapper, "w", encoding="utf-8") as stream:
-                stream.write("-f " + json.dumps(self.bazel_compile_args, ensure_ascii=False) + "\n")
-                stream.write(json.dumps(profile["entry"], ensure_ascii=False) + "\n")
+            wrapper_text = ("-f " + json.dumps(self.bazel_compile_args, ensure_ascii=False) + "\n" +
+                            json.dumps(profile["entry"], ensure_ascii=False) + "\n")
+            config_text = json.dumps(profile, indent=2, sort_keys=True)
+            # Remember the generated files: the --recompile launch step wipes job_dir
+            # and must restore them because vcomp.sh references the wrapper.
+            self._prepared_analog_files = {
+                wrapper: wrapper_text,
+                os.path.join(self.job_dir, "analog_config.json"): config_text,
+            }
+            self._write_prepared_analog_files()
             self.bazel_compile_args = wrapper
-            with open(os.path.join(self.job_dir, "analog_config.json"), "w", encoding="utf-8") as stream:
-                json.dump(profile, stream, indent=2, sort_keys=True)
             log.info("%s selects analog_file %s", self.name, profile["entry"])
 
         # --- Template Rendering ---

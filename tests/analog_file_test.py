@@ -9,8 +9,10 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import tempfile
+import types
 import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -72,7 +74,7 @@ class AnalogFileTest(unittest.TestCase):
             dict(schema_version=1, entry="dc.scs", inputs=["dc.scs"])),
                                                          encoding="utf-8")
         self.ns["get_bazel_bin"] = lambda project: str(self.root)
-        self.ns["subprocess"].run.return_value = SimpleNamespace(stdout=str(self.root))
+        self.ns["subprocess"].run.return_value = SimpleNamespace(stdout=str(self.root), returncode=0)
         rcfg = SimpleNamespace(proj_dir=str(self.root), all_vcomp={"//bench:tb": {"//bench:case": 1}})
         opts = SimpleNamespace(no_bazel=False, no_compile=False, simulator="XRUN", emulator="")
         result = self.ns["_load_analog_profiles"](rcfg, opts)
@@ -81,6 +83,30 @@ class AnalogFileTest(unittest.TestCase):
         opts.simulator = "VCS"
         with self.assertRaisesRegex(ValueError, "standard XRUN"):
             self.ns["_load_analog_profiles"](rcfg, opts)
+
+    def test_loader_reports_bazel_build_failure_without_a_traceback(self):
+        package = self.root / "bench"
+        package.mkdir()
+        self.ns["subprocess"].run.return_value = SimpleNamespace(stdout="", stderr="boom", returncode=1)
+        rcfg = SimpleNamespace(proj_dir=str(self.root), all_vcomp={"//bench:tb": {"//bench:case": 1}})
+        opts = SimpleNamespace(no_bazel=False, no_compile=False, simulator="XRUN", emulator="")
+
+        with self.assertRaisesRegex(RuntimeError, "analog test metadata failed with exit code 1"):
+            self.ns["_load_analog_profiles"](rcfg, opts)
+
+    def test_loader_chunks_large_target_lists(self):
+        targets = {"//bench:case{}".format(index): 1 for index in range(250)}
+        self.ns["get_bazel_bin"] = lambda project: str(self.root)
+        self.ns["subprocess"].run.return_value = SimpleNamespace(stdout=str(self.root), returncode=0)
+        rcfg = SimpleNamespace(proj_dir=str(self.root), all_vcomp={"//bench:tb": targets})
+        opts = SimpleNamespace(no_bazel=False, no_compile=False, simulator="XRUN", emulator="")
+
+        self.ns["_load_analog_profiles"](rcfg, opts)
+
+        builds = [
+            call.args[0] for call in self.ns["subprocess"].run.call_args_list if call.args[0][:2] == ["bazel", "build"]
+        ]
+        self.assertEqual([200, 50], [len(build) - 2 for build in builds])
 
     def test_real_scheduler_routes_each_test_to_its_variant(self):
         main = next(n for n in TREE.body if isinstance(n, ast.FunctionDef) and n.name == "main")
@@ -199,6 +225,12 @@ class AnalogFileTest(unittest.TestCase):
         selected = next(n for n in pre_run.body
                         if isinstance(n, ast.If) and ast.unparse(n.test) == "self.analog_profile")
         job = SimpleNamespace(analog_profile=profile, job_dir=str(job_dir), bazel_compile_args=str(common), name="tb")
+        # The block calls a sibling method; compile the real one and bind it to the stub job.
+        writer = next(n for n in cls.body
+                      if isinstance(n, ast.FunctionDef) and n.name == "_write_prepared_analog_files")
+        writer_ns = {}
+        exec(compile(ast.Module(body=[writer], type_ignores=[]), "simmer.py", "exec"), writer_ns)
+        job._write_prepared_analog_files = types.MethodType(writer_ns["_write_prepared_analog_files"], job)
         ns = dict(self.ns, self=job, log=Mock())
         code = compile(ast.Module(body=[selected], type_ignores=[]), "simmer.py", "exec")
         exec(code, ns)
@@ -208,6 +240,16 @@ class AnalogFileTest(unittest.TestCase):
         self.assertEqual(len(lines), 2)
         self.assertEqual(common.read_text(encoding="utf-8"), "amscf.scs\n")
         self.assertTrue((job_dir / "analog_config.json").is_file())
+
+        # --recompile wipes job_dir after preparation; the generated files that
+        # vcomp.sh references must be restored, not left deleted.
+        wrapper_text = Path(job.bazel_compile_args).read_text(encoding="utf-8")
+        shutil.rmtree(job_dir)
+        job_dir.mkdir()
+        job._write_prepared_analog_files()
+        self.assertEqual(wrapper_text, Path(job.bazel_compile_args).read_text(encoding="utf-8"))
+        self.assertTrue((job_dir / "analog_config.json").is_file())
+
         (self.root / "dc space.scs").write_text("// changed while scheduled", encoding="utf-8")
         with self.assertRaisesRegex(RuntimeError, "changed during build"):
             exec(code, ns)
