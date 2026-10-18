@@ -117,6 +117,16 @@ py_test(
 )
 
 py_test(
+    name = "vcs_home_resolution_test",
+    timeout = "short",
+    srcs = ["vcs_home_resolution_test.py"],
+    deps = [
+        "//bin:args_parser_lib",
+        "//lib/simulators",
+    ],
+)
+
+py_test(
     name = "docs_test",
     timeout = "short",
     srcs = ["docs_test.py"],

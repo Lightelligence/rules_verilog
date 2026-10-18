@@ -114,6 +114,7 @@ class VcsSimulator(SimulatorInterface):
         self._resolved_make_jobs = _UNRESOLVED
         self._allocation_and_source = None
         self._vcs_tool_identity = None
+        self._vcs_home = None
 
     def get_name(self):
         return "vcs"
@@ -131,7 +132,37 @@ class VcsSimulator(SimulatorInterface):
         return self.env.get_template('vcs_wave_cmd_template.tcl.j2')
 
     def get_tool_runner(self):
-        return self.options.vcs_runner or os.environ.get("RV_VCS_RUNNER") or "runmod vcs --"
+        runner = self.options.vcs_runner or os.environ.get("RV_VCS_RUNNER") or "runmod vcs --"
+        return "" if runner.lower() in ("none", "") else runner
+
+    def get_vcs_home(self):
+        """Return the VCS installation root, resolved once per simulator instance.
+
+        The environment is authoritative when the regression already runs inside
+        the VCS environment; otherwise the runner is asked once per regression
+        rather than once per compile step. Returns an empty string when VCS is
+        not resolvable so the generated script can fail with its own message.
+        """
+        if self._vcs_home is not None:
+            return self._vcs_home
+        environment_home = os.environ.get("VCS_HOME")
+        if environment_home:
+            self._vcs_home = environment_home
+            return self._vcs_home
+        runner = self.get_tool_runner()
+        command = shlex.split(runner) + ["printenv", "VCS_HOME"] if runner else ["printenv", "VCS_HOME"]
+        try:
+            result = subprocess.run(command, capture_output=True, text=True, timeout=30, check=False)
+        except (OSError, subprocess.TimeoutExpired):
+            log.warning("Unable to resolve VCS_HOME with '%s'; leaving it empty", shlex.join(command))
+            self._vcs_home = ""
+            return self._vcs_home
+        home = result.stdout.strip().splitlines()[-1].strip() if result.stdout.strip() else ""
+        if result.returncode != 0 or not home:
+            log.warning("Unable to resolve VCS_HOME with '%s'; leaving it empty", shlex.join(command))
+            home = ""
+        self._vcs_home = home
+        return self._vcs_home
 
     def get_tool_command(self, tool_name):
         return "{} {}".format(self.get_tool_runner(), tool_name).strip()
@@ -251,6 +282,8 @@ class VcsSimulator(SimulatorInterface):
         }
         if getattr(vcomp_job, "vcs_three_step", False):
             context.update({
+                'vcs_home':
+                self.get_vcs_home(),
                 'vcs_analysis_work_dir':
                 self.get_analysis_work_dir(vcomp_job),
                 'vcs_elab_args':
