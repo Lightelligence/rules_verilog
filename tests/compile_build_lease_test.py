@@ -54,9 +54,12 @@ class CompileBuildLeaseTest(unittest.TestCase):
         os.mkdir(self.directory)
         Path(self.directory, "simv").write_text("original", encoding="ascii")
         self.context = multiprocessing.get_context("spawn")
+        self.worker_events = []
 
     def worker(self, shared):
         events = [self.context.Event() for _ in range(5)]
+        # Spawned children must deserialize every semaphore before it can die.
+        self.worker_events.append(events)
         acquired, waiting, release, downgrade, downgraded = events
         process = self.context.Process(target=_lease_worker, args=(self.directory, shared, *events))
         process.start()
