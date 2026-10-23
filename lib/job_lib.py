@@ -261,6 +261,9 @@ class Job():
         if not os.path.exists(self.job_dir):
             self.log.debug("Creating job_dir: %s", self.job_dir)
             os.mkdir(self.job_dir)
+        output_dir = getattr(self, "output_dir", None)
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
 
     def post_run(self):
         self.job_stop_time = datetime.datetime.now()
@@ -347,6 +350,9 @@ class SubprocessJobRunner(JobRunner):
     def __init__(self, job, manager):
         super(SubprocessJobRunner, self).__init__(job, manager)
         kwargs = {'shell': True, 'start_new_session': True}
+        lock_fds = getattr(job, "inherited_lock_fds", ())
+        if lock_fds:
+            kwargs["pass_fds"] = tuple(lock_fds)
         self._timed_out = False
         self._orphaned_process_group = False
         self._monitoring_failed = False
@@ -368,7 +374,7 @@ class SubprocessJobRunner(JobRunner):
             # output twice (once via the simulator's own -l flag or tee, once
             # via the wrapper's captured stdout). Stderr remains captured for
             # diagnostics when the wrapper itself fails.
-            self.stderr_log_path = os.path.join(self.job.job_dir, "stderr.log")
+            self.stderr_log_path = os.path.join(getattr(self.job, "output_dir", self.job.job_dir), "stderr.log")
             kwargs['stdout'] = subprocess.DEVNULL
             self.stderr_fp = open(self.stderr_log_path, 'w')
             kwargs['stderr'] = self.stderr_fp
@@ -617,7 +623,8 @@ class SubprocessJobRunner(JobRunner):
             self._term_deadline = now + datetime.timedelta(seconds=self.TERM_GRACE_SECONDS)
             self._signal_process_group(signal.SIGTERM)
             self._signal_sidecar_process_groups(signal.SIGTERM)
-            stderr_log_path = getattr(self, "stderr_log_path", os.path.join(self.job.job_dir, "stderr.log"))
+            stderr_log_path = getattr(self, "stderr_log_path",
+                                      os.path.join(getattr(self.job, "output_dir", self.job.job_dir), "stderr.log"))
             with open(stderr_log_path, 'a') as filep:
                 filep.write("%%E- %s exceeded timeout value of %s (SIGTERM sent)\n" % (self.job, self.job.timeout))
             # Also mark the simulator's own log when the simulator owns one.
@@ -1361,6 +1368,8 @@ class BazelTBJob(Job):
             self.vcomper.add_dependency(self)
 
         self.job_dir = self.vcomper.job_dir # Don't actually need a dir, but jobrunner/manager want it defined
+        if getattr(vcomper, "output_dir", None):
+            self.output_dir = os.path.join(vcomper.output_dir, "bazel_tb")
         self.bazel_profile_path = None
         self._requires_build = not self.rcfg.options.no_bazel and bool(self.bazel_targets)
         if self.rcfg.options.no_bazel:
@@ -1374,6 +1383,10 @@ class BazelTBJob(Job):
                 command.append("--profile={}".format(self.bazel_profile_path))
             command.extend(self.bazel_targets)
             self.main_cmdline = shlex.join(command)
+
+    @property
+    def inherited_lock_fds(self):
+        return getattr(self.vcomper, "inherited_lock_fds", ())
 
     @property
     def execution_mode(self):
@@ -1393,7 +1406,8 @@ class BazelTBJob(Job):
             self.jobstatus = JobStatus.PASSED
         else:
             self.jobstatus = JobStatus.FAILED
-            self.log.error("%s failed. Log in %s", self, os.path.join(self.job_dir, "stderr.log"))
+            self.log.error("%s failed. Log in %s", self,
+                           os.path.join(getattr(self, "output_dir", self.job_dir), "stderr.log"))
 
     def _collect_bazel_profile(self):
         if not self.bazel_profile_path or not os.path.exists(self.bazel_profile_path):
@@ -1424,6 +1438,8 @@ class BazelTestCfgJob(Job):
             self.add_dependency(vcomper)
 
         self.job_dir = self.vcomper.job_dir # Don't actually need a dir, but jobrunner/manager want it defined
+        if getattr(vcomper, "output_dir", None):
+            self.output_dir = os.path.join(vcomper.output_dir, "bazel_cfg")
         self._requires_build = not self.rcfg.options.no_bazel and not prebuilt
         if self.rcfg.options.no_bazel:
             self.main_cmdline = "echo \"Bypassing test cfg build due to --no-bazel\""
@@ -1431,6 +1447,10 @@ class BazelTestCfgJob(Job):
             self.main_cmdline = "echo \"Using test cfg outputs from initial Bazel build\""
         else:
             self.main_cmdline = "bazel build {}".format(shlex.join(self.bazel_targets))
+
+    @property
+    def inherited_lock_fds(self):
+        return getattr(self.vcomper, "inherited_lock_fds", ())
 
     @property
     def execution_mode(self):
@@ -1442,7 +1462,8 @@ class BazelTestCfgJob(Job):
             self.jobstatus = JobStatus.PASSED
         else:
             self.jobstatus = JobStatus.FAILED
-            self.log.error("%s failed. Log in %s", self, os.path.join(self.job_dir, "stderr.log"))
+            self.log.error("%s failed. Log in %s", self,
+                           os.path.join(getattr(self, "output_dir", self.job_dir), "stderr.log"))
 
     def dynamic_args(self, target=None):
         """Additional arugmuents to specific to each simulation"""

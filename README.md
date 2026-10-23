@@ -434,6 +434,9 @@ reporting, MSIE, Palladium, ICO, VSO.ai and CCEX.
 
 `--no-compile` reuse is rejected when source/runfile content, an external
 compile configuration, or the selected simulator tool environment changes.
+Standard VCS batch and waveform `--no-compile` invocations share matching
+compiled results concurrently. Recompilation waits for existing simulations,
+then holds an exclusive build lease until the new artifacts are validated.
 Completed and interrupted simulations remain visible through `simmer --history`;
 failures that prevent every test from starting are not recorded. Local history
 is stored in `.simmer/results.json`; older project-root `.simmer_results.json`

@@ -468,7 +468,13 @@ class VCompJob(Job):
         self.cov_work_dir = None
         self.compile_cache_hit = False
         self._compile_lock = None
+        self._build_lease = None
         self._shared_runtime_locks = {}
+        if self.simulator.get_name().upper() == "VCS":
+            if not getattr(rcfg, "control_run_id", None):
+                rcfg.control_run_id = uuid.uuid4().hex
+            self.output_dir = os.path.join(rcfg.proj_dir, ".simmer", "runs", rcfg.control_run_id,
+                                           os.path.basename(self.job_dir))
         self._scheduler_prepared = False
         self._prepared_launch_pending = False
         self._preparation_needs_refresh = False
@@ -513,6 +519,9 @@ class VCompJob(Job):
             self.cancel()
 
     def _acquire_compile_lock(self):
+        if getattr(self, "_build_lease", None) is not None:
+            self.raise_if_cancelled()
+            return
         if self._compile_lock is not None:
             self.raise_if_cancelled()
             return
@@ -536,14 +545,39 @@ class VCompJob(Job):
         self._compile_lock = None
         log.debug("Released compile directory lock %s", lock_path)
 
+    def _runtime_lock_path(self, runtime_path):
+        runtime_path = os.path.normcase(os.path.realpath(runtime_path))
+        runtime_identity = runtime_path.encode("utf-8")
+        runtime_digest = sha1(runtime_identity).hexdigest()[:20]
+        return os.path.join(self.rcfg.proj_dir, ".simmer", "locks", "runtime-{}.lock".format(runtime_digest))
+
+    def acquire_build_lease(self, shared=False):
+        if getattr(self, "_build_lease", None) is not None:
+            return
+        lease = compile_cache.CompileBuildLease(self.job_dir,
+                                                shared=shared,
+                                                legacy_lock_path=self._runtime_lock_path(self.job_dir))
+        self._build_lease = lease
+        try:
+            if not lease.acquire():
+                log.info("Waiting for %s access to compiled build %s", "read" if shared else "write", self.job_dir)
+                while not lease.acquire():
+                    self.raise_if_cancelled()
+                    self.wait_for_cancel(0.1)
+            self.raise_if_cancelled()
+            if self.rcfg.options.no_compile and not os.path.isdir(self.job_dir):
+                raise RuntimeError("--no-compile requires an existing compile directory: {}".format(self.job_dir))
+        except BaseException:
+            lease.release()
+            self._build_lease = None
+            raise
+
     def acquire_shared_runtime_lock(self, runtime_path):
-        """Hold exclusive ownership of a shared backend directory for this run."""
+        """Hold exclusive ownership of a shared writable backend directory."""
         runtime_path = os.path.normcase(os.path.realpath(runtime_path))
         if runtime_path in self._shared_runtime_locks:
             return
-        runtime_identity = os.path.normcase(runtime_path).encode("utf-8")
-        runtime_digest = sha1(runtime_identity).hexdigest()[:20]
-        lock_path = os.path.join(self.rcfg.proj_dir, ".simmer", "locks", "runtime-{}.lock".format(runtime_digest))
+        lock_path = self._runtime_lock_path(runtime_path)
         runtime_lock = compile_cache.CompileDirectoryLock(lock_path)
         if not runtime_lock.acquire(blocking=False):
             log.info("Waiting for shared runtime directory lock %s", lock_path)
@@ -559,6 +593,10 @@ class VCompJob(Job):
             runtime_lock.release()
             log.debug("Released shared runtime directory lock %s", runtime_lock.path)
             del self._shared_runtime_locks[runtime_path]
+        lease = getattr(self, "_build_lease", None)
+        if lease is not None:
+            lease.release()
+            self._build_lease = None
 
     def resolve_bazel_runfiles_main(self):
         """Return the stable Bazel runfiles root without requiring it to exist yet."""
@@ -578,6 +616,10 @@ class VCompJob(Job):
                 stream.write(text)
 
     def pre_run(self):
+        options = self.rcfg.options
+        read_only_reuse = options.no_compile and self.simulator.get_name().upper() == "VCS"
+        if read_only_reuse and not os.path.isdir(self.job_dir):
+            raise RuntimeError("--no-compile requires an existing compile directory: {}".format(self.job_dir))
         if self._prepared_launch_pending:
             self._prepared_launch_pending = False
             self.raise_if_cancelled()
@@ -598,7 +640,6 @@ class VCompJob(Job):
         super(VCompJob, self).pre_run()
         self.compile_cache_hit = False
 
-        options = self.rcfg.options
         if options.compile_args_file and not os.path.isabs(options.compile_args_file):
             options.compile_args_file = os.path.abspath(os.path.join(self.rcfg.proj_dir, options.compile_args_file))
         relpath, bazel_target = self.bazel_vcomp_target.split(':')
@@ -636,12 +677,13 @@ class VCompJob(Job):
 
         log.debug("workdir = %s", self.job_dir)
 
-        with open(os.path.join(self.job_dir, 'env.out'), 'w') as env_out:
-            for key in ENV_CAPTURE_KEYS:
-                if key in os.environ:
-                    env_out.write("{}={}\n".format(key, os.environ[key]))
-        with open(os.path.join(self.job_dir, 'hostname.out'), 'w') as hostname_out:
-            subprocess.run(["hostname"], stdout=hostname_out, stderr=subprocess.STDOUT, check=False)
+        if not read_only_reuse:
+            with open(os.path.join(self.job_dir, 'env.out'), 'w') as env_out:
+                for key in ENV_CAPTURE_KEYS:
+                    if key in os.environ:
+                        env_out.write("{}={}\n".format(key, os.environ[key]))
+            with open(os.path.join(self.job_dir, 'hostname.out'), 'w') as hostname_out:
+                subprocess.run(["hostname"], stdout=hostname_out, stderr=subprocess.STDOUT, check=False)
 
         if options.compile_args_file and not os.path.exists(options.compile_args_file):
             self.rcfg.log.critical(f"The specified compile arguments file does not exist: {options.compile_args_file}")
@@ -704,7 +746,8 @@ class VCompJob(Job):
 
         compile_script = compile_template.render(**template_context)
         self._prepared_compile_script = compile_script
-        sim_artifacts.write_executable_script(vcomp_sh_path, compile_script)
+        if not read_only_reuse:
+            sim_artifacts.write_executable_script(vcomp_sh_path, compile_script)
         fingerprint_inputs = self.simulator.get_compile_fingerprint_inputs(self)
         fingerprint_script = compile_cache.normalize_compile_script_paths(
             self.simulator.compile_script_for_fingerprint(compile_script),
@@ -890,6 +933,13 @@ class VCompJob(Job):
 
         self.compile_metrics = self.simulator.collect_compile_metrics(self)
 
+        lease = getattr(self, "_build_lease", None)
+        if (lease is not None and not lease.shared and self.jobstatus.successful
+                and self.simulator.supports_shared_compile_reuse()):
+            lease.downgrade()
+            self.simulator.validate_reusable_compile_artifacts(self)
+            compile_cache.validate_compile_fingerprint(self.job_dir, self.compile_fingerprint)
+
         # log_level is determined by initial return code and potential warning failures
         log_level("%s vcomp %s in %s", self.name, self.jobstatus, self.job_dir)
         simmer_results.record_compile_job(getattr(self.rcfg, "simmer_results_run", None), self)
@@ -921,6 +971,11 @@ class VCompJob(Job):
     def cancel(self):
         self._release_compile_lock()
 
+    @property
+    def inherited_lock_fds(self):
+        lease = getattr(self, "_build_lease", None)
+        return lease.file_descriptors if lease is not None else ()
+
     def __repr__(self):
         sim_name = self.simulator.get_name() if hasattr(self, 'simulator') else '???'
         return 'Vcomp("{}@{}" -> {})'.format(self.bazel_vcomp_target, sim_name, self.name) # Add simulator info
@@ -929,6 +984,10 @@ class VCompJob(Job):
 class TestJob(Job):
 
     LOG_NAME = 'stdout.log'
+
+    @property
+    def inherited_lock_fds(self):
+        return getattr(self.vcomper, "inherited_lock_fds", ())
 
     @property
     def execution_mode(self):
