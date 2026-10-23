@@ -13,8 +13,9 @@ FINGERPRINT_FILE = ".compile_fingerprint.json"
 class CompileDirectoryLock:
     """Advisory lock held while validating or updating a compile directory."""
 
-    def __init__(self, path):
+    def __init__(self, path, shared=False):
         self.path = os.path.abspath(os.fspath(path))
+        self.shared = shared
         self._filep = None
 
     def acquire(self, blocking=True):
@@ -25,7 +26,7 @@ class CompileDirectoryLock:
 
         os.makedirs(os.path.dirname(self.path), exist_ok=True)
         filep = open(self.path, "a+", encoding="utf-8")
-        operation = fcntl.LOCK_EX
+        operation = fcntl.LOCK_SH if self.shared else fcntl.LOCK_EX
         if not blocking:
             operation |= fcntl.LOCK_NB
         try:
@@ -39,6 +40,19 @@ class CompileDirectoryLock:
         self._filep = filep
         return True
 
+    def downgrade(self):
+        if self._filep is None:
+            raise RuntimeError("Cannot downgrade an unheld compile lock")
+        if not self.shared:
+            import fcntl
+
+            fcntl.flock(self._filep, fcntl.LOCK_SH)
+            self.shared = True
+
+    @property
+    def file_descriptor(self):
+        return self._filep.fileno() if self._filep is not None else None
+
     def release(self):
         if self._filep is None:
             return
@@ -50,6 +64,66 @@ class CompileDirectoryLock:
         finally:
             self._filep.close()
             self._filep = None
+
+
+class CompileBuildLease:
+    """Protect a build through compilation and all of its simulation consumers.
+
+    The gate remains held while a writer drains readers and compiles. Readers
+    hold it only while entering. The legacy runtime guard is always shared:
+    older simmer versions take it exclusively for their entire regression.
+    """
+
+    def __init__(self, directory, shared=False, legacy_lock_path=None):
+        self.directory = os.path.normcase(os.path.realpath(directory))
+        self.shared = shared
+        self.acquired = False
+        self.gate = CompileDirectoryLock(self.directory + ".compile.gate.lock")
+        self.contents = CompileDirectoryLock(self.directory + ".compile.lock", shared=shared)
+        self.legacy = CompileDirectoryLock(legacy_lock_path, shared=True) if legacy_lock_path else None
+
+    def acquire(self):
+        if self.acquired:
+            return True
+        try:
+            if not self.gate.acquire(blocking=False):
+                return False
+            if self.legacy is not None and not self.legacy.acquire(blocking=False):
+                return False
+            if not self.contents.acquire(blocking=False):
+                return False
+            self.acquired = True
+            if self.shared:
+                self.gate.release()
+            return True
+        except BaseException:
+            self.release()
+            raise
+
+    def downgrade(self):
+        if not self.acquired:
+            raise RuntimeError("Cannot downgrade an unheld build lease")
+        # Keep the gate and legacy guard across conversion; flock conversion
+        # need not be atomic, and no cooperating writer may enter that gap.
+        self.contents.downgrade()
+        self.shared = True
+        self.gate.release()
+
+    @property
+    def file_descriptors(self):
+        locks = [self.contents] + ([self.legacy] if self.legacy is not None else [])
+        return tuple(lock.file_descriptor for lock in locks if lock.file_descriptor is not None)
+
+    def release(self):
+        try:
+            self.contents.release()
+        finally:
+            try:
+                if self.legacy is not None:
+                    self.legacy.release()
+            finally:
+                self.gate.release()
+                self.acquired = False
 
 
 def _digest_bytes(*values):

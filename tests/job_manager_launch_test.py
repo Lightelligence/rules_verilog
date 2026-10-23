@@ -937,6 +937,24 @@ class JobManagerLaunchTest(unittest.TestCase):
 
         self.assertIs(subprocess.DEVNULL, popen.call_args.kwargs["stdout"])
 
+    def test_build_reader_passes_leases_to_children_and_keeps_logs_out_of_vcomp(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            build = root / "vcomp"
+            build.mkdir()
+            job = Job(SimpleNamespace(options=SimpleNamespace(timeout=1, no_stdout=True), log=_Logger()), "reuse")
+            job.job_dir = str(build)
+            job.output_dir = str(root / "run" / "control")
+            job.inherited_lock_fds = (11, 12)
+            job.main_cmdline = "echo reuse"
+            job.pre_run()
+            with mock.patch("lib.job_lib.subprocess.Popen", return_value=_ExitedProcess()) as popen:
+                runner = SubprocessJobRunner(job, SimpleNamespace())
+            self.assertEqual((11, 12), popen.call_args.kwargs["pass_fds"])
+            self.assertEqual(os.path.join(job.output_dir, "stderr.log"), runner.stderr_log_path)
+            self.assertEqual([], list(build.iterdir()))
+            runner._close_output_streams()
+
     def test_unsuppressed_runner_leaves_stdout_inherited(self):
         log = _Logger()
         job = Job(SimpleNamespace(options=SimpleNamespace(timeout=1, no_stdout=False), log=log), "test")
@@ -955,10 +973,13 @@ class JobManagerLaunchTest(unittest.TestCase):
 
     def test_timeout_marker_never_synthesizes_stdout_log(self):
         job_dir = Path(tempfile.mkdtemp())
+        output_dir = job_dir / "control"
+        output_dir.mkdir()
         job = SimpleNamespace(
             timeout=0.001,
             suppress_output=True,
             job_dir=str(job_dir),
+            output_dir=str(output_dir),
             rcfg=SimpleNamespace(options=SimpleNamespace(no_stdout=False)),
         )
         runner = SubprocessJobRunner.__new__(SubprocessJobRunner)
@@ -980,7 +1001,8 @@ class JobManagerLaunchTest(unittest.TestCase):
         # job_dir/stdout.log belongs to the simulator's own -l flag; a job with
         # no simulator log must not have one fabricated on timeout.
         self.assertFalse((job_dir / "stdout.log").exists())
-        marker = (job_dir / "stderr.log").read_text(encoding="utf-8")
+        self.assertFalse((job_dir / "stderr.log").exists())
+        marker = (output_dir / "stderr.log").read_text(encoding="utf-8")
         self.assertIn("exceeded timeout value", marker)
         self.assertTrue(marker.endswith("\n"), "timeout marker must end in a newline")
 

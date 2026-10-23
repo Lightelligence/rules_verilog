@@ -838,7 +838,11 @@ class RegressionConfig():
         """Build selected artifacts without narrowing the complete metadata cache."""
         targets = list(dict.fromkeys(test for tests in selected.values() for test in tests))
         if not self.options.no_compile:
-            targets.extend(sorted(selected))
+            # VCS build outputs must be refreshed only after its build lease is
+            # held. Config metadata is needed earlier to plan analog variants.
+            targets.extend(vcomp for vcomp in sorted(selected)
+                           if {self.tests_to_simulator.get(test)
+                               for test in selected[vcomp]} != {"VCS"})
         targets = list(dict.fromkeys(targets))
         self.discovery_prebuilt_targets = set()
         dtp = rv_utils.DatetimePrinter(self.log)

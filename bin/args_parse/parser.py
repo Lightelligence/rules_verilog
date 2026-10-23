@@ -118,6 +118,8 @@ def parse_args(argv):
 
     options = parser.parse_args(argv)
     options.no_bazel_was_explicit = argument_explicitly_requested(argv, '--no-bazel')
+    if options.no_compile and options.recompile:
+        parser.error("--no-compile cannot be combined with --recompile.")
     if options.no_compile:
         options.no_bazel = True
     if options.jobs is not None and options.jobs < 1:

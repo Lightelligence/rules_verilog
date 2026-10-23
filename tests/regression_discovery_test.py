@@ -1004,10 +1004,9 @@ class RegressionDiscoveryTest(unittest.TestCase):
         self.assertIn("--noinclude_aspects", commands[1])
         self.assertIn("--output=starlark", commands[1])
         self.assertEqual(["bazel", "build"], commands[2][:2])
-        self.assertIn("//benches/soc_tb:soc_tb", commands[2])
+        self.assertNotIn("//benches/soc_tb:soc_tb", commands[2])
         self.assertEqual(
             {
-                "//benches/soc_tb:soc_tb",
                 "//benches/soc_tb/tests:dma_single_transfer",
             },
             config.discovery_prebuilt_targets,
@@ -1046,9 +1045,9 @@ class RegressionDiscoveryTest(unittest.TestCase):
             with mock.patch("lib.regression.rv_utils.DatetimePrinter", _Timer):
                 config.test_discovery_all()
             self.assertEqual({target: []}, config.tests_to_tags)
-            self.assertEqual({target, "//benches/soc_tb:soc_tb"}, config.discovery_prebuilt_targets)
+            self.assertEqual({target}, config.discovery_prebuilt_targets)
             build = config._run_command.call_args.args[0]
-            self.assertEqual(["bazel", "build", target, "//benches/soc_tb:soc_tb"], build)
+            self.assertEqual(["bazel", "build", target], build)
 
     def test_discovery_filters_wildcard_bench_and_tags_before_building_artifacts(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -1073,8 +1072,8 @@ class RegressionDiscoveryTest(unittest.TestCase):
             ])
             with mock.patch("lib.regression.rv_utils.DatetimePrinter", _Timer):
                 config.test_discovery_all()
-            self.assertEqual(["bazel", "build", selected, benches[0]], config._run_command.call_args.args[0])
-            self.assertEqual({selected, benches[0]}, config.discovery_prebuilt_targets)
+            self.assertEqual(["bazel", "build", selected], config._run_command.call_args.args[0])
+            self.assertEqual({selected}, config.discovery_prebuilt_targets)
             # The cache retains every candidate so a later tag selection needs
             # no discovery refresh, including the other simulator/bench.
             cached = config._load_discovery_cache_generation()
@@ -1086,7 +1085,7 @@ class RegressionDiscoveryTest(unittest.TestCase):
             self.assertEqual({benches[0]: {selected: 3}}, config.all_vcomp)
             self.assertEqual(3, config._run_command.call_count)
 
-    def test_cached_discovery_refreshes_selected_source_outputs_and_keeps_full_cache(self):
+    def test_cached_discovery_refreshes_cfgs_and_defers_vcs_tb_outputs_until_locked(self):
         with tempfile.TemporaryDirectory() as directory:
             config = self._config(Path(directory))
             bench = "//benches/soc_tb:soc_tb"
@@ -1102,13 +1101,13 @@ class RegressionDiscoveryTest(unittest.TestCase):
             config._run_command = mock.Mock(return_value=(0, "", ""))
             with mock.patch("lib.regression.rv_utils.DatetimePrinter", _Timer):
                 config.test_discovery_match()
-                # A source edit leaves query metadata fresh, but must still ask
-                # Bazel to refresh the selected compile inventory/runfiles.
+                # A source edit leaves query metadata fresh. Only cfgs may be
+                # materialized here; the runner refreshes the TB under its lease.
                 Path(directory, "selected.sv").write_text("module changed; endmodule\n", encoding="utf-8")
                 config.test_discovery_match()
             self.assertEqual(2, config._run_command.call_count)
-            config._run_command.assert_called_with(["bazel", "build", selected, bench])
-            self.assertEqual({selected, bench}, config.discovery_prebuilt_targets)
+            config._run_command.assert_called_with(["bazel", "build", selected])
+            self.assertEqual({selected}, config.discovery_prebuilt_targets)
             self.assertEqual({bench: {selected: 1}}, config.all_vcomp)
             self.assertEqual({selected: 0, unselected: 0}, config._cached_discovery[0][bench])
             self.assertEqual(original_cache, Path(config._discovery_cache_path()).read_bytes())
