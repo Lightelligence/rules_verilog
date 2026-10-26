@@ -13,7 +13,7 @@ def add_xcelium_arguments(parser):
         default=True,
         action='store_true',
         help=('Allow tests to share a compiled XRUN database concurrently from separate run directories. '
-              'Enabled by default for ordinary batch runs without coverage, MCE, MSIE or emulation. '
+              'Enabled by default for ordinary batch runs, including coverage, without MCE, MSIE or emulation. '
               '--jobs still limits concurrency. Use --no-xrun-parallel to serialize each database.'))
     gxrun.add_argument('--no-xrun-parallel',
                        dest='xrun_parallel',

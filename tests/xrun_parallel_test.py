@@ -6,6 +6,9 @@ declarations with stdlib doubles, then validate AMS concurrency on the EDA host.
 import argparse
 import ast
 import logging
+import hashlib
+import shutil
+import tempfile
 import os
 from pathlib import Path
 import shlex
@@ -25,7 +28,8 @@ class XrunParallelTest(unittest.TestCase):
     def setUp(self):
         cls = next(n for n in source_tree("lib/simulators/xcelium.py").body
                    if isinstance(n, ast.ClassDef) and n.name == "XceliumSimulator")
-        self.ns = dict(SimulatorInterface=object, os=os, shlex=shlex, log=logging.getLogger(__name__))
+        self.ns = dict(SimulatorInterface=object, os=os, shlex=shlex, hashlib=hashlib,
+                       shutil=shutil, log=logging.getLogger(__name__))
         exec(compile(ast.Module(body=[cls], type_ignores=[]), "xcelium.py", "exec"), self.ns)
         self.backend = object.__new__(self.ns["XceliumSimulator"])
         self.backend.options = SimpleNamespace(xrun_parallel=True,
@@ -59,7 +63,7 @@ class XrunParallelTest(unittest.TestCase):
     def test_special_flows_keep_exclusive_resource_even_if_validation_is_bypassed(self):
         self.backend.options.xrun_parallel = True
         test = SimpleNamespace(vcomper=SimpleNamespace(job_dir="/compile/db"))
-        for name in ("gui", "coverage", "mce", "msie", "msie_href", "msie_prim", "msie_incr", "emulator"):
+        for name in ("gui", "mce", "msie", "msie_href", "msie_prim", "msie_incr", "emulator"):
             original = getattr(self.backend.options, name)
             with self.subTest(name=name):
                 setattr(self.backend.options, name, "enabled")
@@ -100,7 +104,7 @@ class XrunParallelTest(unittest.TestCase):
         self.backend.options.xrun_parallel = True
         parser = SimpleNamespace(error=Mock(side_effect=ValueError))
         self.backend.options.xcelium_explicit_switches = ["--xrun-parallel"]
-        for name in ("coverage", "mce", "msie", "msie_href", "msie_prim", "msie_incr", "emulator"):
+        for name in ("mce", "msie", "msie_href", "msie_prim", "msie_incr", "emulator"):
             original = getattr(self.backend.options, name)
             setattr(self.backend.options, name, "enabled")
             with self.subTest(name=name), self.assertRaises(ValueError):
@@ -144,13 +148,59 @@ class XrunParallelTest(unittest.TestCase):
         code = compile(ast.Module(body=[fn.body[0]], type_ignores=[]), "xcelium_options.py", "exec")
         parser = SimpleNamespace(error=Mock(side_effect=ValueError))
         self.backend.options.xcelium_explicit_switches = []
-        for name in ("coverage", "mce", "msie", "msie_href", "msie_prim", "msie_incr", "emulator"):
+        for name in ("mce", "msie", "msie_href", "msie_prim", "msie_incr", "emulator"):
             original = getattr(self.backend.options, name)
             setattr(self.backend.options, name, "enabled")
             exec(code, dict(options=self.backend.options, parser=parser))
             self.assertFalse(self.backend._parallel_test_runs_enabled())
             setattr(self.backend.options, name, original)
         parser.error.assert_not_called()
+
+    def test_coverage_parallel_and_explicit_serial_fallback(self):
+        self.backend.options.coverage = 'A'
+        job = SimpleNamespace(vcomper=SimpleNamespace(job_dir='/compile/db'))
+        self.assertIsNone(self.backend.get_test_exclusive_resource(job))
+        self.backend.options.xrun_parallel = False
+        self.assertIsNotNone(self.backend.get_test_exclusive_resource(job))
+
+    def test_explicit_parallel_coverage_validation_is_allowed(self):
+        fn = next(n for n in source_tree('lib/simulators/xcelium_options.py').body if isinstance(n, ast.FunctionDef))
+        code = compile(ast.Module(body=[fn.body[0]], type_ignores=[]), 'xcelium_options.py', 'exec')
+        self.backend.options.coverage = 'A'
+        self.backend.options.xcelium_explicit_switches = ['--xrun-parallel']
+        parser = SimpleNamespace(error=Mock(side_effect=ValueError))
+        exec(code, dict(options=self.backend.options, parser=parser))
+        parser.error.assert_not_called()
+
+    def test_duplicate_case_seed_iteration_gets_isolated_coverage_and_cleanup(self):
+        self.backend.options.coverage = 'A'
+        self.backend.options.profile = False
+        with tempfile.TemporaryDirectory() as root:
+            compile_job = SimpleNamespace(cov_work_dir=os.path.join(root, 'cov'))
+            jobs = [SimpleNamespace(name='same_test', iteration=1, vcomper=compile_job,
+                                    job_dir=os.path.join(root, name)) for name in ('run1', 'run2')]
+            names = []
+            for job in jobs:
+                args = shlex.split(self.backend.generate_sim_options(job, 42))
+                names.append(args[args.index('-covbaserun') + 1])
+                self.assertEqual(compile_job.cov_work_dir, args[args.index('-covworkdir') + 1])
+                self.assertIn('+SVFCOV=1', args)
+                Path(job.coverage_db_path).mkdir(parents=True)
+            self.assertNotEqual(names[0], names[1])
+            again = shlex.split(self.backend.generate_sim_options(jobs[0], 42))
+            self.assertEqual(names[0], again[again.index('-covbaserun') + 1])
+            self.backend.cleanup_test_coverage(jobs[0])
+            self.assertFalse(Path(jobs[0].coverage_db_path).exists())
+            self.assertTrue(Path(jobs[1].coverage_db_path).exists())
+
+    def test_coverage_root_lock_is_preserved(self):
+        self.backend.options.coverage = 'A'
+        job = SimpleNamespace(name='tb', job_dir='/compile/db',
+                              resolve_bazel_runfiles_main=lambda: '/shared/runfiles',
+                              acquire_shared_runtime_lock=Mock())
+        self.backend.prepare_regression_runtime({'tb': job})
+        paths = [call.args[0] for call in job.acquire_shared_runtime_lock.call_args_list]
+        self.assertIn(os.path.normcase(os.path.realpath(job.cov_work_dir)), paths)
 
 
 if __name__ == "__main__":

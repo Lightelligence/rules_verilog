@@ -402,7 +402,7 @@ class XceliumSimulator(SimulatorInterface):
         # validation rejects an explicit request to parallelize those flows.
         return getattr(self.options, "xrun_parallel", True) and not any(
             getattr(self.options, name, None)
-            for name in ("gui", "coverage", "mce", "msie", "msie_href", "msie_prim", "msie_incr", "emulator"))
+            for name in ("gui", "mce", "msie", "msie_href", "msie_prim", "msie_incr", "emulator"))
 
     def get_test_exclusive_resource(self, test_job):
         # Keep an explicit serial fallback for flows with shared writable outputs.
@@ -532,7 +532,12 @@ class XceliumSimulator(SimulatorInterface):
                 sim_args.extend(["-covworkdir", test_job.vcomper.cov_work_dir])
             else:
                 log.warning(f"Coverage enabled but cov_work_dir not set for vcomp job {test_job.vcomper.name}")
-            coverage_name = "{}_sv{}_i{}".format(test_job.name, seed, test_job.iteration)
+            # Claimed test directories distinguish duplicate selectors/retries,
+            # even when name, seed and iteration are identical. Keep each
+            # -covoverwrite and failed-test cleanup confined to its own run.
+            run_identity = os.path.normcase(os.path.realpath(test_job.job_dir))
+            run_key = hashlib.sha256(run_identity.encode("utf-8")).hexdigest()[:20]
+            coverage_name = "{}_{}_sv{}_i{}".format(test_job.name, run_key, seed, test_job.iteration)
             sim_args.extend([
                 "-covbaserun",
                 coverage_name,
