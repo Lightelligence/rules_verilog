@@ -28,8 +28,12 @@ class XrunParallelTest(unittest.TestCase):
     def setUp(self):
         cls = next(n for n in source_tree("lib/simulators/xcelium.py").body
                    if isinstance(n, ast.ClassDef) and n.name == "XceliumSimulator")
-        self.ns = dict(SimulatorInterface=object, os=os, shlex=shlex, hashlib=hashlib,
-                       shutil=shutil, log=logging.getLogger(__name__))
+        self.ns = dict(SimulatorInterface=object,
+                       os=os,
+                       shlex=shlex,
+                       hashlib=hashlib,
+                       shutil=shutil,
+                       log=logging.getLogger(__name__))
         exec(compile(ast.Module(body=[cls], type_ignores=[]), "xcelium.py", "exec"), self.ns)
         self.backend = object.__new__(self.ns["XceliumSimulator"])
         self.backend.options = SimpleNamespace(xrun_parallel=True,
@@ -177,8 +181,10 @@ class XrunParallelTest(unittest.TestCase):
         self.backend.options.profile = False
         with tempfile.TemporaryDirectory() as root:
             compile_job = SimpleNamespace(cov_work_dir=os.path.join(root, 'cov'))
-            jobs = [SimpleNamespace(name='same_test', iteration=1, vcomper=compile_job,
-                                    job_dir=os.path.join(root, name)) for name in ('run1', 'run2')]
+            jobs = [
+                SimpleNamespace(name='same_test', iteration=1, vcomper=compile_job, job_dir=os.path.join(root, name))
+                for name in ('run1', 'run2')
+            ]
             names = []
             for job in jobs:
                 args = shlex.split(self.backend.generate_sim_options(job, 42))
@@ -195,7 +201,8 @@ class XrunParallelTest(unittest.TestCase):
 
     def test_coverage_root_lock_is_preserved(self):
         self.backend.options.coverage = 'A'
-        job = SimpleNamespace(name='tb', job_dir='/compile/db',
+        job = SimpleNamespace(name='tb',
+                              job_dir='/compile/db',
                               resolve_bazel_runfiles_main=lambda: '/shared/runfiles',
                               acquire_shared_runtime_lock=Mock())
         self.backend.prepare_regression_runtime({'tb': job})
