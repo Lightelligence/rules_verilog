@@ -57,6 +57,13 @@ py_test(
 )
 
 py_test(
+    name = "compile_build_lease_test",
+    timeout = "short",
+    srcs = ["compile_build_lease_test.py"],
+    deps = ["//lib:compile_cache"],
+)
+
+py_test(
     name = "compile_input_digest_test",
     timeout = "short",
     srcs = ["compile_input_digest_test.py"],

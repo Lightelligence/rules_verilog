@@ -37,11 +37,25 @@ VCS uses the two-step compile/sim flow:
 simmer -t <bench>:<test> --simulator VCS
 ```
 
-VCS retains its separate concurrency contract: compilation is serialized, while
-matching normal simulations reuse `simv` concurrently without a regression-wide
-Bazel runfiles lock. VCS coverage retains its separate shared coverage-directory
-lock. Do not use `--recompile` or change compile inputs for the same VCOMP while
-simulations are active.
+Standard VCS batch and `--waves` runs can reuse a matching compiled build across
+independent simmer invocations. `--no-compile` holds a shared read lease from
+artifact/fingerprint validation until every simulation consumer has exited.
+Each test keeps its own run directory, log and waveform. Reuse does not rewrite
+the shared build's scripts, environment records, logs or fingerprint.
+
+Normal compilation and `--recompile` take an exclusive write lease before
+refreshing the TB's Bazel outputs or changing VCOMP. They wait for existing
+simulations to finish; a waiting writer prevents new readers from continually
+delaying it. After a successful compile or automatic cache hit, the write lease
+becomes a read lease before simulations start. Waiting writers recheck the
+current build after admission. Locks live beside the canonical VCOMP directory
+and survive `--recompile`; existing runtime lock files also guard compatibility
+with older simmer processes. Do not remove lock files to bypass a live owner.
+
+GUI, coverage, DTL, ICO, VSO and custom shared partition-directory flows retain
+exclusive ownership for the regression. XRUN's existing locking is unchanged.
+These locks coordinate simmer; directly deleting or editing active build
+artifacts with other commands is outside this protection.
 
 Do not pass `--vcs-runner` for the normal flow. The runner defaults to:
 
@@ -213,6 +227,12 @@ by default. If that cache is missing or stale, simmer refreshes discovery once
 before validating the existing compile output. Add explicit `--no-bazel` when
 the invocation must not run Bazel at all; a missing or stale scoped cache is
 then an error.
+
+With VCS, selected test-config outputs may be materialized during discovery,
+but the TB itself is built only after its write lease is held. Skipping
+compilation does not skip fingerprint or artifact checks. `--no-compile` and
+`--recompile` cannot be combined. An older simmer process holding the original
+exclusive runtime lock must finish before new shared readers can enter.
 
 Discovery freshness and simulator compile reuse are separate decisions. When
 dynamic repository or `glob` inputs cannot be safely tracked, simmer reports

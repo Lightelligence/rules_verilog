@@ -3360,7 +3360,10 @@ exit 0
             for name, runfiles_name in (("z_tb", "a.runfiles"), ("a_tb", "z.runfiles")):
                 job = SimpleNamespace(name=name, cov_work_dir=None, job_dir=str(root / (name + "_VCOMP")))
                 job.resolve_bazel_runfiles_main = lambda value=str(root / runfiles_name): value
-                job.acquire_shared_runtime_lock = lambda path, value=name: trace.append((os.path.abspath(path), value))
+                job.acquire_shared_runtime_lock = lambda path, value=name: trace.append(
+                    (os.path.normcase(os.path.realpath(path)), value))
+                job.acquire_build_lease = lambda shared=False, value=name, directory=job.job_dir: trace.append(
+                    (os.path.normcase(os.path.realpath(directory)), value))
                 result[name] = job
             return result
 

@@ -11,6 +11,9 @@ from bin.args_parser import parse_args
 
 class ArgsParserValidationTest(unittest.TestCase):
 
+    def test_no_compile_rejects_recompile(self):
+        self.assert_parse_error(["--no-compile", "--recompile"])
+
     def test_simulator_defaults_to_vcs_and_preserves_environment_and_cli_overrides(self):
         script = ("import json, sys; from bin.args_parser import parse_args; "
                   "options = parse_args(sys.argv[1:]); "

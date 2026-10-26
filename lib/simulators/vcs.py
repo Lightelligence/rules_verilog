@@ -435,20 +435,25 @@ class VcsSimulator(SimulatorInterface):
         os.makedirs(os.path.dirname(dbdir), exist_ok=True)
         return shlex.split(self.get_tool_runner()) + ["crg", "-dir", dbdir, "-shared", "init"], log_path
 
+    def supports_shared_compile_reuse(self):
+        return not any(
+            getattr(self.options, name, None)
+            for name in ("gui", "cm", "dtl", "ico", "vso", "vso_ccex", "vcs_partcomp_dir", "vcs_partcomp_sharedlib"))
+
     def prepare_regression_runtime(self, vcomp_jobs):
         runtime_jobs = {}
         for vcomp_job in vcomp_jobs.values():
-            # simv and its companion files remain inputs to queued and active
-            # simulations after the compile lock is released. Keep ownership
-            # until those consumers finish so another run cannot rebuild them.
-            paths = [vcomp_job.job_dir]
+            path = os.path.normcase(os.path.realpath(vcomp_job.job_dir))
+            runtime_jobs.setdefault(path, (vcomp_job, True))
             if self.options.cm:
                 vcomp_job.cov_work_dir = os.path.join(self.rcfg.regression_dir, vcomp_job.name + "__COV_WORK_VCS.vdb")
-                paths.append(vcomp_job.cov_work_dir)
-            for path in paths:
-                runtime_jobs.setdefault(os.path.normcase(os.path.realpath(path)), vcomp_job)
-        for runtime_path, vcomp_job in sorted(runtime_jobs.items()):
-            vcomp_job.acquire_shared_runtime_lock(runtime_path)
+                path = os.path.normcase(os.path.realpath(vcomp_job.cov_work_dir))
+                runtime_jobs.setdefault(path, (vcomp_job, False))
+        for runtime_path, (vcomp_job, build) in sorted(runtime_jobs.items()):
+            if build:
+                vcomp_job.acquire_build_lease(shared=self.options.no_compile and self.supports_shared_compile_reuse())
+            else:
+                vcomp_job.acquire_shared_runtime_lock(runtime_path)
 
     def generate_compile_options(self, vcomp_job):
         opts = {

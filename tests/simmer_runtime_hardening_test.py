@@ -51,6 +51,79 @@ class _FatalLog:
 
 class SimmerRuntimeHardeningTest(unittest.TestCase):
 
+    def test_no_compile_reuse_is_read_only_for_batch_and_waves(self):
+        for waves in (False, True):
+            with self.subTest(waves=waves), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                bench = root / "runfiles" / "bench"
+                bench.mkdir(parents=True)
+                (bench / "tb_compile_args.f").write_text("bench/top.sv\n", encoding="utf-8")
+                argv = ["--simulator", "VCS", "--no-vcs-partcomp"] + (["--waves"] if waves else [])
+                options = parse_args(argv)
+                rcfg = SimpleNamespace(options=options,
+                                       proj_dir=str(root),
+                                       regression_dir=str(root),
+                                       log=CmnLogger("read-only-reuse"))
+                simulator = simmer.VcsSimulator(options, rcfg, simmer.jinja2_env)
+                simulator._vcs_tool_identity = "test compiler"
+                with mock.patch.dict(simmer.VCompJob.all_names, clear=True), mock.patch("simmer.log", rcfg.log):
+                    job = simmer.VCompJob(rcfg, "//bench:tb", simulator)
+                    job.bazel_runfiles_main = str(bench.parent)
+                    with mock.patch.object(job, "_acquire_compile_lock"), mock.patch("simmer.subprocess.run"):
+                        job.pre_run()
+                    executable = Path(job.job_dir, "simv")
+                    executable.write_text("compiled fixture", encoding="ascii")
+                    executable.chmod(0o755)
+                    compile_cache.write_compile_fingerprint(job.job_dir, job.compile_fingerprint)
+                    before = {
+                        path.name: (path.read_bytes(), path.stat().st_mtime_ns)
+                        for path in Path(job.job_dir).iterdir() if path.is_file()
+                    }
+                    options = parse_args(argv + ["--no-compile"])
+                    rcfg.options = simulator.options = options
+                    with mock.patch.object(job,
+                                           "_acquire_compile_lock"), mock.patch("simmer.subprocess.run") as command:
+                        job.pre_run()
+                    command.assert_not_called()
+                    self.assertIn("Bypassing", job.main_cmdline)
+                    after = {
+                        path.name: (path.read_bytes(), path.stat().st_mtime_ns)
+                        for path in Path(job.job_dir).iterdir() if path.is_file()
+                    }
+                    self.assertEqual(before, after)
+
+    def test_compile_success_downgrades_but_does_not_release_build_lease(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            bench = root / "runfiles" / "bench"
+            bench.mkdir(parents=True)
+            (bench / "tb_compile_args.f").write_text("bench/top.sv\n", encoding="utf-8")
+            options = parse_args(["--simulator", "VCS", "--no-vcs-partcomp"])
+            rcfg = SimpleNamespace(options=options,
+                                   proj_dir=str(root),
+                                   regression_dir=str(root),
+                                   log=CmnLogger("compile-downgrade"))
+            simulator = simmer.VcsSimulator(options, rcfg, simmer.jinja2_env)
+            simulator._vcs_tool_identity = "test compiler"
+            with mock.patch.dict(simmer.VCompJob.all_names, clear=True), mock.patch("simmer.log", rcfg.log):
+                job = simmer.VCompJob(rcfg, "//bench:tb", simulator)
+                job.bazel_runfiles_main = str(bench.parent)
+                with mock.patch.object(job, "_acquire_compile_lock"), mock.patch("simmer.subprocess.run"):
+                    job.pre_run()
+                executable = Path(job.job_dir, "simv")
+                executable.write_text("compiled fixture", encoding="ascii")
+                executable.chmod(0o755)
+                lease = mock.Mock(shared=False)
+                lease.downgrade.side_effect = lambda: compile_cache.validate_compile_fingerprint(
+                    job.job_dir, job.compile_fingerprint)
+                job._build_lease = lease
+                job.job_lib = SimpleNamespace(returncode=0)
+                job.post_run()
+                lease.downgrade.assert_called_once_with()
+                lease.release.assert_not_called()
+                job.release_shared_runtime_locks()
+                lease.release.assert_called_once_with()
+
     def test_vcs_scheduler_prepares_once_and_retains_exclusive_build_admission(self):
         for cache_hit in (False, True):
             with self.subTest(cache_hit=cache_hit), tempfile.TemporaryDirectory() as root:
@@ -310,19 +383,24 @@ class SimmerRuntimeHardeningTest(unittest.TestCase):
             self.assertIsNone(coverage["tb"]["total"])
 
     def test_vcs_compile_directory_remains_owned_until_regression_cleanup(self):
-        for coverage in (False, True):
-            with self.subTest(coverage=coverage), tempfile.TemporaryDirectory() as root:
-                args = ["--simulator", "VCS"] + (["--cm", "line"] if coverage else [])
+        for extra_args, shared in (([], False), (["--no-compile"], True), (["--no-compile",
+                                                                            "--waves"], True), (["--recompile"], False),
+                                   (["--no-compile",
+                                     "--gui"], False), (["--no-compile",
+                                                         "--dtl"], False), (["--no-compile", "--cm", "line"], False)):
+            with self.subTest(extra_args=extra_args), tempfile.TemporaryDirectory() as root:
+                args = ["--simulator", "VCS"] + extra_args
                 options = parse_args(args)
                 simulator = simmer.VcsSimulator(options, SimpleNamespace(regression_dir=root), simmer.jinja2_env)
                 job = SimpleNamespace(name="tb",
                                       job_dir=os.path.join(root, "compile"),
+                                      acquire_build_lease=mock.Mock(),
                                       acquire_shared_runtime_lock=mock.Mock(),
                                       release_shared_runtime_locks=mock.Mock())
                 simulator.prepare_regression_runtime({"//bench:tb": job})
+                job.acquire_build_lease.assert_called_once_with(shared=shared)
                 paths = [call.args[0] for call in job.acquire_shared_runtime_lock.call_args_list]
-                self.assertIn(os.path.normcase(os.path.realpath(job.job_dir)), paths)
-                self.assertEqual(2 if coverage else 1, len(paths))
+                self.assertEqual(1 if options.cm else 0, len(paths))
                 job.release_shared_runtime_locks.assert_not_called()
                 simulator.cleanup_shared_runtime_artifacts({"//bench:tb": job})
                 job.release_shared_runtime_locks.assert_called_once_with()
@@ -1173,7 +1251,7 @@ class SimmerRuntimeHardeningTest(unittest.TestCase):
     def test_vcs_recompile_waits_after_first_compile_lock_is_released(self):
         with tempfile.TemporaryDirectory() as root, mock.patch("simmer.log", mock.Mock()):
             options = parse_args(["--simulator", "VCS"])
-            rcfg = SimpleNamespace(proj_dir=root, regression_dir=root)
+            rcfg = SimpleNamespace(proj_dir=root, regression_dir=root, options=options)
             simulator = simmer.VcsSimulator(options, rcfg, simmer.jinja2_env)
             jobs = []
             for _ in range(2):

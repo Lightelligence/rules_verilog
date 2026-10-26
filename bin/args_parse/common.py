@@ -317,7 +317,8 @@ def add_flow_control_arguments(parser):
         action="store_true",
         help=('Skip simulator compilation and reuse the existing VCOMP executable/database. Matching scoped '
               'discovery data is reused without Bazel when available; otherwise simmer refreshes discovery once. '
-              'Simmer validates the compile fingerprint and required artifacts before launching simulations.'))
+              'Simmer validates the compile fingerprint and required artifacts before launching simulations. '
+              'Standard VCS batch/wave runs can share the compiled build across invocations.'))
     flow_control_group.add_argument(
         '--recompile',
         default=False,
