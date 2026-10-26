@@ -3287,6 +3287,7 @@ exit 0
                 "XRUN",
                 "--coverage",
                 "A",
+                "--xrun-parallel",
                 "--covfile",
                 covfile.name,
             ])
@@ -3301,10 +3302,14 @@ exit 0
         test_job = SimpleNamespace(
             iteration=2,
             name="same_test",
-            vcomper=SimpleNamespace(cov_work_dir="/tmp/cov", name="unit_vcomp"),
+            job_dir=tempfile.mkdtemp(),
+            vcomper=SimpleNamespace(cov_work_dir=tempfile.mkdtemp(), name="unit_vcomp"),
         )
         sim_args = shlex.split(simulator.generate_sim_options(test_job, 42))
-        self.assertEqual("same_test_sv42_i2", sim_args[sim_args.index("-covbaserun") + 1])
+        coverage_name = sim_args[sim_args.index("-covbaserun") + 1]
+        self.assertTrue(coverage_name.startswith("same_test_"))
+        self.assertTrue(coverage_name.endswith("_sv42_i2"))
+        self.assertNotEqual("same_test_sv42_i2", coverage_name)
         Path(test_job.coverage_db_path).mkdir(parents=True)
         simulator.cleanup_test_coverage(test_job)
         self.assertFalse(Path(test_job.coverage_db_path).exists())

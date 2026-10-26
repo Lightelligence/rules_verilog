@@ -5,7 +5,7 @@ def validate_xcelium_runtime_options(options, parser):
     if (getattr(options, 'xrun_parallel', True)
             and '--xrun-parallel' in getattr(options, 'xcelium_explicit_switches', [])):
         conflicts = [
-            name for name in ('coverage', 'mce', 'msie', 'msie_href', 'msie_prim', 'msie_incr', 'emulator')
+            name for name in ('mce', 'msie', 'msie_href', 'msie_prim', 'msie_incr', 'emulator')
             if getattr(options, name, None)
         ]
         if conflicts:
