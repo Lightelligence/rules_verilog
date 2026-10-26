@@ -1693,7 +1693,17 @@ run_bounded_process([
 
         self.assertIn("+fsdb+glitch=0", sim_options)
         self.assertIn("+fsdb+force", sim_options)
+        self.assertIn("+fsdb+dump_encrypt", sim_options)
         self.assertIn("dump -glitch on -fid $wave_fid", rendered_tcl)
+
+    def test_encrypted_dump_option_is_limited_to_vcs_wave_capture(self):
+        for backend, waves in (("VCS", False), ("VCS", True), ("XRUN", False), ("XRUN", True)):
+            with self.subTest(backend=backend, waves=waves):
+                argv = ["--simulator", backend] + (["--waves"] if waves else [])
+                _, simulator = self._validated(argv)
+                sim_options = shlex.split(simulator.generate_sim_options(SimpleNamespace(name="smoke", iteration=1),
+                                                                         42))
+                self.assertEqual(int(backend == "VCS" and waves), sim_options.count("+fsdb+dump_encrypt"))
 
     def test_vcs_wave_template_quotes_tcl_substitutions_in_fsdb_path(self):
         wave_template = self._read_repo_file("bin/templates/vcs_wave_cmd_template.tcl.j2")

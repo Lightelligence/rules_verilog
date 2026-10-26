@@ -777,7 +777,8 @@ which is the documented unlimited hierarchy depth; other explicit depths are
 preserved.
 
 VCS FSDB waves enable glitch and force information by default. Simmer passes
-`+fsdb+glitch=0` and `+fsdb+force` to `simv`; generated UCLI also runs
+`+fsdb+glitch=0`, `+fsdb+force`, and `+fsdb+dump_encrypt` to `simv` when waves
+are enabled; generated UCLI also runs
 `dump -glitch on` on the actual FSDB file ID. The generated `dump -add` keeps
 `-fsdb_opt +packedmda+struct+parameter` because those object-selection options
 are separate from glitch and force capture. Do not add `dump -forceEvent`: it
