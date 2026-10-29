@@ -591,7 +591,7 @@ class SubprocessJobRunner(JobRunner):
             return False
         if self._timed_out:
             if not self._kill_sent and now >= self._term_deadline:
-                self._send_sigkill("%s did not exit after SIGTERM; sending SIGKILL", now)
+                self._send_sigkill("%s did not exit after the timeout grace period; sending SIGKILL", now)
             elif self._kill_sent and now >= self._kill_deadline:
                 return self._ownership_wait_expired(now)
             return False
@@ -618,15 +618,25 @@ class SubprocessJobRunner(JobRunner):
         timeout_start += self._paused_duration_since(timeout_start, now)
         delta = now - timeout_start
         if self.job.timeout > 0 and delta > datetime.timedelta(hours=self.job.timeout):
-            self.log.error("%s exceeded timeout value of %s; sending SIGTERM", self.job, self.job.timeout)
+            timeout_signal = getattr(self.job, "timeout_signal", signal.SIGTERM)
+            signal_name = signal.Signals(timeout_signal).name
+            # Backend-owned request files let simulator Tcl distinguish a timeout
+            # from an ordinary interactive breakpoint. Publish before signalling.
+            request_path = getattr(self.job, "timeout_request_path", None)
+            if request_path:
+                with open(request_path, "w", encoding="ascii") as request:
+                    request.write("timeout\n")
+            self.log.error("%s exceeded timeout value of %s; sending %s", self.job, self.job.timeout, signal_name)
             self._timed_out = True
-            self._term_deadline = now + datetime.timedelta(seconds=self.TERM_GRACE_SECONDS)
-            self._signal_process_group(signal.SIGTERM)
+            grace = getattr(self.job, "timeout_grace_seconds", self.TERM_GRACE_SECONDS)
+            self._term_deadline = now + datetime.timedelta(seconds=grace)
+            self._signal_process_group(timeout_signal)
             self._signal_sidecar_process_groups(signal.SIGTERM)
             stderr_log_path = getattr(self, "stderr_log_path",
                                       os.path.join(getattr(self.job, "output_dir", self.job.job_dir), "stderr.log"))
             with open(stderr_log_path, 'a') as filep:
-                filep.write("%%E- %s exceeded timeout value of %s (SIGTERM sent)\n" % (self.job, self.job.timeout))
+                filep.write("%%E- %s exceeded timeout value of %s (%s sent)\n" %
+                            (self.job, self.job.timeout, signal_name))
             # Also mark the simulator's own log when the simulator owns one.
             # Never synthesize job_dir/stdout.log: that path belongs to the
             # simulator's -l flag, and writing it here would both invent a file
@@ -635,8 +645,8 @@ class SubprocessJobRunner(JobRunner):
             if simulator_log_path:
                 try:
                     with open(simulator_log_path, 'a') as filep:
-                        filep.write("%%E- %s exceeded timeout value of %s (SIGTERM sent)\n" %
-                                    (self.job, self.job.timeout))
+                        filep.write("%%E- %s exceeded timeout value of %s (%s sent)\n" %
+                                    (self.job, self.job.timeout, signal_name))
                 except OSError:
                     pass
             return False

@@ -785,6 +785,15 @@ are separate from glitch and force capture. Do not add `dump -forceEvent`: it
 is a VPD command, while FSDB force/release/deposit data comes from
 `+fsdb+force`.
 
+VCS wall-clock timeout first publishes a timeout request and sends SIGINT,
+allowing the UCLI driver to flush and close the wave database before exiting.
+This driver also wraps custom wave Tcl without modifying the source file.
+The test remains failed on timeout even when VCS exits cleanly. Simmer keeps
+process ownership and runtime locks during a 60-second save grace period;
+an unresponsive process is then killed. Forced termination, simulator crashes,
+or filesystem errors cannot guarantee a complete wave file; retain the timeout
+log and check for `SIMMER_VCS_TIMEOUT_WAVE_CLOSE_COMPLETE` before trusting it.
+
 Use `--wave-tcl <file>` for project-specific FSDB dump/probe commands. The
 [editable VCS FSDB example](examples/vcs_fsdb_dump.tcl) shows per-scope depth,
 timed enable/disable, glitch capture, flush and close ordering. A custom Tcl

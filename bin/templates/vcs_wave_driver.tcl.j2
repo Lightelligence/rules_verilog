@@ -1,0 +1,20 @@
+# Keep the timeout handler in the macro executing run, including custom Tcl.
+onbreak {
+    if {[file exists {{ timeout_request_path|tcl_quote }}]} {
+        puts "SIMMER_VCS_TIMEOUT_WAVE_CLOSE_BEGIN"
+        if {[info exists wave_fid]} {
+            if {[catch {dump -flush $wave_fid} message]} {
+                puts "%E- VCS timeout wave flush failed: $message"
+            }
+        }
+        if {[catch {dump -close} message]} {
+            puts "%E- VCS timeout wave close failed: $message"
+        } else {
+            puts "SIMMER_VCS_TIMEOUT_WAVE_CLOSE_COMPLETE"
+        }
+        flush stdout
+        exit
+    }
+}
+# source preserves this macro's onbreak handler; do would create another macro.
+source {{ wave_tcl_path|tcl_quote }}
