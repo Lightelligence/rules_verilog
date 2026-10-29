@@ -211,7 +211,10 @@ def print_simmer_profile(rcfg, jm, interrupted=False):
         return
 
     def job_name(job):
-        name = str(job)
+        try:
+            name = str(job)
+        except Exception:
+            return str(getattr(job, "name", type(job).__name__))
         if name.startswith("<") and name.endswith(">"):
             return str(getattr(job, "name", name))
         return name

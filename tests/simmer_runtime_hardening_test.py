@@ -115,6 +115,23 @@ class SimmerRuntimeHardeningTest(unittest.TestCase):
             simmer.rv_utils.print_interrupted_profiles(rcfg, None, {'bench': bad})
         self.assertEqual(2, logger.warning.call_count)
 
+    def test_interrupted_profile_keeps_partial_jobs_with_unavailable_display_names(self):
+
+        class PartialJob(SimpleNamespace):
+
+            def __str__(self):
+                raise AttributeError('job name formatter not ready')
+
+        output = []
+        logger = mock.Mock()
+        logger.summary.side_effect = lambda fmt, *args: output.append(fmt % args)
+        rcfg = SimpleNamespace(options=SimpleNamespace(simmer_profile=True), profile_events=[], log=logger)
+        job = PartialJob(name='partial_job', job_start_time=datetime.datetime.now(), job_stop_time=None)
+        manager = SimpleNamespace(_done=[], _skipped=[], interrupted_jobs=(job, ))
+        simmer.rv_utils.print_simmer_profile(rcfg, manager, interrupted=True)
+        self.assertIn('partial_job', '\n'.join(output))
+        self.assertIn('INTERRUPTED', '\n'.join(output))
+
     def test_interrupted_compile_profile_collects_only_after_complete_shutdown(self):
         for stopped in (False, True):
             with self.subTest(stopped=stopped):
@@ -1034,8 +1051,8 @@ class SimmerRuntimeHardeningTest(unittest.TestCase):
                     self.assertEqual("partial wave data", (project / "waves.fsdb").read_text(encoding="utf-8"))
                     self.assertNotIn("Select [s]", output)
                     self.assertNotIn("Traceback", output)
-                    self.assertEqual(int('--simmer-profile' in flags), output.count('Simmer Profile'))
-                    self.assertEqual(int('--vcs-profile' in flags), output.count('VCS Profile'))
+                    self.assertEqual(int('--simmer-profile' in flags), output.count('Simmer Profile'), output)
+                    self.assertEqual(int('--vcs-profile' in flags), output.count('VCS Profile'), output)
                     if '--simmer-profile' in flags:
                         self.assertIn('partial elapsed times', output)
                         self.assertIn('discovery', output)

@@ -33,6 +33,7 @@ def main():
                            profile_events=[(0.125, "discovery", "bazel query")])
     logger.summary = logger.info
     rcfg._profile_step = mock.Mock(return_value=False)
+    rcfg.format_test_name = lambda bench, test, iteration, sim: '{} {} {} {}'.format(bench, test, iteration, sim)
     run = {
         "planned_tests": 4,
         "tests": [{
@@ -58,6 +59,7 @@ def main():
     Path(vcomp.log_path).write_text("PC_SHARED\nPC_SHARED\n", encoding="utf-8")
     job = simmer.TestJob.__new__(simmer.TestJob)
     job.rcfg = rcfg
+    job.simulator = SimpleNamespace(get_name=lambda: 'VCS')
     job.vcomper = vcomp
     job.name = "active"
     job.target = "//tb:active"
