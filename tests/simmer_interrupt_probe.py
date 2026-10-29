@@ -23,13 +23,15 @@ def main():
     logger = logging.getLogger("interrupt-probe")
     logger.setLevel(logging.INFO)
     logger.addHandler(logging.StreamHandler(sys.stdout))
-    options = parse_args(["--simulator", "VCS", "--waves", "--wave-type", "fsdb"])
+    options = parse_args(["--simulator", "VCS", "--waves", "--wave-type", "fsdb", *sys.argv[2:]])
     options.simmer_argv = ["simmer", "--waves"]
     rcfg = SimpleNamespace(options=options,
                            all_vcomp={},
                            proj_dir=str(project),
                            regression_dir=str(project),
-                           log=logger)
+                           log=logger,
+                           profile_events=[(0.125, "discovery", "bazel query")])
+    logger.summary = logger.info
     rcfg._profile_step = mock.Mock(return_value=False)
     run = {
         "planned_tests": 4,
@@ -46,7 +48,14 @@ def main():
     vcomp = SimpleNamespace(name="tb",
                             bazel_vcomp_target="//tb:tb",
                             job_dir=str(project),
-                            log_path=str(project / "cmp.log"))
+                            log_path=str(project / "cmp.log"),
+                            compile_metrics={
+                                "compile_cache_hit": False,
+                                "profile_marker_lines": {
+                                    "PC_SHARED": 2
+                                }
+                            })
+    Path(vcomp.log_path).write_text("PC_SHARED\nPC_SHARED\n", encoding="utf-8")
     job = simmer.TestJob.__new__(simmer.TestJob)
     job.rcfg = rcfg
     job.vcomper = vcomp
@@ -64,7 +73,7 @@ def main():
     job.wave_artifact_path = str(project / "waves.fsdb")
     Path(job.run_wave_script_path).write_text("#!/usr/bin/env bash\n", encoding="utf-8")
     Path(job.wave_artifact_path).write_text("partial wave data", encoding="utf-8")
-    manager = mock.Mock(interrupted_jobs=(job, ), shutdown_incomplete=False)
+    manager = mock.Mock(interrupted_jobs=(job, ), shutdown_incomplete=False, _done=[], _skipped=[])
 
     def wait():
         (project / "ready").touch()
@@ -87,6 +96,12 @@ def main():
     simulator.cleanup_shared_runtime_artifacts.side_effect = lambda _: logger.info("CLEANUP_DONE")
     active_run = mock.Mock()
     active_run.close.side_effect = lambda: logger.info("ACTIVE_STATE_CLOSED")
+    # Exercise a completed compile followed by an interrupted simulation.
+    original_finalize = simmer.finalize_interrupted_run
+
+    def finalize_with_compile(config, backend, _jobs, **kwargs):
+        return original_finalize(config, backend, {"//tb:tb": vcomp}, **kwargs)
+
     with mock.patch("simmer.log", logger), \
          mock.patch("simmer.regression.RegressionConfig", return_value=rcfg), \
          mock.patch("simmer.simmer_state.ActiveRun", return_value=active_run), \
@@ -94,6 +109,7 @@ def main():
          mock.patch("simmer.get_simulator", return_value=simulator), \
          mock.patch("simmer.get_active_job_limit", return_value=1), \
          mock.patch("simmer.job_lib.JobManager", return_value=manager), \
+         mock.patch("simmer.finalize_interrupted_run", side_effect=finalize_with_compile), \
          mock.patch("simmer.simmer_results.create_run", return_value=run):
         simmer._run_regression_cli(options, logger)
 

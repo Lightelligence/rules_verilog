@@ -885,6 +885,16 @@ Use `--simmer-profile` to print phase and job timings after the summary:
 simmer -t <bench>:<test> --simulator VCS --simmer-profile
 ```
 
+After Ctrl+C stop or SIGTERM, requested profiles are printed after job shutdown
+and the interrupted-run summary. `--simmer-profile` includes completed phases
+and jobs, skipped jobs, and partial elapsed times for interrupted jobs.
+`--vcs-profile` also reports available compile metrics and `cmp.log` paths,
+including completed compilation before an interrupted simulation. VCS timing
+tables remain in `cmp.log`; missing final tool statistics are not invented.
+If shutdown is incomplete, no new compile-log scan is attempted. Profiling
+errors do not replace the interrupt exit code. A profile already printed is
+not printed a second time during later interrupted finalization.
+
 The profile includes discovery, each Bazel command, Bazel build-phase markers,
 Bazel external-repository events, TB setup, VCS compile, test config builds,
 simulation jobs, job directories, and commands. The scheduled testbench build
