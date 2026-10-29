@@ -886,8 +886,9 @@ simmer -t <bench>:<test> --simulator VCS --simmer-profile
 ```
 
 After Ctrl+C stop or SIGTERM, requested profiles are printed after job shutdown
-and the interrupted-run summary. `--simmer-profile` includes completed phases
-and jobs, skipped jobs, and partial elapsed times for interrupted jobs.
+and the interrupted-run summary. `--simmer-profile` includes recorded phase
+timings, completed/skipped jobs, and partial elapsed times for interrupted jobs.
+Phase rows are marked `RECORDED` because an interrupted phase may be incomplete.
 `--vcs-profile` also reports available compile metrics and `cmp.log` paths,
 including completed compilation before an interrupted simulation. VCS timing
 tables remain in `cmp.log`; missing final tool statistics are not invented.

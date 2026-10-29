@@ -221,7 +221,7 @@ def print_simmer_profile(rcfg, jm, interrupted=False):
 
     rows = []
     for duration, name, detail in getattr(rcfg, "profile_events", []):
-        rows.append((duration, "PHASE", name, "DONE", "", detail))
+        rows.append((duration, "PHASE", name, "RECORDED" if interrupted else "DONE", "", detail))
     for job in getattr(jm, "_done", []):
         rows.append((
             job.duration_s,

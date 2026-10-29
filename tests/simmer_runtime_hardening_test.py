@@ -101,6 +101,8 @@ class SimmerRuntimeHardeningTest(unittest.TestCase):
                     self.assertEqual(1, text.count('active_simulation'))
                     self.assertIn('INTERRUPTED', text)
                     self.assertIn('discovery', text)
+                    phase = next(line for line in text.splitlines() if 'PHASE' in line)
+                    self.assertIn('RECORDED', phase)
                     row = next(line for line in text.splitlines() if 'INTERRUPTED' in line)
                     self.assertGreaterEqual(float(row.split()[0]), 3)
                 if vcs_profile:
