@@ -51,6 +51,118 @@ class _FatalLog:
 
 class SimmerRuntimeHardeningTest(unittest.TestCase):
 
+    def test_finalized_interrupt_prints_requested_profiles_after_summary(self):
+        output = []
+        logger = mock.Mock()
+        logger.info.side_effect = logger.summary.side_effect = lambda fmt, *args: output.append(fmt % args)
+        rcfg = SimpleNamespace(options=SimpleNamespace(simmer_profile=True, vcs_profile=True),
+                               log=logger,
+                               profile_events=[(0.25, 'discovery', 'bazel query')],
+                               simmer_results_run=None)
+        compile_job = SimpleNamespace(name='bench', log_path='/compile/cmp.log', compile_metrics={})
+        backend = mock.Mock()
+        backend.cleanup_shared_runtime_artifacts.side_effect = lambda _: output.append('cleanup')
+        simmer.finalize_interrupted_run(rcfg, backend, {'bench': compile_job})
+        text = '\n'.join(output)
+        self.assertIn('Simmer Profile', text)
+        self.assertIn('VCS Profile', text)
+        self.assertIn('/compile/cmp.log', text)
+        self.assertLess(text.index('cleanup'), text.index('Interrupted run summary'))
+        self.assertLess(text.index('Interrupted run summary'), text.index('Simmer Profile'))
+
+    def test_interrupted_profiles_honor_flags_and_include_running_jobs_once(self):
+        for simmer_profile, vcs_profile in ((False, False), (True, False), (False, True), (True, True)):
+            with self.subTest(simmer_profile=simmer_profile, vcs_profile=vcs_profile):
+                output = []
+                logger = mock.Mock()
+                logger.summary.side_effect = lambda fmt, *args: output.append(fmt % args)
+                rcfg = SimpleNamespace(options=SimpleNamespace(simmer_profile=simmer_profile,
+                                                               vcs_profile=vcs_profile,
+                                                               timeout=1),
+                                       profile_events=[(0.25, 'discovery', 'bazel query')],
+                                       log=logger)
+                job = simmer.job_lib.Job(rcfg, 'active_simulation')
+                job.job_start_time = datetime.datetime.now() - datetime.timedelta(seconds=3)
+                job.job_stop_time = None
+                job.job_dir = '/sim'
+                job.main_cmdline = 'simv'
+                manager = SimpleNamespace(_done=[], _skipped=[], interrupted_jobs=(job, job))
+                compile_job = SimpleNamespace(name='bench',
+                                              log_path='/compile/cmp.log',
+                                              compile_metrics={'profile_marker_lines': {
+                                                  'PC_SHARED': 2
+                                              }})
+                for _ in range(2):
+                    simmer.rv_utils.print_interrupted_profiles(rcfg, manager, {'bench': compile_job})
+                text = '\n'.join(output)
+                self.assertEqual(int(simmer_profile), text.count('Simmer Profile'))
+                self.assertEqual(int(vcs_profile), text.count('VCS Profile'))
+                if simmer_profile:
+                    self.assertEqual(1, text.count('active_simulation'))
+                    self.assertIn('INTERRUPTED', text)
+                    self.assertIn('discovery', text)
+                    phase = next(line for line in text.splitlines() if 'PHASE' in line)
+                    self.assertIn('RECORDED', phase)
+                    row = next(line for line in text.splitlines() if 'INTERRUPTED' in line)
+                    self.assertGreaterEqual(float(row.split()[0]), 3)
+                if vcs_profile:
+                    self.assertIn('/compile/cmp.log', text)
+                    self.assertIn('PC_SHARED', text)
+
+    def test_interrupted_profile_errors_do_not_replace_exit_or_other_profiles(self):
+        logger = mock.Mock()
+        rcfg = SimpleNamespace(options=SimpleNamespace(simmer_profile=True, vcs_profile=True), log=logger)
+        bad = SimpleNamespace(name='bench', log_path='cmp.log', compile_metrics={'bad': object()})
+        with mock.patch('simmer.rv_utils.print_simmer_profile', side_effect=OSError('profile unavailable')):
+            simmer.rv_utils.print_interrupted_profiles(rcfg, None, {'bench': bad})
+        self.assertEqual(2, logger.warning.call_count)
+
+    def test_interrupted_profile_keeps_partial_jobs_with_unavailable_display_names(self):
+
+        class PartialJob(SimpleNamespace):
+
+            def __str__(self):
+                raise AttributeError('job name formatter not ready')
+
+        output = []
+        logger = mock.Mock()
+        logger.summary.side_effect = lambda fmt, *args: output.append(fmt % args)
+        rcfg = SimpleNamespace(options=SimpleNamespace(simmer_profile=True), profile_events=[], log=logger)
+        job = PartialJob(name='partial_job', job_start_time=datetime.datetime.now(), job_stop_time=None)
+        manager = SimpleNamespace(_done=[], _skipped=[], interrupted_jobs=(job, ))
+        simmer.rv_utils.print_simmer_profile(rcfg, manager, interrupted=True)
+        self.assertIn('partial_job', '\n'.join(output))
+        self.assertIn('INTERRUPTED', '\n'.join(output))
+
+    def test_interrupted_compile_profile_collects_only_after_complete_shutdown(self):
+        for stopped in (False, True):
+            with self.subTest(stopped=stopped):
+                run = {'planned_tests': 0, 'tests': [], 'compile': [], 'launch_failures': []}
+                rcfg = SimpleNamespace(options=SimpleNamespace(vcs_profile=True),
+                                       log=mock.Mock(),
+                                       simmer_results_run=run,
+                                       proj_dir='/repo')
+                compile_job = simmer.VCompJob.__new__(simmer.VCompJob)
+                compile_job.name = 'bench'
+                compile_job.bazel_vcomp_target = '//tb:tb'
+                compile_job.job_dir = '/compile'
+                compile_job.log_path = '/compile/cmp.log'
+                compile_job.job_start_time = datetime.datetime.now() - datetime.timedelta(seconds=1)
+                compile_job.job_stop_time = None
+                compile_job._jobstatus = JobStatus.NOT_STARTED
+                manager = SimpleNamespace(interrupted_jobs=(compile_job, ))
+                backend = mock.Mock()
+                backend.collect_compile_metrics.return_value = {'profile_marker_lines': {'PC_SHARED': 1}}
+                simmer.finalize_interrupted_run(rcfg,
+                                                backend, {'bench': compile_job},
+                                                jm=manager,
+                                                cleanup_shared_runtime=stopped)
+                self.assertEqual(int(stopped), backend.collect_compile_metrics.call_count)
+                if stopped:
+                    self.assertEqual({'PC_SHARED': 1}, run['compile'][0]['metrics']['profile_marker_lines'])
+                else:
+                    self.assertEqual({}, run['compile'][0]['metrics'])
+
     def test_no_compile_reuse_is_read_only_for_batch_and_waves(self):
         for waves in (False, True):
             with self.subTest(waves=waves), tempfile.TemporaryDirectory() as temporary:
@@ -901,15 +1013,17 @@ class SimmerRuntimeHardeningTest(unittest.TestCase):
 
     @unittest.skipUnless(os.name == "posix", "POSIX subprocess signal delivery")
     def test_real_cli_signals_print_after_cleanup_and_preserve_wave_paths(self):
-        for signum in (signal.SIGINT, signal.SIGTERM):
-            with self.subTest(signum=signum), tempfile.TemporaryDirectory() as project_dir:
+        cases = [(sig, flags) for sig in (signal.SIGINT, signal.SIGTERM)
+                 for flags in ((), ('--simmer-profile', ), ('--vcs-profile', ), ('--simmer-profile', '--vcs-profile'))]
+        for signum, flags in cases:
+            with self.subTest(signum=signum, flags=flags), tempfile.TemporaryDirectory() as project_dir:
                 project = Path(project_dir)
                 environment = os.environ.copy()
                 environment["PYTHONPATH"] = os.pathsep.join(sys.path)
                 process = subprocess.Popen(
                     [sys.executable,
                      str(REPO_ROOT / "tests" / "simmer_interrupt_probe.py"),
-                     str(project)],
+                     str(project), *flags],
                     stdin=subprocess.DEVNULL,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
@@ -939,6 +1053,15 @@ class SimmerRuntimeHardeningTest(unittest.TestCase):
                     self.assertEqual("partial wave data", (project / "waves.fsdb").read_text(encoding="utf-8"))
                     self.assertNotIn("Select [s]", output)
                     self.assertNotIn("Traceback", output)
+                    self.assertEqual(int('--simmer-profile' in flags), output.count('Simmer Profile'), output)
+                    self.assertEqual(int('--vcs-profile' in flags), output.count('VCS Profile'), output)
+                    if '--simmer-profile' in flags:
+                        self.assertIn('partial elapsed times', output)
+                        self.assertIn('discovery', output)
+                        self.assertIn('INTERRUPTED', output)
+                    if '--vcs-profile' in flags:
+                        self.assertIn(str(project / 'cmp.log'), output)
+                        self.assertIn('PC_SHARED', output)
                     history = simmer.simmer_results.load_store(project_dir)["last_run"]
                     self.assertEqual(1, history["summary"]["interrupted"])
                     self.assertEqual(1, history["summary"]["passed"])

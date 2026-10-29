@@ -206,19 +206,22 @@ def print_summary(rcfg, vcomp_jobs, jm, trd):
     return regression_log_path
 
 
-def print_simmer_profile(rcfg, jm):
-    if not getattr(rcfg.options, "simmer_profile", False):
+def print_simmer_profile(rcfg, jm, interrupted=False):
+    if not getattr(rcfg.options, "simmer_profile", False) or getattr(rcfg, "_simmer_profile_printed", False):
         return
 
     def job_name(job):
-        name = str(job)
+        try:
+            name = str(job)
+        except Exception:
+            return str(getattr(job, "name", type(job).__name__))
         if name.startswith("<") and name.endswith(">"):
             return str(getattr(job, "name", name))
         return name
 
     rows = []
     for duration, name, detail in getattr(rcfg, "profile_events", []):
-        rows.append((duration, "PHASE", name, "DONE", "", detail))
+        rows.append((duration, "PHASE", name, "RECORDED" if interrupted else "DONE", "", detail))
     for job in getattr(jm, "_done", []):
         rows.append((
             job.duration_s,
@@ -238,6 +241,19 @@ def print_simmer_profile(rcfg, jm):
             getattr(job, "main_cmdline", "") or "",
         ))
 
+    if interrupted and jm is not None:
+        reported = {id(job) for job in list(getattr(jm, "_done", ())) + list(getattr(jm, "_skipped", ()))}
+        stopped_at = datetime.datetime.now()
+        for job in jm.interrupted_jobs:
+            if id(job) in reported:
+                continue
+            reported.add(id(job))
+            started = getattr(job, "job_start_time", None)
+            stopped = getattr(job, "job_stop_time", None) or stopped_at
+            elapsed = max(0.0, (stopped - started).total_seconds()) if started is not None else 0.0
+            rows.append((elapsed, job.__class__.__name__, job_name(job), "INTERRUPTED", getattr(job, "job_dir", "")
+                         or "", getattr(job, "main_cmdline", "") or ""))
+
     rows.sort(key=lambda row: row[0], reverse=True)
     lines = ["{:<9} {:<18} {:<8} {}".format("seconds", "kind", "status", "item")]
     lines.append("{:<9} {:<18} {:<8} {}".format("-------", "----", "------", "----"))
@@ -248,7 +264,39 @@ def print_simmer_profile(rcfg, jm):
         if detail:
             lines.append("{}cmd: {}".format(" " * LOGGER_INDENT, detail))
 
-    rcfg.log.summary("Simmer Profile\n%s", "\n".join(" " * LOGGER_INDENT + line for line in lines))
+    heading = "Simmer Profile (interrupted; partial elapsed times)" if interrupted else "Simmer Profile"
+    rcfg.log.summary("%s\n%s", heading, "\n".join(" " * LOGGER_INDENT + line for line in lines))
+    rcfg._simmer_profile_printed = True
+
+
+def print_interrupted_profiles(rcfg, jm, vcomp_jobs, shutdown_complete=True):
+    """Expose available profiles without changing the interrupted run's outcome."""
+    options = getattr(rcfg, "options", None)
+    if getattr(options, "simmer_profile", False):
+        try:
+            print_simmer_profile(rcfg, jm, interrupted=True)
+        except Exception as exc:
+            rcfg.log.warning("Unable to print interrupted simmer profile: %s", exc)
+    if not getattr(options, "vcs_profile", False) or getattr(rcfg, "_vcs_interrupt_profile_printed", False):
+        return
+    try:
+        lines = ["VCS Profile (interrupted; available compile data)"]
+        seen = set()
+        for job in vcomp_jobs.values():
+            if id(job) in seen:
+                continue
+            seen.add(id(job))
+            lines.append("    {}".format(getattr(job, "name", "compile")))
+            lines.append("        cmp log: {}".format(getattr(job, "log_path", "unavailable")))
+            metrics = getattr(job, "compile_metrics", None)
+            if isinstance(metrics, dict) and metrics:
+                lines.append("        metrics (may be partial): {}".format(json.dumps(metrics, sort_keys=True)))
+        if not shutdown_complete:
+            lines.append("    Shutdown incomplete: logs may still be changing; no live compile metrics were collected.")
+        rcfg.log.summary("%s", "\n".join(lines))
+        rcfg._vcs_interrupt_profile_printed = True
+    except Exception as exc:
+        rcfg.log.warning("Unable to print interrupted VCS profile: %s", exc)
 
 
 def calc_simresults_location(checkout_path):

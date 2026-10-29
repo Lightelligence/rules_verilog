@@ -2139,6 +2139,12 @@ def finalize_interrupted_run(rcfg,
             if isinstance(job, TestJob) and job.job_start_time is not None:
                 simmer_results.record_test_job(run, job, status="INTERRUPTED", simulation_started=True)
             elif isinstance(job, VCompJob):
+                if (cleanup_shared_runtime and getattr(getattr(rcfg, "options", None), "vcs_profile", False)
+                        and job.job_start_time is not None):
+                    try:
+                        job.compile_metrics = simulator.collect_compile_metrics(job)
+                    except Exception as exc:
+                        rcfg.log.warning("Unable to collect interrupted compile metrics for %s: %s", job, exc)
                 simmer_results.record_compile_job(run, job, status="INTERRUPTED")
     simmer_results.finalize_run(
         run,
@@ -2154,6 +2160,7 @@ def finalize_interrupted_run(rcfg,
                                                               reason=reason,
                                                               shutdown_complete=cleanup_shared_runtime).splitlines():
             rcfg.log.info("%s", line)
+        rv_utils.print_interrupted_profiles(rcfg, jm, vcomp_jobs, shutdown_complete=cleanup_shared_runtime)
 
 
 def _run_regression_cli(options, logger):
