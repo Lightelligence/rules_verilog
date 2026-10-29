@@ -1428,6 +1428,36 @@ class JobManagerLaunchTest(unittest.TestCase):
         )
         self.assertEqual(-signal.SIGTERM, runner.returncode)
 
+    def test_timeout_interrupt_publishes_request_before_signal_and_keeps_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            request = Path(directory) / ".simmer_timeout"
+            runner = SubprocessJobRunner.__new__(SubprocessJobRunner)
+            runner.job = SimpleNamespace(timeout=0.001,
+                                         timeout_signal=signal.SIGINT,
+                                         timeout_grace_seconds=60,
+                                         timeout_request_path=str(request),
+                                         job_dir=directory)
+            runner.log = _Logger()
+            runner._p = _RunningProcess()
+            runner._start_time = datetime.datetime.now() - datetime.timedelta(hours=1)
+            runner._timed_out = False
+            runner._kill_sent = False
+            runner._paused = False
+            before = datetime.datetime.now()
+
+            def interrupt(signum):
+                self.assertEqual(signal.SIGINT, signum)
+                self.assertEqual("timeout\n", request.read_text())
+
+            with mock.patch.object(runner, "_signal_process_group", side_effect=interrupt), \
+                 mock.patch.object(runner, "_signal_sidecar_process_groups"):
+                self.assertFalse(runner._check_for_done())
+            self.assertGreaterEqual((runner._term_deadline - before).total_seconds(), 60)
+            runner._p = _ExitedProcess()
+            with mock.patch.object(runner, "_managed_process_groups_exist", return_value=False):
+                self.assertTrue(runner._check_for_done())
+            self.assertNotEqual(0, runner.returncode)
+
     def test_timed_out_runner_kills_process_group_after_shell_exits(self):
         runner = SubprocessJobRunner.__new__(SubprocessJobRunner)
         runner.job = SimpleNamespace(suppress_output=False,

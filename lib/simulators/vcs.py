@@ -8,6 +8,7 @@ import logging
 import platform
 import re
 import shlex
+import signal
 import shutil
 import socket
 import subprocess
@@ -743,13 +744,20 @@ class VcsSimulator(SimulatorInterface):
 
         # UCLI owns both generated and user-provided FSDB dump scripts. Keeping
         # this option here prevents VCS-specific runtime arguments reaching XRUN.
-        simulation_options = " " + shlex.join(["-ucli", "-do", wave_tcl_path])
+        driver_path = os.path.join(test_job.job_dir, "vcs_waves_driver.tcl")
+        test_job.timeout_request_path = os.path.join(test_job.job_dir, ".simmer_timeout")
+        test_job.timeout_signal = signal.SIGINT
+        # FSDB close can take longer than the generic process termination grace.
+        test_job.timeout_grace_seconds = 60
+        simulation_options = " " + shlex.join(["-ucli", "-do", driver_path])
         return {
             'sim_opts': simulation_options,
             'wave_tcl_path': wave_tcl_path,
             'waves_db': wave_database_path,
             'default_capture': default_capture_scope,
             'render_template': not self.options.wave_tcl,
+            'driver_tcl_path': driver_path,
+            'driver_template': 'vcs_wave_driver.tcl.j2',
         }
 
     def get_no_wave_capture_options(self, test_job, nwaves_tcl_path):
