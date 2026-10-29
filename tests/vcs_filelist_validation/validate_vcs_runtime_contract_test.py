@@ -337,7 +337,8 @@ run_bounded_process([
                                   pre_run_cmd="",
                                   pre_sim_commands=(),
                                   skip_parse_sim_log=1,
-                                  check_test_path=None):
+                                  check_test_path=None,
+                                  timeout_request_path=None):
         jinja_environment = jinja2.Environment(undefined=jinja2.StrictUndefined)
         jinja_environment.filters["shell_quote"] = shlex.quote
         simulation_template = jinja_environment.from_string(self._read_repo_file("bin/templates/sim_template.sh.j2"))
@@ -352,6 +353,8 @@ run_bounded_process([
                 rcfg=SimpleNamespace(proj_dir=str(project_dir)),
             ),
         )
+        if timeout_request_path is not None:
+            test_job.timeout_request_path = str(timeout_request_path)
         return simulation_template.render(
             check_test_path=str(check_test_path or Path(project_dir) / "check test.py"),
             check_test_python=sys.executable,
@@ -658,6 +661,65 @@ run_bounded_process([
             )
 
             self.assertEqual(os.path.abspath(relative_path), capture["wave_tcl_path"])
+
+    def test_vcs_timeout_driver_wraps_custom_tcl_without_overwriting_it(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            custom = root / 'custom $waves [file].tcl'
+            custom.write_text("run\nexit\n", encoding="utf-8")
+            _, simulator = self._validated(["--simulator", "VCS", "--waves", "--wave-tcl", str(custom)])
+            job = SimpleNamespace(job_dir=directory)
+            capture = simulator.get_wave_capture_options(job, str(root / "waves.tcl"))
+            self.assertEqual(["-ucli", "-do", str(root / "vcs_waves_driver.tcl")], shlex.split(capture['sim_opts']))
+            self.assertEqual(signal.SIGINT, job.timeout_signal)
+            self.assertEqual(60, job.timeout_grace_seconds)
+            self.assertEqual(str(root / ".simmer_timeout"), job.timeout_request_path)
+            self.assertEqual("run\nexit\n", custom.read_text())
+            self.assertFalse(capture['render_template'])
+
+    @unittest.skipUnless(os.name == "posix" and shutil.which("bash"), "POSIX shell required")
+    def test_rerun_clears_previous_timeout_request_before_simulation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            request = root / '.simmer_timeout'
+            request.write_text('timeout\n')
+            script = self._render_simulation_script(root,
+                                                    root,
+                                                    'test ! -e ' + shlex.quote(str(request)),
+                                                    sim_working_dir=root,
+                                                    timeout_request_path=request)
+            result = subprocess.run(['bash'], input=script, capture_output=True, text=True, timeout=5)
+            self.assertEqual(0, result.returncode, result.stderr)
+            self.assertFalse(request.exists())
+
+    @unittest.skipUnless(shutil.which("tclsh"), "Tcl interpreter required")
+    def test_vcs_timeout_driver_closes_waves_before_exit_and_ignores_normal_breaks(self):
+        template = self._read_repo_file("bin/templates/vcs_wave_driver.tcl.j2")
+        env = jinja2.Environment(undefined=jinja2.StrictUndefined)
+        env.filters['tcl_quote'] = _vcs_tcl_quote
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            request = root / 'timeout $[request]'
+            custom = root / 'custom $[waves].tcl'
+            custom.write_text('set wave_fid 7\neval $handler\nputs AFTER_BREAK\n', encoding='utf-8')
+            driver = env.from_string(template).render(wave_tcl_path=str(custom), timeout_request_path=str(request))
+            preamble = 'proc onbreak {body} {set ::handler $body}\nproc dump {args} {puts "DUMP $args"}\n'
+            for timed_out in (False, True):
+                if timed_out:
+                    request.write_text('timeout\n')
+                result = subprocess.run([shutil.which('tclsh')],
+                                        input=preamble + driver,
+                                        capture_output=True,
+                                        text=True,
+                                        check=True,
+                                        timeout=5)
+                if timed_out:
+                    self.assertLess(result.stdout.index('DUMP -flush 7'), result.stdout.index('DUMP -close'))
+                    self.assertIn('SIMMER_VCS_TIMEOUT_WAVE_CLOSE_COMPLETE', result.stdout)
+                    self.assertNotIn('AFTER_BREAK', result.stdout)
+                else:
+                    self.assertNotIn('DUMP ', result.stdout)
+                    self.assertIn('AFTER_BREAK', result.stdout)
 
     def test_xcelium_custom_wave_tcl_path_is_resolved_before_the_run_directory_changes(self):
         with tempfile.NamedTemporaryFile(suffix=".tcl") as wave_tcl:

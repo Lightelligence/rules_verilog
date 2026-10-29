@@ -1228,6 +1228,13 @@ class TestJob(Job):
                 with open(wave_tcl_path, 'w') as filep:
                     filep.write(wave_cmd_template.render(**wave_tcl_context))
 
+            if wave_capture_settings.get('driver_tcl_path'):
+                driver_template = self.simulator.env.get_template(wave_capture_settings['driver_template'])
+                with open(wave_capture_settings['driver_tcl_path'], 'w') as filep:
+                    filep.write(
+                        driver_template.render(wave_tcl_path=wave_tcl_path,
+                                               timeout_request_path=self.timeout_request_path))
+
             self._prepare_wave_viewer()
 
         else:

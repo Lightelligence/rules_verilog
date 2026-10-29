@@ -297,6 +297,10 @@ function run_test {
         return
     fi
 
+ {% if job.timeout_request_path is defined %}
+    # A manually rerun script must not inherit the previous timeout request.
+    rm -f -- {{ job.timeout_request_path|shell_quote }}
+ {% endif %}
     # The timeout monitor starts here, after sidecar and pre-run setup complete.
     : > "$TEST_LOG_PATH"
     local SIMULATION_START_SECONDS=$SECONDS
