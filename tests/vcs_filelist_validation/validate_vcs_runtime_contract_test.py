@@ -337,7 +337,8 @@ run_bounded_process([
                                   pre_run_cmd="",
                                   pre_sim_commands=(),
                                   skip_parse_sim_log=1,
-                                  check_test_path=None):
+                                  check_test_path=None,
+                                  timeout_request_path=None):
         jinja_environment = jinja2.Environment(undefined=jinja2.StrictUndefined)
         jinja_environment.filters["shell_quote"] = shlex.quote
         simulation_template = jinja_environment.from_string(self._read_repo_file("bin/templates/sim_template.sh.j2"))
@@ -352,6 +353,8 @@ run_bounded_process([
                 rcfg=SimpleNamespace(proj_dir=str(project_dir)),
             ),
         )
+        if timeout_request_path is not None:
+            test_job.timeout_request_path = str(timeout_request_path)
         return simulation_template.render(
             check_test_path=str(check_test_path or Path(project_dir) / "check test.py"),
             check_test_python=sys.executable,
@@ -673,6 +676,21 @@ run_bounded_process([
             self.assertEqual(str(root / ".simmer_timeout"), job.timeout_request_path)
             self.assertEqual("run\nexit\n", custom.read_text())
             self.assertFalse(capture['render_template'])
+
+    @unittest.skipUnless(os.name == "posix" and shutil.which("bash"), "POSIX shell required")
+    def test_rerun_clears_previous_timeout_request_before_simulation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            request = root / '.simmer_timeout'
+            request.write_text('timeout\n')
+            script = self._render_simulation_script(root,
+                                                    root,
+                                                    'test ! -e ' + shlex.quote(str(request)),
+                                                    sim_working_dir=root,
+                                                    timeout_request_path=request)
+            result = subprocess.run(['bash'], input=script, capture_output=True, text=True, timeout=5)
+            self.assertEqual(0, result.returncode, result.stderr)
+            self.assertFalse(request.exists())
 
     @unittest.skipUnless(shutil.which("tclsh"), "Tcl interpreter required")
     def test_vcs_timeout_driver_closes_waves_before_exit_and_ignores_normal_breaks(self):
