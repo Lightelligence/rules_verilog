@@ -6,10 +6,8 @@ set wave_fid [dump -file "$::env(SIMRESULTS)/waves.fsdb" -type FSDB]
 # Optional filters must precede the first dump -add command.
 # dump -suppress_instance hdl_top.dut.memory_subsystem
 
-# simmer passes +fsdb+glitch=0 and +fsdb+force whenever VCS FSDB waves are enabled.
-# A custom Tcl file must still enable glitch dumping on its own FSDB file ID.
+# simmer passes +fsdb+force whenever VCS FSDB waves are enabled.
 # Do not use dump -forceEvent here; that command applies to VPD, not FSDB.
-dump -glitch on -fid $wave_fid
 
 # Depth 0 means all hierarchy below this scope; depth 1 means this scope only.
 # -fsdb_opt selects packed MDA, struct, and parameter objects in addition to aggregates.
