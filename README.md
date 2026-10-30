@@ -162,7 +162,7 @@ FSDB capture; they do not enable VPI or UVM transaction recording.
 
 | simmer argument | Effect |
 |-----------------|--------|
-| `--waves [scope ...]` | Enables FSDB, glitch capture, and force/release/deposit metadata; no scope defaults to `hdl_top`. |
+| `--waves [scope ...]` | Enables FSDB and force/release/deposit metadata; no scope defaults to `hdl_top`. |
 | `--wave-depth N` | Applies depth `N` to every selected scope. The default is 10; use 999 for all hierarchy. |
 | `--wave-start NS` | Starts dumping at an absolute, non-negative simulation time in ns. |
 | `--wave-end NS` | Stops dumping at an absolute time in ns; it must be greater than `--wave-start`. |
@@ -179,15 +179,13 @@ UCLI also supports `dump -suppress_file`, `dump -suppress_instance`, and
 `dump -deltaCycle`; follow the installed VCS guide because ordering and setup
 requirements vary by option.
 
-For generated Tcl, simmer passes `+fsdb+glitch=0` and `+fsdb+force`, then runs
-`dump -glitch on` on the returned FSDB file ID. `+fsdb+force` records force,
-release, and deposit information for Verdi; UCLI `dump -forceEvent` is VPD-only
-and must not be used for FSDB.
+For FSDB wave runs, simmer passes `+fsdb+force` to record force, release, and
+deposit information for Verdi. Glitch capture is not enabled by default. UCLI
+`dump -forceEvent` is VPD-only and must not be used for FSDB.
 
-With `--wave-tcl`, the Tcl file owns scopes, depths, dump timing, and the
-file-ID-specific `dump -glitch on` command. Simmer still passes both runtime
-FSDB options. Keep the output at `$::env(SIMRESULTS)/waves.fsdb`, the path opened
-by `run_waves.sh`. For both VCS and Xcelium, `--waves` generates this viewer
+With `--wave-tcl`, the Tcl file owns scopes, depths, and dump timing. Simmer
+still passes `+fsdb+force`. Keep the output at `$::env(SIMRESULTS)/waves.fsdb`,
+the path opened by `run_waves.sh`. For both VCS and Xcelium, `--waves` generates this viewer
 script before simulation starts and retains it after interruption. It attempts
 to open whatever data is available, without guaranteeing an intact or complete
 database; if the wave artifact does not exist yet, it reports its path.

@@ -690,9 +690,8 @@ class VcsSimulator(SimulatorInterface):
                 "+ntb_solver_bias_test_name={}".format(coverage_name),
             ])
         if self.options.waves is not None:
-            # VCS enables force-value capture at runtime. The generated UCLI Tcl
-            # separately enables per-file glitch dumping on the returned FSDB ID.
-            sim_args.extend(["+fsdb+glitch=0", "+fsdb+force", "+fsdb+dump_encrypt"])
+            # Capture force/release/deposit metadata for FSDB waves.
+            sim_args.append("+fsdb+force")
         sim_args.extend(["+ntb_random_seed={}".format(seed), "-xlrm", "hier_inst_seed", "-assert", "nopostproc"])
         if self.options.fgp is not None:
             sim_args.append("-fgp=num_threads:{}".format(self.options.fgp))

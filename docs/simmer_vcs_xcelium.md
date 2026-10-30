@@ -776,10 +776,9 @@ not assume `FSDB0` when another dump file is already open. The default
 which is the documented unlimited hierarchy depth; other explicit depths are
 preserved.
 
-VCS FSDB waves enable glitch and force information by default. Simmer passes
-`+fsdb+glitch=0`, `+fsdb+force`, and `+fsdb+dump_encrypt` to `simv` when waves
-are enabled; generated UCLI also runs
-`dump -glitch on` on the actual FSDB file ID. The generated `dump -add` keeps
+VCS FSDB waves retain force/release/deposit information through the
+`+fsdb+force` option passed to `simv` when waves are enabled. Glitch capture
+is not enabled by default. The generated `dump -add` keeps
 `-fsdb_opt +packedmda+struct+parameter` because those object-selection options
 are separate from glitch and force capture. Do not add `dump -forceEvent`: it
 is a VPD command, while FSDB force/release/deposit data comes from
@@ -796,8 +795,8 @@ log and check for `SIMMER_VCS_TIMEOUT_WAVE_CLOSE_COMPLETE` before trusting it.
 
 Use `--wave-tcl <file>` for project-specific FSDB dump/probe commands. The
 [editable VCS FSDB example](examples/vcs_fsdb_dump.tcl) shows per-scope depth,
-timed enable/disable, glitch capture, flush and close ordering. A custom Tcl
-file owns scopes, depths, timing, and `dump -glitch on`; keep its output at
+timed enable/disable, flush and close ordering. A custom Tcl file owns scopes,
+depths, and timing; keep its output at
 `$::env(SIMRESULTS)/waves.fsdb`, the path opened by the generated `run_waves.sh`.
 
 ## Xcelium defaults
