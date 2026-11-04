@@ -328,6 +328,25 @@ run_bounded_process([
         test_srcdir = os.environ["TEST_SRCDIR"]
         return (Path(test_srcdir) / test_workspace / relative_path).read_text(encoding="utf-8")
 
+    def _run_tcl_script(self, script):
+        tclsh = shutil.which("tclsh")
+        if tclsh:
+            command = [tclsh]
+        else:
+            try:
+                import tkinter
+            except ImportError:
+                self.skipTest("Tcl interpreter required")
+            # tkinter embeds Tcl without tclsh's process-exit command.
+            command = [
+                sys.executable, "-c", "import os, sys, tkinter; t = tkinter.Tcl(); "
+                "t.createcommand('exit', lambda code=0: (t.eval('flush stdout'), os._exit(int(code)))); "
+                "t.eval(sys.stdin.read())"
+            ]
+        result = subprocess.run(command, input=script, capture_output=True, text=True, timeout=5)
+        self.assertEqual(0, result.returncode, result.stderr)
+        return result
+
     def _render_simulation_script(self,
                                   project_dir,
                                   job_dir,
@@ -692,7 +711,6 @@ run_bounded_process([
             self.assertEqual(0, result.returncode, result.stderr)
             self.assertFalse(request.exists())
 
-    @unittest.skipUnless(shutil.which("tclsh"), "Tcl interpreter required")
     def test_vcs_timeout_driver_closes_waves_before_exit_and_ignores_normal_breaks(self):
         template = self._read_repo_file("bin/templates/vcs_wave_driver.tcl.j2")
         env = jinja2.Environment(undefined=jinja2.StrictUndefined)
@@ -703,16 +721,11 @@ run_bounded_process([
             custom = root / 'custom $[waves].tcl'
             custom.write_text('set wave_fid 7\neval $handler\nputs AFTER_BREAK\n', encoding='utf-8')
             driver = env.from_string(template).render(wave_tcl_path=str(custom), timeout_request_path=str(request))
-            preamble = 'proc onbreak {body} {set ::handler $body}\nproc dump {args} {puts "DUMP $args"}\n'
+            preamble = 'proc config {args} {}\nproc onbreak {body} {set ::handler $body}\nproc dump {args} {puts "DUMP $args"}\n'
             for timed_out in (False, True):
                 if timed_out:
                     request.write_text('timeout\n')
-                result = subprocess.run([shutil.which('tclsh')],
-                                        input=preamble + driver,
-                                        capture_output=True,
-                                        text=True,
-                                        check=True,
-                                        timeout=5)
+                result = self._run_tcl_script(preamble + driver)
                 if timed_out:
                     self.assertLess(result.stdout.index('DUMP -flush 7'), result.stdout.index('DUMP -close'))
                     self.assertIn('SIMMER_VCS_TIMEOUT_WAVE_CLOSE_COMPLETE', result.stdout)
@@ -720,6 +733,80 @@ run_bounded_process([
                 else:
                     self.assertNotIn('DUMP ', result.stdout)
                     self.assertIn('AFTER_BREAK', result.stdout)
+
+    def test_vcs_ucli_echo_does_not_mask_runtime_cleanup_diagnostics(self):
+        template = self._read_repo_file("bin/templates/vcs_wave_driver.tcl.j2")
+        env = jinja2.Environment(undefined=jinja2.StrictUndefined)
+        env.filters["tcl_quote"] = _vcs_tcl_quote
+        # Model UCLI's documented command/result echo while Tcl executes the
+        # actual driver. Explicit puts output is independent of command echo.
+        preamble = """set ::cmdecho on
+proc config {name value} {
+    if {$name ne "cmdecho"} {error "unexpected UCLI setting"}
+    set ::cmdecho $value
+}
+proc onbreak {body} {set ::handler $body}
+proc dump {args} {
+    puts "DUMP $args"
+    if {[lindex $args 0] eq $::fail_dump_command} {error "injected dump failure"}
+}
+"""
+        macro_runner = """set macro [open $::driver_file r]
+set command ""
+while {[gets $macro line] >= 0} {
+    append command $line "\n"
+    if {![info complete $command]} {continue}
+    if {$::cmdecho eq "on"} {puts "ucli% $command"}
+    set result [uplevel #0 $command]
+    if {$::cmdecho eq "on" && $result ne ""} {puts $result}
+    set command ""
+}
+close $macro
+"""
+        cases = ((False, ""), (True, ""), (True, "-flush"), (True, "-close"))
+        for timed_out, failed_command in cases:
+            with self.subTest(timed_out=timed_out,
+                              failed_command=failed_command), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                request = root / ".simmer_timeout"
+                if timed_out:
+                    request.write_text("timeout\n", encoding="utf-8")
+                custom = root / "custom waves.tcl"
+                custom.write_text(
+                    'set wave_fid 7\neval $::handler\nputs "--- UVM Report Summary ---"\n'
+                    'puts "UVM_ERROR : 0"\nputs "UVM_FATAL : 0"\n',
+                    encoding="utf-8")
+                driver_path = root / "vcs_waves_driver.tcl"
+                driver_path.write_text(env.from_string(template).render(wave_tcl_path=str(custom),
+                                                                        timeout_request_path=str(request)),
+                                       encoding="utf-8")
+                settings = "set ::driver_file {}\nset ::fail_dump_command {}\n".format(
+                    _vcs_tcl_quote(str(driver_path)), _vcs_tcl_quote(failed_command))
+                result = self._run_tcl_script(preamble + settings + macro_runner)
+                self.assertEqual("", result.stderr)
+                if failed_command:
+                    diagnostic = "%E- VCS timeout wave {} failed:".format(failed_command[1:])
+                    self.assertIn(diagnostic, result.stdout)
+                    self.assertNotIn("SIMMER_VCS_TIMEOUT_WAVE_CLOSE_COMPLETE", result.stdout)
+                    self.assertIn("DUMP -close", result.stdout)
+                log = root / "stdout.log"
+                contents = result.stdout
+                if failed_command:
+                    # Real diagnostics must fail even with a later clean summary.
+                    contents += "--- UVM Report Summary ---\nUVM_ERROR : 0\nUVM_FATAL : 0\n"
+                log.write_text(contents, encoding="utf-8")
+                checker = root / "check_test.py"
+                checker.write_text(self._read_repo_file("bin/check_test.py"), encoding="utf-8")
+                for checker_args in ([], ["--pass-pattern", "^--- UVM Report Summary ---$"]):
+                    checked = subprocess.run(
+                        [sys.executable, "-B", str(checker), str(log)] + checker_args,
+                        cwd=root,
+                        capture_output=True,
+                        text=True,
+                        timeout=5)
+                    self.assertEqual(int(timed_out), checked.returncode, checked.stdout + checked.stderr)
+                    if failed_command:
+                        self.assertIn(diagnostic, (root / "stdout.log.err").read_text(encoding="utf-8"))
 
     def test_xcelium_custom_wave_tcl_path_is_resolved_before_the_run_directory_changes(self):
         with tempfile.NamedTemporaryFile(suffix=".tcl") as wave_tcl:

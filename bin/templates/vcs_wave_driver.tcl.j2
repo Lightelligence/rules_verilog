@@ -1,3 +1,5 @@
+config cmdecho off
+# Suppress command/result echo while preserving simulator and puts diagnostics.
 # Keep the timeout handler in the macro executing run, including custom Tcl.
 onbreak {
     if {[file exists {{ timeout_request_path|tcl_quote }}]} {
