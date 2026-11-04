@@ -227,7 +227,7 @@ def add_vcs_arguments(parser):
                       type=str,
                       default=None,
                       help=('Override the command prefix used for VCS, simv, URG, and Verdi. Resolution order is '
-                            'this option, RV_VCS_RUNNER, then "runmod vcs --". The value is shell-tokenized.'))
+                            'this option, RV_VCS_RUNNER, then direct tool execution. The value is shell-tokenized.'))
     gvcs.add_argument('--dtl',
                       default=False,
                       action='store_true',

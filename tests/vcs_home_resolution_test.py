@@ -39,7 +39,7 @@ class VcsHomeResolutionTest(unittest.TestCase):
     def test_environment_home_wins_without_invoking_the_runner(self):
         with mock.patch.dict(os.environ, {"VCS_HOME": "/opt/vcs"}, clear=False), \
              mock.patch("lib.simulators.vcs.subprocess.run") as run:
-            self.assertEqual("/opt/vcs", self._simulator(runner="runmod vcs --").get_vcs_home())
+            self.assertEqual("/opt/vcs", self._simulator(runner="site-launcher --").get_vcs_home())
         run.assert_not_called()
 
     def test_falls_back_to_the_runner_when_the_environment_is_empty(self):
@@ -47,17 +47,17 @@ class VcsHomeResolutionTest(unittest.TestCase):
              mock.patch("lib.simulators.vcs.subprocess.run",
                         return_value=SimpleNamespace(returncode=0,
                                                      stdout="/opt/synopsys/vcs\n")) as run:
-            home = self._simulator(runner="runmod vcs --").get_vcs_home()
+            home = self._simulator(runner="site-launcher --").get_vcs_home()
 
         self.assertEqual("/opt/synopsys/vcs", home)
-        self.assertEqual(["runmod", "vcs", "--", "printenv", "VCS_HOME"], run.call_args.args[0])
+        self.assertEqual(["site-launcher", "--", "printenv", "VCS_HOME"], run.call_args.args[0])
         self.assertFalse(run.call_args.kwargs["check"])
 
     def test_resolution_runs_once_per_simulator_instance(self):
         with self._clean_environment(), \
              mock.patch("lib.simulators.vcs.subprocess.run",
                         return_value=SimpleNamespace(returncode=0, stdout="/opt/vcs\n")) as run:
-            simulator = self._simulator(runner="runmod vcs --")
+            simulator = self._simulator(runner="site-launcher --")
             self.assertEqual("/opt/vcs", simulator.get_vcs_home())
             self.assertEqual("/opt/vcs", simulator.get_vcs_home())
 
@@ -76,7 +76,7 @@ class VcsHomeResolutionTest(unittest.TestCase):
              mock.patch("lib.simulators.vcs.subprocess.run",
                         return_value=SimpleNamespace(returncode=1, stdout="")), \
              mock.patch("lib.simulators.vcs.log") as log:
-            home = self._simulator(runner="runmod vcs --").get_vcs_home()
+            home = self._simulator(runner="site-launcher --").get_vcs_home()
 
         self.assertEqual("", home)
         log.warning.assert_called_once()
@@ -86,7 +86,7 @@ class VcsHomeResolutionTest(unittest.TestCase):
              mock.patch("lib.simulators.vcs.subprocess.run",
                         return_value=SimpleNamespace(returncode=0, stdout="\n\n")), \
              mock.patch("lib.simulators.vcs.log") as log:
-            home = self._simulator(runner="runmod vcs --").get_vcs_home()
+            home = self._simulator(runner="site-launcher --").get_vcs_home()
 
         self.assertEqual("", home)
         log.warning.assert_called_once()
@@ -95,17 +95,17 @@ class VcsHomeResolutionTest(unittest.TestCase):
         with self._clean_environment(), \
              mock.patch("lib.simulators.vcs.subprocess.run", side_effect=OSError("no such file")), \
              mock.patch("lib.simulators.vcs.log") as log:
-            home = self._simulator(runner="runmod vcs --").get_vcs_home()
+            home = self._simulator(runner="site-launcher --").get_vcs_home()
 
         self.assertEqual("", home)
         log.warning.assert_called_once()
 
     def test_runner_timeout_leaves_home_empty_and_warns(self):
-        timeout = subprocess.TimeoutExpired(cmd="runmod", timeout=30)
+        timeout = subprocess.TimeoutExpired(cmd="site-launcher", timeout=30)
         with self._clean_environment(), \
              mock.patch("lib.simulators.vcs.subprocess.run", side_effect=timeout), \
              mock.patch("lib.simulators.vcs.log") as log:
-            home = self._simulator(runner="runmod vcs --").get_vcs_home()
+            home = self._simulator(runner="site-launcher --").get_vcs_home()
 
         self.assertEqual("", home)
         log.warning.assert_called_once()
@@ -116,7 +116,7 @@ class VcsHomeResolutionTest(unittest.TestCase):
              mock.patch("lib.simulators.vcs.subprocess.run",
                         return_value=SimpleNamespace(returncode=1, stdout="")) as run, \
              mock.patch("lib.simulators.vcs.log"):
-            simulator = self._simulator(runner="runmod vcs --")
+            simulator = self._simulator(runner="site-launcher --")
             self.assertEqual("", simulator.get_vcs_home())
             self.assertEqual("", simulator.get_vcs_home())
 

@@ -57,18 +57,20 @@ exclusive ownership for the regression. XRUN's existing locking is unchanged.
 These locks coordinate simmer; directly deleting or editing active build
 artifacts with other commands is outside this protection.
 
-Do not pass `--vcs-runner` for the normal flow. The runner defaults to:
+Load the project-selected modules before starting `simmer`, and keep each
+simulator flow in its own job environment. VCS, `vlogan`, `simv`, URG and
+Verdi run directly from the inherited `PATH` by default. Xcelium compile,
+simulation, Verisium and IMC follow the same environment contract.
 
-```text
-runmod vcs --
-```
+Export installation roots and the required license/library variables from the
+selected module environment. Bazel consumers must pass the needed values through
+action/test settings; DPI repository setup reads `VCS_HOME` and
+`XCELIUMHOME` directly and validates the required headers.
 
-Override it only when a project needs a different wrapper:
-
-```bash
-RV_VCS_RUNNER="runmod vcs --" simmer -t <bench>:<test> --simulator VCS
-simmer -t <bench>:<test> --simulator VCS --vcs-runner "runmod vcs --"
-```
+The optional `RV_VCS_RUNNER` or `--vcs-runner` prefix remains available for
+an explicit scheduler integration. `--vcs-runner none` selects direct execution
+even when `RV_VCS_RUNNER` is set. Changing a launcher or tool environment can
+invalidate a compile fingerprint; preserve the normal compatibility checks.
 
 Socket helper startup waits for a registered process identity and an
 acknowledgement before waiting for the endpoint. Both startup stages have bounded

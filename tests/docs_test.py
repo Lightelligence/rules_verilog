@@ -51,12 +51,13 @@ class DocsTest(unittest.TestCase):
         self.assertNotIn("justin371/new_rules_verilog", readme)
         self.assertNotIn("LM_LICENESE_FILE", readme)
 
-    def test_vcs_config_uses_declared_simulator_settings(self):
+    def test_documented_configs_select_simulators_without_command_overrides(self):
         readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
-        for setting in ("verilog_unit_test_simulator", "verilog_dv_unit_test_command_vcs",
-                        "verilog_rtl_lint_test_command_vcs", "verilog_rtl_svunit_test_command_vcs",
-                        "verilog_rtl_unit_test_command_vcs", "verilog_vcs_unit_test_runner"):
-            self.assertIn("--@rules_verilog//:{}=".format(setting), readme)
+        for config, simulator in (("vcs", "VCS"), ("xrun", "XRUN")):
+            self.assertIn("build:{} --@rules_verilog//:verilog_unit_test_simulator={}".format(config, simulator),
+                          readme)
+        settings = re.findall(r"^build:(?:vcs|xrun) --@rules_verilog//:([a-z0-9_]+)=", readme, flags=re.MULTILINE)
+        self.assertEqual(["verilog_unit_test_simulator", "verilog_unit_test_simulator"], settings)
 
 
 if __name__ == "__main__":

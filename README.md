@@ -53,15 +53,22 @@ precedence; `SIM_PLATFORM` overrides the `simmer` fallback. To select XRUN for
 one-step rules that omit `simulator`, set
 `--@rules_verilog//:verilog_unit_test_simulator=XRUN`.
 
-For site-specific Synopsys VCS launchers, you can add a named Bazel config in `.bazelrc` and invoke it explicitly. Example:
+Load the simulator modules selected by your project before invoking Bazel or
+`simmer`. Module selection belongs to the project/job entry point; generated
+commands invoke `vcs`, `xrun`, `simv` and the associated viewers and coverage
+tools directly from `PATH`. Keep each tool flow in its own job environment.
+
+For DPI header repositories, export `VCS_HOME` or `XCELIUMHOME` before Bazel
+starts. Missing installation roots or headers fail during repository setup.
+Pass the selected environment through Bazel's action/test settings, including
+`PATH`, the required installation roots, license variables and
+`LD_LIBRARY_PATH`. The repository `.bazelrc` shows these settings; consumers
+must configure their own `.bazelrc`.
+
+A named config can select VCS without replacing tool commands:
 
 ```bazelrc
 build:vcs --@rules_verilog//:verilog_unit_test_simulator=VCS
-build:vcs --@rules_verilog//:verilog_dv_unit_test_command_vcs="runmod vcs -- vcs"
-build:vcs --@rules_verilog//:verilog_rtl_lint_test_command_vcs="runmod vcs -- vcs"
-build:vcs --@rules_verilog//:verilog_rtl_svunit_test_command_vcs="runmod vcs --"
-build:vcs --@rules_verilog//:verilog_rtl_unit_test_command_vcs="runmod vcs -- vcs"
-build:vcs --@rules_verilog//:verilog_vcs_unit_test_runner="runmod vcs --"
 ```
 
 Then run the test suite with VCS selected for one-step unit tests and RTL lint
@@ -74,7 +81,7 @@ bsub -I -q syn bazel test --config=vcs //... --test_tag_filters=-no_ci_gate \
 
 An explicit `simulator = "XRUN"` or `simulator = "VCS"` on a target takes
 precedence over the config default. VCS one-step unit tests compile with `vcs`
-and then execute the generated `simv` through `verilog_vcs_unit_test_runner`,
+and then execute the generated `simv` directly by default,
 so the compile and runtime processes share the same tool environment. VCS
 one-step FSDB dumping is currently disabled; the wave commands remain in the
 Synopsys templates as comments.
@@ -94,13 +101,13 @@ instead. Set `rulefile_vcs` when a target needs project-specific VCS lint
 options. Targets that explicitly set `simulator = "VCS"` may continue using
 `rulefile` for backward compatibility.
 
-For `simmer` VCS runs, no simulator flag is needed unless overriding `SIM_PLATFORM`. The VCS, `simv`, and Verdi launcher prefix defaults to `runmod vcs --`.
+For `simmer` VCS runs, no simulator flag is needed unless overriding `SIM_PLATFORM`. VCS, `simv`, URG and Verdi run directly in the selected environment.
 
 ```bash
 simmer -t //hw/dv/project_benches/sys/tb:some_vcs_test --simulator VCS
 ```
 
-Override the launcher with `RV_VCS_RUNNER` or `--vcs-runner` only when a project needs a different module wrapper.
+Override the launcher with `RV_VCS_RUNNER` or `--vcs-runner` only when a project needs an explicit command prefix, such as an LSF scheduler.
 
 ### Interrupting a regression
 
@@ -209,11 +216,10 @@ verilog_rtl_unit_test(
 
 ```
 
-Configure the Xcelium site wrappers independently from the VCS regression flow:
+Load the Xcelium environment and select XRUN independently from the VCS flow:
 
 ```bazelrc
-build:xrun --@rules_verilog//:verilog_dv_unit_test_command="runmod -t xrun --"
-build:xrun --@rules_verilog//:verilog_rtl_unit_test_command="runmod -t xrun --"
+build:xrun --@rules_verilog//:verilog_unit_test_simulator=XRUN
 ```
 
 Run the Xcelium unit test on the Red Hat workstation:
@@ -228,8 +234,8 @@ above.
 The bundled SVUnit template supports Xcelium and VCS. A project-specific custom
 template remains simulator-specific unless it implements both backends.
 
-`runmod` is a site-provided command from a separate repository and is assumed
-to be available on `PATH`.
+Module loading is completed before launching a flow. Generated commands inherit
+that environment and do not select or load site modules.
 
 ### VCS Partition Compile
 

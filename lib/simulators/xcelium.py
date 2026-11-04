@@ -108,7 +108,7 @@ class XceliumSimulator(SimulatorInterface):
         return self.env.get_template('xrun_wave_cmd_template.tcl.j2')
 
     def get_wave_view_command(self, wave_file_path, job_dir=None):
-        argv = ["runmod", "xrun", "--", "verisium", "-64bit", "-db", wave_file_path]
+        argv = ["verisium", "-64bit", "-db", wave_file_path]
         if any("\n" in arg or "\r" in arg for arg in argv):
             raise ValueError("Wave viewer arguments cannot contain newlines")
         return "\n".join(argv)
@@ -135,13 +135,9 @@ class XceliumSimulator(SimulatorInterface):
             return self._xcelium_tool_identity
 
         # `xrun -64 -version` is a supported, license-free release query. Normal
-        # runs select Xcelium through runmod; emulator runs launch xrun directly.
-        # Probe through the same launcher so the fingerprint identifies the tool
-        # that will actually consume the compile/runtime artifacts.
-        if self.options.emulator:
-            command = ["xrun", "-64", "-version"]
-        else:
-            command = shlex.split("runmod -t xrun --") + ["-64", "-version"]
+        # The caller selects the Xcelium environment before starting simmer.
+        # Probe the same executable that consumes compile/runtime artifacts.
+        command = ["xrun", "-64", "-version"]
         try:
             result = subprocess.run(command, capture_output=True, text=True, timeout=30, check=False)
         except (OSError, subprocess.TimeoutExpired) as exc:
@@ -478,9 +474,8 @@ class XceliumSimulator(SimulatorInterface):
             with open(merge_sh, 'w') as filep:
                 filep.write("".join([
                     "#!/usr/bin/env bash\n",
-                    "" if self.options.report else
-                    shlex.join(["runmod", "xrun", "--", "imc", "-exec", merge_exec_tcl, "-verbose"]) + "\n",
-                    shlex.join(["runmod", "xrun", "--", "imc", "-load", merged_output]) + "\n",
+                    "" if self.options.report else shlex.join(["imc", "-exec", merge_exec_tcl, "-verbose"]) + "\n",
+                    shlex.join(["imc", "-load", merged_output]) + "\n",
                 ]))
             st = os.stat(merge_sh)
             os.chmod(merge_sh, st.st_mode | stat.S_IEXEC)
@@ -674,7 +669,7 @@ class XceliumSimulator(SimulatorInterface):
             merge_exec_tcl = os.path.join(cov_work_dir, "merge_exec.tcl")
             try:
                 result = run_bounded_process(
-                    ["runmod", "xrun", "--", "imc", "-exec", merge_exec_tcl, "-verbose"],
+                    ["imc", "-exec", merge_exec_tcl, "-verbose"],
                     capture_output=True,
                     text=True,
                 )
@@ -704,7 +699,7 @@ class XceliumSimulator(SimulatorInterface):
                 continue
             try:
                 result = run_bounded_process(
-                    ["runmod", "xrun", "--", "imc", "-exec", report_tcl, "-verbose"],
+                    ["imc", "-exec", report_tcl, "-verbose"],
                     capture_output=True,
                     text=True,
                 )
@@ -766,7 +761,7 @@ class XceliumSimulator(SimulatorInterface):
                 emu_dpi_lib,
             ]
         else:
-            cmd_parts = shlex.split("runmod -t xrun --") + ["-R", "-xmlibdirname", vcomp_job_dir]
+            cmd_parts = ["xrun", "-R", "-xmlibdirname", vcomp_job_dir]
             if self.options.gui and " -gui " not in sim_opts:
                 cmd_parts.append("-gui")
 

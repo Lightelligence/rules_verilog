@@ -49,3 +49,54 @@ run_fixture "$fixture_dir" "$temporary_root/local-output-user-root"
 run_fixture "$http_archive_fixture_dir" "$temporary_root/http-archive-output-user-root"
 
 "$python_path" "$repo_root/tests/discovery_cache_smoke_test.py"
+
+# Resolve real repository rules against small fake installations. No simulator
+# executable is present: only the exported homes may supply the DPI headers.
+headers_fixture="$temporary_root/simulator-headers"
+mkdir -p "$headers_fixture" "$temporary_root/vcs-v1/include" "$temporary_root/vcs-v2/include" \
+  "$temporary_root/xcelium/tools.lnx86/include" "$temporary_root/empty-home"
+for version in v1 v2; do
+  for header in svdpi.h svdpi_src.h; do
+    printf 'vcs-%s-%s\n' "$version" "$header" >"$temporary_root/vcs-$version/include/$header"
+  done
+done
+for header in svdpi.h svdpi_compatibility.h; do
+  printf 'xcelium-%s\n' "$header" >"$temporary_root/xcelium/tools.lnx86/include/$header"
+done
+cat >"$headers_fixture/WORKSPACE" <<EOF
+workspace(name = "simulator_headers_fixture")
+local_repository(name = "rules_verilog", path = "$repo_root")
+load("@rules_verilog//:simulator.bzl", "vcs_setup", "xcelium_setup")
+vcs_setup(name = "vcs")
+xcelium_setup(name = "xcelium")
+EOF
+cat >"$headers_fixture/BUILD" <<'EOF'
+genrule(
+    name = "headers",
+    srcs = ["@vcs//:dpi_headers", "@xcelium//:dpi_headers"],
+    outs = ["headers.txt"],
+    cmd = "cat $(SRCS) > $@",
+)
+EOF
+(
+  cd "$headers_fixture"
+  export XCELIUMHOME="$temporary_root/xcelium"
+  for version in v1 v2; do
+    export VCS_HOME="$temporary_root/vcs-$version"
+    bazel --output_user_root="$temporary_root/headers-output" build --noenable_bzlmod //:headers
+    grep -F "vcs-$version-svdpi.h" bazel-bin/headers.txt
+    grep -F 'xcelium-svdpi_compatibility.h' bazel-bin/headers.txt
+  done
+  if env -u VCS_HOME bazel --output_user_root="$temporary_root/headers-output" \
+      build --noenable_bzlmod @vcs//:dpi_headers >"$temporary_root/missing-home.log" 2>&1; then
+    echo "ERROR: DPI setup accepted a missing VCS_HOME." >&2
+    exit 1
+  fi
+  grep -F 'VCS_HOME must be exported' "$temporary_root/missing-home.log"
+  if VCS_HOME="$temporary_root/empty-home" bazel --output_user_root="$temporary_root/headers-output" \
+      build --noenable_bzlmod @vcs//:dpi_headers >"$temporary_root/missing-header.log" 2>&1; then
+    echo "ERROR: DPI setup accepted an installation without headers." >&2
+    exit 1
+  fi
+  grep -F 'does not provide required DPI header' "$temporary_root/missing-header.log"
+)
