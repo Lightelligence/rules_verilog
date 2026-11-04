@@ -787,6 +787,9 @@ is a VPD command, while FSDB force/release/deposit data comes from
 VCS wall-clock timeout first publishes a timeout request and sends SIGINT,
 allowing the UCLI driver to flush and close the wave database before exiting.
 This driver also wraps custom wave Tcl without modifying the source file.
+It disables UCLI command/result echo (`config cmdecho off`) so unexecuted Tcl
+source is not mistaken for a log diagnostic; simulator and `puts` output remain
+visible to the log checker.
 The test remains failed on timeout even when VCS exits cleanly. Simmer keeps
 process ownership and runtime locks during a 60-second save grace period;
 an unresponsive process is then killed. Forced termination, simulator crashes,
