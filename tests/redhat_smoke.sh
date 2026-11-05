@@ -43,10 +43,10 @@ if grep -F -- "legacy_hal_rules.lint" "${custom_lint_args}"; then
 fi
 configured_svunit="bazel-bin/tests/vcs_filelist_validation/rtl_svunit_vcs"
 explicit_xrun_svunit="bazel-bin/tests/vcs_filelist_validation/rtl_svunit_explicit_xrun"
-grep -F -- "runmod vcs -- runSVUnit" "${configured_svunit}"
+grep -F -- "runSVUnit" "${configured_svunit}"
 grep -F -- "-s vcs" "${configured_svunit}"
 grep -F -- "-f tests/vcs_filelist_validation/unit_test_top_vcs.f" "${configured_svunit}"
-if grep -E "xcelium|runmod -t xrun" "${configured_svunit}"; then
+if grep -E "xcelium|xrun" "${configured_svunit}"; then
   echo "ERROR: VCS SVUnit retained an Xcelium command." >&2
   exit 1
 fi

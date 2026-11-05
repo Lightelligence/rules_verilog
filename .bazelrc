@@ -5,21 +5,28 @@ build --action_env=HOME
 build --incompatible_use_python_toolchains=false
 build --python_path=python3.12
 build --action_env=PATH
+build --action_env=VCS_HOME
+build --action_env=XCELIUMHOME
+build --action_env=VERDI_HOME
+build --action_env=SVUNIT_INSTALL
+build --action_env=LM_LICENSE_FILE
+build --action_env=SNPSLMD_LICENSE_FILE
+build --action_env=CDS_LIC_FILE
+build --action_env=LD_LIBRARY_PATH
+test --test_env=PATH
+test --test_env=VCS_HOME
+test --test_env=XCELIUMHOME
+test --test_env=VERDI_HOME
+test --test_env=SVUNIT_INSTALL
+test --test_env=LM_LICENSE_FILE
+test --test_env=SNPSLMD_LICENSE_FILE
+test --test_env=CDS_LIC_FILE
+test --test_env=LD_LIBRARY_PATH
 
-# Lightelligence Specific
-build --//:verilog_dv_unit_test_command="runmod -t xrun --"
-build --//:verilog_rtl_cdc_test_command="runmod -t jg --"
-build --//:verilog_rtl_unit_test_command="runmod -t xrun --"
-build --//:verilog_rtl_lint_test_command="runmod -t xrun --"
+# Simulator tools are provided by the caller's selected environment.
 
-# Synopsys VCS/Verdi wrappers. Use with `--config=vcs`.
+# Select VCS. Use with `--config=vcs`.
 build:vcs --//:verilog_unit_test_simulator=VCS
-build:vcs --//:verilog_dv_unit_test_command_vcs="runmod vcs -- vcs"
-build:vcs --//:verilog_rtl_lint_test_command_vcs="runmod vcs -- vcs"
-build:vcs --//:verilog_rtl_svunit_test_command_vcs="runmod vcs --"
-build:vcs --//:verilog_rtl_unit_test_command_vcs="runmod vcs -- vcs"
-build:vcs --//:verilog_vcs_unit_test_runner="runmod vcs --"
-# build:vcs --//:verilog_rtl_wave_viewer_command_vcs="runmod vcs -- verdi"
 
 #If true, Bazel tries to load external repositories from the Bzlmod system before looking into the WORKSPACE file
 ## Enable Bzlmod for every Bazel command

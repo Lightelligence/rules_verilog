@@ -133,7 +133,7 @@ class VcsSimulator(SimulatorInterface):
         return self.env.get_template('vcs_wave_cmd_template.tcl.j2')
 
     def get_tool_runner(self):
-        runner = self.options.vcs_runner or os.environ.get("RV_VCS_RUNNER") or "runmod vcs --"
+        runner = self.options.vcs_runner or os.environ.get("RV_VCS_RUNNER") or ""
         return "" if runner.lower() in ("none", "") else runner
 
     def get_vcs_home(self):

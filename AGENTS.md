@@ -63,7 +63,7 @@ deps/         # pinned public and site-local repository declarations
 - Do not use `../` traversal or environment variables for Bazel-owned filelist paths; retain runfiles-relative paths.
 - Do not load `verilog/private` from new consumer BUILD files. Existing internal use is compatibility-sensitive.
 - Do not assume `//docs:defs_docs` exists: the migration checklist is stale; maintain docs directly.
-- Do not treat `env.sh` or `.bazelrc` site wrappers as portable defaults; `runmod` and licensed tools are external.
+- Do not treat `env.sh` or `.bazelrc` site setup as portable defaults; licensed tools are external.
 - Do not treat PLDM as a third simulator backend. Its independent Starlark module emits compatibility inputs for Xcelium emulation.
 
 ## COMMANDS

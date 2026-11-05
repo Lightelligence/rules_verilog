@@ -171,7 +171,7 @@ class VcsFilelistValidationTest(unittest.TestCase):
             root = Path(temporary_dir)
             bin_dir = root / "bin"
             bin_dir.mkdir()
-            for command in ("runmod", "vcs", "xrun"):
+            for command in ("vcs", "xrun"):
                 tool = bin_dir / command
                 tool.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
                 tool.chmod(0o755)
@@ -321,7 +321,7 @@ class VcsFilelistValidationTest(unittest.TestCase):
         self.assertNotIn("-full64", lint_args)
         self.assertNotIn("-lca", lint_args)
         self.assertNotIn("xcelium", svunit_script)
-        self.assertNotIn("runmod -t xrun", svunit_script)
+        self.assertNotIn("-s xcelium", svunit_script)
         self.assertNotIn("-file tests/vcs_filelist_validation/unit_test_top_vcs.f", svunit_script)
         self.assertIn("-s xcelium", xrun_svunit_script)
         self.assertNotIn("-s vcs", xrun_svunit_script)
@@ -642,7 +642,7 @@ with open(os.environ["TOOL_LOG"], "a", encoding="utf-8") as log_file:
             temporary_path = Path(temporary_dir)
             bin_dir = temporary_path / "bin"
             bin_dir.mkdir()
-            for tool in ("runmod", ):
+            for tool in ("xrun", ):
                 tool_path = bin_dir / tool
                 tool_path.write_text(tool_stub, encoding="utf-8")
                 tool_path.chmod(0o755)
@@ -670,7 +670,7 @@ with open(os.environ["TOOL_LOG"], "a", encoding="utf-8") as log_file:
                 )
 
             records = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
-            self.assertTrue(any(record["tool"] == "runmod" for record in records))
+            self.assertTrue(any(record["tool"] == "xrun" for record in records))
             self.assertTrue(any("+XRUN_DECLARED_RUNTIME" in record["args"] for record in records))
             for record in records:
                 self.assertFalse(any(not argument.strip() for argument in record["args"]), record)
@@ -679,9 +679,9 @@ with open(os.environ["TOOL_LOG"], "a", encoding="utf-8") as log_file:
         with tempfile.TemporaryDirectory() as temporary_dir:
             bin_dir = Path(temporary_dir) / "bin"
             bin_dir.mkdir()
-            runmod_path = bin_dir / "runmod"
-            runmod_path.write_text("#!/usr/bin/env bash\nexit 23\n", encoding="utf-8")
-            runmod_path.chmod(0o755)
+            xrun_path = bin_dir / "xrun"
+            xrun_path.write_text("#!/usr/bin/env bash\nexit 23\n", encoding="utf-8")
+            xrun_path.chmod(0o755)
             environment = dict(os.environ)
             environment["PATH"] = "{}{}{}".format(bin_dir, os.pathsep, environment["PATH"])
 
@@ -696,7 +696,7 @@ with open(os.environ["TOOL_LOG"], "a", encoding="utf-8") as log_file:
             self.assertEqual(23, result.returncode)
             self.assertIn("ERROR: line", result.stderr)
             self.assertIn("exited 23", result.stderr)
-            self.assertIn("runmod", result.stderr)
+            self.assertIn("xrun", result.stderr)
 
 
 if __name__ == "__main__":

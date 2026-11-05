@@ -619,7 +619,7 @@ verilog_rtl_unit_test = rule(
             default = Label("@rules_verilog//:verilog_rtl_unit_test_command"),
             doc = "Allows custom override of simulator command in the event of wrapping via modulefiles.\n" +
                   "Example override in project's .bazelrc:\n" +
-                  '  build --@rules_verilog//:verilog_rtl_unit_test_command="runmod -t xrun --"',
+                  '  build --@rules_verilog//:verilog_rtl_unit_test_command="/site/bin/xrun"',
         ),
         "_command_override_xrun": attr.label(
             default = Label("@rules_verilog//:verilog_rtl_unit_test_command"),
@@ -637,7 +637,7 @@ verilog_rtl_unit_test = rule(
             default = Label("@rules_verilog//:verilog_rtl_wave_viewer_command"),
             doc = "Allows custom override of waveform viewer command in the event of wrapping via modulefiles.\n" +
                   "Example override in project's .bazelrc:\n" +
-                  '  build --@rules_verilog//:verilog_rtl_wave_viewer_command="runmod xrun --"\n',
+                  '  build --@rules_verilog//:verilog_rtl_wave_viewer_command="/site/bin/simvision"\n',
         ),
         "_wave_viewer_command_xrun": attr.label(
             default = Label("@rules_verilog//:verilog_rtl_wave_viewer_command"),
@@ -910,7 +910,7 @@ verilog_rtl_lint_test = rule(
             default = Label("@rules_verilog//:verilog_rtl_lint_test_command"),
             doc = "Allows custom override of simulator command in the event of wrapping via modulefiles\n" +
                   "Example override in project's .bazelrc:\n" +
-                  '  build --@rules_verilog//:verilog_rtl_lint_test_command="runmod -t xrun --"',
+                  '  build --@rules_verilog//:verilog_rtl_lint_test_command="/site/bin/xrun"',
         ),
         "_command_override_vcs": attr.label(
             default = Label("@rules_verilog//:verilog_rtl_lint_test_command_vcs"),
@@ -1082,7 +1082,7 @@ verilog_rtl_cdc_test = rule(
             default = Label("@rules_verilog//:verilog_rtl_cdc_test_command"),
             doc = "Allows custom override of simulator command in the event of wrapping via modulefiles\n" +
                   "Example override in project's .bazelrc:\n" +
-                  '  build --@rules_verilog//:rtl_cdc_test_command="runmod -t jg --"',
+                  '  build --@rules_verilog//:rtl_cdc_test_command="/site/bin/jg"',
         ),
     },
     outputs = {

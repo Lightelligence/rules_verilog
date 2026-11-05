@@ -246,7 +246,7 @@ run_bounded_process([
 
         command = simulator.get_wave_view_command("/tmp/waves.fsdb")
 
-        self.assertEqual(["runmod", "vcs", "--", "verdi", "-apex", "-ssf", "/tmp/waves.fsdb"], command.splitlines())
+        self.assertEqual(["verdi", "-apex", "-ssf", "/tmp/waves.fsdb"], command.splitlines())
         self.assertIn("-apex", command)
         self.assertNotIn("-lca", command)
 
@@ -296,11 +296,11 @@ run_bounded_process([
         xcelium = XceliumSimulator(parse_args(["--simulator", "XRUN", "--waves"]), DummyRegressionConfig(), None)
 
         self.assertEqual(
-            ["runmod", "vcs", "--", "verdi", "-apex", "-ssf", wave_path],
+            ["verdi", "-apex", "-ssf", wave_path],
             vcs.get_wave_view_command(wave_path).splitlines(),
         )
         self.assertEqual(
-            ["runmod", "xrun", "--", "verisium", "-64bit", "-db", wave_path],
+            ["verisium", "-64bit", "-db", wave_path],
             xcelium.get_wave_view_command(wave_path).splitlines(),
         )
         with self.assertRaisesRegex(ValueError, "cannot contain newlines"):
@@ -411,7 +411,7 @@ run_bounded_process([
         self.assertIsNone(options.vcs_runner)
         self.assertEqual("fsdb", options.wave_type)
 
-        self.assertEqual("runmod vcs --", simulator.get_tool_runner())
+        self.assertEqual("", simulator.get_tool_runner())
 
     def test_xprop_is_opt_in_for_vcs_and_defaults_to_fox_for_xcelium(self):
         vcs_options, vcs_simulator = self._validated(["-t", "unit:test", "--simulator", "VCS"])
@@ -967,7 +967,7 @@ close $macro
             log_path="/tmp/example_test/stdout.log",
         )
 
-        self.assertIn("runmod vcs -- /tmp/example_vcomp/simv", command)
+        self.assertIn("/tmp/example_vcomp/simv", command)
         self.assertIn("-f bazel_runfiles_main/unit/test_runtime_args.f", command)
         self.assertNotIn("-file bazel_runfiles_main/unit/test_runtime_args.f", command)
         self.assertNotIn(" -sml ", command)
@@ -1333,7 +1333,7 @@ close $macro
 
         identities = []
         for host in ("sh-cloud24", "sh-cloud25"):
-            stdout = ("runmod: selected host {}\n"
+            stdout = ("site-launcher: selected host {}\n"
                       "Compiler version = VCS X-2025.06-SP2-4_Full64; "
                       "Runtime version = VCS X-2025.06-SP2-4_Full64; Jul 16 2026\n".format(host))
             probe = VcsSimulator(options, DummyRegressionConfig(), None)
@@ -1354,7 +1354,7 @@ close $macro
         simulator = VcsSimulator(options, DummyRegressionConfig(), None)
         with mock.patch("lib.simulators.vcs.subprocess.run",
                         return_value=SimpleNamespace(returncode=0,
-                                                     stdout="runmod: selected host sh-cloud24\n",
+                                                     stdout="site-launcher: selected host sh-cloud24\n",
                                                      stderr="")):
             with self.assertRaisesRegex(RuntimeError, "Unable to find a stable 'Compiler version'"):
                 simulator.get_tool_identity()
@@ -1367,13 +1367,13 @@ close $macro
 
         identities = []
         for host in ("sh-cloud24", "sh-cloud25"):
-            stdout = "runmod: selected host {}\n".format(host)
+            stdout = "site-launcher: selected host {}\n".format(host)
             stderr = "TOOL: xrun(64) 25.03-s001: Started on Jul 17, 2026 at 12:34:56 CST\n"
             probe = XceliumSimulator(options, DummyRegressionConfig(), None)
             with mock.patch("lib.simulators.xcelium.subprocess.run",
                             return_value=SimpleNamespace(returncode=0, stdout=stdout, stderr=stderr)) as run:
                 identities.append(probe.get_tool_identity())
-            self.assertEqual(["runmod", "-t", "xrun", "--", "-64", "-version"], run.call_args.args[0])
+            self.assertEqual(["xrun", "-64", "-version"], run.call_args.args[0])
 
         self.assertEqual(["xrun release = 25.03-s001", "xrun release = 25.03-s001"], identities)
 
@@ -3660,7 +3660,7 @@ exit 0
             coverage = simulator.collect_coverage_data({"//pkg:sys_tb": job})
 
         run.assert_called_once_with(
-            ["runmod", "xrun", "--", "imc", "-exec", job.coverage_report_tcl, "-verbose"],
+            ["imc", "-exec", job.coverage_report_tcl, "-verbose"],
             capture_output=True,
             text=True,
         )
