@@ -1430,7 +1430,7 @@ source annotation and hierarchy details.</p></html>
         cmd_parts.append(os.path.join(vcomp_job_dir, "simv"))
         if self.use_smartlog():
             cmd_parts.append("-sml")
-        cmd_parts.extend(["-l", log_path])
+        cmd_parts.extend(["-l", log_path, "+vcs+flush+log"])
         if user_args_list:
             cmd_parts.extend(user_args_list)
         full_command = shlex.join(cmd_parts)
