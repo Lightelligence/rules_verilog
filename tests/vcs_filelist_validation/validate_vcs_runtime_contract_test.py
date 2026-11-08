@@ -971,6 +971,7 @@ close $macro
         self.assertIn("-f bazel_runfiles_main/unit/test_runtime_args.f", command)
         self.assertNotIn("-file bazel_runfiles_main/unit/test_runtime_args.f", command)
         self.assertNotIn(" -sml ", command)
+        self.assertIn("-l /tmp/example_test/stdout.log +vcs+flush+log ", command)
 
     def test_runtime_options_are_shell_escaped_once(self):
         value = "label with spaces;$(touch should_not_run)"
