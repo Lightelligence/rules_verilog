@@ -22,7 +22,28 @@ variables:
   GIT_SUBMODULE_STRATEGY: recursive
   GIT_SUBMODULE_DEPTH: 1
 
-redhat-no-license:
+yapf-format:
+  stage: test
+  timeout: 10m
+  script:
+    - 'python -m yapf --version || { echo "yapf is not installed on this runner (CI is offline; project pin is requirements-format.txt)"; exit 1; }'
+    - python -m yapf --diff --recursive bin lib tests > yapf.patch || true
+    - 'if [ -s yapf.patch ]; then cat yapf.patch; exit 1; fi'
+  artifacts:
+    when: on_failure
+    paths:
+      - yapf.patch
+    expire_in: 1 week
+
+doc-check:
+  stage: test
+  timeout: 10m
+  script:
+    - bash ./tests/doc_test.sh
+
+# Disabled: the runner's glibc is too old to start Bazel 7.7.1. Rename back to
+# 'redhat-no-license' once a suitable runner is available.
+.redhat-no-license:
   stage: test
   script:
     - ./tests/redhat_smoke.sh

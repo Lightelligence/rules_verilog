@@ -601,6 +601,91 @@ run_bounded_process([
         with self.assertRaises(ValueError):
             self._validated(["--simulator", "XRUN", "--vso-ccex"])
 
+    def test_ccex_and_grading_follow_vcs_cm_by_default(self):
+        plain, plain_sim = self._validated(["--simulator", "VCS"])
+        self.assertFalse(plain.vso_ccex)
+        self.assertFalse(plain.vcs_urg_grade)
+        plain_args = shlex.split(plain_sim.generate_sim_options(SimpleNamespace(name="smoke", iteration=1), 7))
+        self.assertNotIn("ccex", plain_args)
+
+        cm, cm_sim = self._validated(["--simulator", "VCS", "--vcs-cm", "line"])
+        self.assertTrue(cm.vso_ccex)
+        self.assertTrue(cm.vso_ccex_rca)
+        self.assertTrue(cm.vcs_urg_grade)
+        cm_job = SimpleNamespace(name="smoke",
+                                 iteration=1,
+                                 vcomper=SimpleNamespace(cov_work_dir=tempfile.mkdtemp(prefix="vcs_cov_work_")))
+        cm_args = shlex.split(cm_sim.generate_sim_options(cm_job, 7))
+        self.assertIn("ccex", cm_args)
+        self.assertIn("rca", cm_args)
+        merge_dirs = [arg for arg in cm_args if arg.startswith("auto_merge_dir=")]
+        self.assertEqual(1, len(merge_dirs))
+        self.assertIn("ccex_artifacts", merge_dirs[0])
+
+    def test_ccex_automatic_default_yields_to_other_flows_and_opt_outs(self):
+        for extra in (["--vso"], ["--ico"], ["--dtl"], ["--no-run"], ["--no-vso-ccex"]):
+            with self.subTest(extra=extra):
+                if extra == ["--vso"]:
+                    extra = extra + ["--vso-target-metric", "line"]
+                options, _ = self._validated(["--simulator", "VCS", "--vcs-cm", "line"] + extra)
+                self.assertFalse(options.vso_ccex)
+        options, _ = self._validated(["--simulator", "VCS", "--vcs-cm", "line", "--no-vso-ccex-rca"])
+        self.assertTrue(options.vso_ccex)
+        self.assertFalse(options.vso_ccex_rca)
+        with self.assertRaises(ValueError):
+            self._validated(["--simulator", "VCS", "--vcs-cm", "line", "--no-vso-ccex", "--vso-ccex-rca"])
+
+    def test_no_vcs_urg_grade_and_grade_requires_cm(self):
+        options, simulator = self._validated(["--simulator", "VCS", "--vcs-cm", "line", "--no-vcs-urg-grade"])
+        self.assertFalse(options.vcs_urg_grade)
+        with self.assertRaises(ValueError):
+            self._validated(["--simulator", "VCS", "--vcs-urg-grade"])
+
+    def test_grade_phase_runs_urg_grade_on_original_vdbs(self):
+        with tempfile.TemporaryDirectory(prefix="vcs grade ") as temporary_dir:
+            root = Path(temporary_dir)
+            recorded = root / "urg arguments.txt"
+            stub = root / "urg stub.sh"
+            stub.write_text("#!/usr/bin/env bash\nprintf '%s\\n' \"$@\" > {}\n".format(shlex.quote(str(recorded))),
+                            encoding="utf-8",
+                            newline="\n")
+            environment = jinja2.Environment(undefined=jinja2.StrictUndefined)
+            environment.filters["shell_quote"] = shlex.quote
+            template = environment.from_string(self._read_repo_file("bin/templates/vcs_cov_merge_template.sh.j2"))
+            grade_dir = str(root / "report_grade")
+            for enabled in (True, False):
+                with self.subTest(enabled=enabled):
+                    rendered = template.render(
+                        cov_db_path=str(root / "src.vdb"),
+                        merged_db_path=str(root / "merged.vdb"),
+                        report_dir=str(root / "report"),
+                        urg_command="bash {} urg".format(shlex.quote(str(stub))),
+                        urg_parallel=False,
+                        urg_show_tests=True,
+                        urg_format="summary",
+                        urg_summary_depth=1,
+                        urg_grade=enabled,
+                        grade_report_dir=grade_dir,
+                        ccex_enabled=enabled,
+                        verdi_command="verdi",
+                    )
+                    script = root / "merge.sh"
+                    script.write_text(rendered, encoding="utf-8", newline="\n")
+                    if recorded.exists():
+                        recorded.unlink()
+                    result = subprocess.run(["bash", str(script), "grade"], check=True, capture_output=True, text=True)
+                    if enabled:
+                        arguments = recorded.read_text(encoding="utf-8").splitlines()
+                        self.assertIn(str(root / "src.vdb"), arguments)
+                        self.assertNotIn(str(root / "merged.vdb"), arguments)
+                        self.assertEqual(["-grade", "testfile"], arguments[arguments.index("-grade"):][:2])
+                        self.assertIn(grade_dir, arguments)
+                        self.assertIn("-ccex -covdir", rendered)
+                    else:
+                        self.assertFalse(recorded.exists())
+                        self.assertIn("Grading disabled", result.stdout)
+                        self.assertNotIn("-ccex", rendered)
+
     def test_vso_cbv_adds_compile_workdir_only_when_requested(self):
         _, normal = self._validated([
             "--simulator",

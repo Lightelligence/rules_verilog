@@ -1,7 +1,38 @@
 import os
 
 
+def resolve_ccex_defaults(options, parser):
+    """Resolve the tri-state Coverage Directed Solver switches to booleans.
+
+    CCEX follows --vcs-cm automatically, but only for plain batch simulation: an explicit --vso/--ico flow,
+    --gui, --dtl, and --no-run keep their existing commands.
+    """
+    explicit = options.vso_ccex
+    detail_requested = bool(options.vso_ccex_rca) or options.vso_ccex_auto_merge_dir is not None
+    if explicit is False and detail_requested:
+        parser.error("VSO.ai CCEX detail switches conflict with '--no-vso-ccex'. Stopping before Bazel starts.")
+    if explicit is None:
+        explicit = True if detail_requested else None
+    if explicit is None:
+        explicit = bool(options.cm) and not any([options.vso, options.ico, options.gui, options.dtl, options.no_run])
+    options.vso_ccex = bool(explicit)
+    if options.vso_ccex_rca is None:
+        options.vso_ccex_rca = options.vso_ccex
+
+
+def resolve_urg_grade_default(options, parser):
+    if options.vcs_urg_grade and not options.cm:
+        parser.error("--vcs-urg-grade requires '--vcs-cm'. Stopping before Bazel starts.")
+    if options.vcs_urg_grade and getattr(options, "vcs_coverage_incremental", False):
+        parser.error("--vcs-urg-grade is not supported with --vcs-coverage-incremental. "
+                     "Stopping before Bazel starts.")
+    if options.vcs_urg_grade is None:
+        options.vcs_urg_grade = bool(options.cm) and not getattr(options, "vcs_coverage_incremental", False)
+
+
 def validate_vcs_runtime_options(options, parser):
+    resolve_ccex_defaults(options, parser)
+    resolve_urg_grade_default(options, parser)
     if any([
             options.vcs_cm_line is not None,
             options.vcs_cm_report is not None,

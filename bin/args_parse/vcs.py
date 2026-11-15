@@ -122,6 +122,20 @@ def add_vcs_arguments(parser):
                        action='store_true',
                        help=('Add -show tests to the generated URG merge so the merged VDB retains test-to-cover '
                              'correlation for grading and debug. This increases merged database size.'))
+    urg_grade_control = gvcs.add_mutually_exclusive_group()
+    urg_grade_control.add_argument(
+        '--vcs-urg-grade',
+        dest='vcs_urg_grade',
+        default=None,
+        action='store_true',
+        help=('Grade the original test VDBs with urg -grade testfile after the coverage merge '
+              'and write gradedtests.txt and uniquetests.txt to <report>_grade. Enabled '
+              'automatically by --vcs-cm; grading failure only warns. Not supported with '
+              '--vcs-coverage-incremental.'))
+    urg_grade_control.add_argument('--no-vcs-urg-grade',
+                                   dest='vcs_urg_grade',
+                                   action='store_false',
+                                   help='Skip the automatic URG test grading selected by --vcs-cm.')
     add_child_argument(gvcs,
                        '--cm',
                        parent='--vcs-cm',
@@ -347,23 +361,40 @@ def add_vcs_arguments(parser):
                        action='store_true',
                        help=('Enable VSO.ai Change-Based Verification compile tagging by passing the CSO workdir '
                              'to VCS. Requires --vso and Day0 line coverage or port-only toggle coverage.'))
-    gvcs.add_argument('--vso-ccex',
-                      default=False,
-                      action='store_true',
-                      help=('Enable the VSO.ai LCA Coverage Directed Solver by passing -vso ccex at VCS compile '
-                            'and simv runtime. Put extra compile options in --file and runtime -ccex_opts values '
-                            'in --sim-opts-file.'))
+    ccex_control = gvcs.add_mutually_exclusive_group()
+    ccex_control.add_argument('--vso-ccex',
+                              dest='vso_ccex',
+                              default=None,
+                              action='store_true',
+                              help=('Force the VSO.ai LCA Coverage Directed Solver by passing -vso ccex at VCS compile '
+                                    'and simv runtime. It is enabled automatically for VCS with --vcs-cm unless '
+                                    '--vso, --ico, --gui, --dtl, or --no-run is selected. Put extra compile options '
+                                    'in --file and runtime -ccex_opts values in --sim-opts-file.'))
+    ccex_control.add_argument('--no-vso-ccex',
+                              dest='vso_ccex',
+                              action='store_false',
+                              help='Disable the automatic Coverage Directed Solver selected by --vcs-cm.')
     add_child_argument(gvcs,
                        '--vso-ccex-rca',
                        parent='--vso-ccex',
-                       default=False,
-                       action='store_true',
-                       help=('Enable Coverage Directed Solver static root-cause analysis with -ccex_opts rca. '
-                             'Requires --vso-ccex; inspect results with an URG or Verdi CCEX report.'))
-    add_child_argument(gvcs,
-                       '--vso-ccex-auto-merge-dir',
-                       parent='--vso-ccex',
-                       type=str,
+                       dest='vso_ccex_rca',
                        default=None,
-                       help=('Enable inter-simulation Coverage Directed Solver learning through the given shared '
-                             'directory. Requires --vso-ccex and storage visible to every simv job.'))
+                       action='store_true',
+                       help=('Enable Coverage Directed Solver static root-cause analysis with -ccex_opts rca (default '
+                             'whenever CCEX is enabled); inspect results with an URG or Verdi CCEX report.'))
+    add_child_argument(gvcs,
+                       '--no-vso-ccex-rca',
+                       parent='--vso-ccex',
+                       dest='vso_ccex_rca',
+                       action='store_false',
+                       help='Do not pass -ccex_opts rca when Coverage Directed Solver is enabled.')
+    add_child_argument(
+        gvcs,
+        '--vso-ccex-auto-merge-dir',
+        parent='--vso-ccex',
+        type=str,
+        default=None,
+        help=(
+            'Enable inter-simulation Coverage Directed Solver learning through the given shared '
+            'directory. Default with CCEX: <regression>/ccex_artifacts/merge. Storage must be visible to every simv job '
+            'and differ from the coverage directory.'))
