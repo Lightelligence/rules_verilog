@@ -366,9 +366,25 @@ class CoverageUpdate:
             raise
 
     def publish(self):
-        if (model_digest(self.original.cov_work_dir) != self.current["model_sha256"]
-                or datasets(self.original.cov_work_dir) != self.current["datasets"]):
-            raise OSError("Coverage input changed during the incremental merge")
+        changes = []
+        if model_digest(self.original.cov_work_dir) != self.current["model_sha256"]:
+            changes.append("static coverage model changed")
+        before = self.current["datasets"]
+        after = datasets(self.original.cov_work_dir)
+        if after is None:
+            changes.append("work VDB testdata directory disappeared")
+        else:
+            for change, names in (
+                ("added", after.keys() - before.keys()),
+                ("removed", before.keys() - after.keys()),
+                ("modified", {name
+                              for name in before.keys() & after.keys() if before[name] != after[name]}),
+            ):
+                if names:
+                    sample = ", ".join(repr(name) for name in sorted(names)[:5])
+                    changes.append("datasets {} ({}): {}".format(change, len(names), sample))
+        if changes:
+            raise OSError("Coverage input changed during the incremental merge: " + "; ".join(changes))
         if model_digest(self.job.merged_coverage_dir) != self.current["model_sha256"]:
             raise OSError("URG changed the static coverage model during incremental merging")
         # Merge-only mode has no report; publish an empty report directory so a

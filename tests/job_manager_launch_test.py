@@ -1991,6 +1991,25 @@ class JobManagerLaunchTest(unittest.TestCase):
         self.assertEqual("", header["tag"])
         self.assertEqual("https://github.com/example/digit/commit/deadbeef", header["commit"])
 
+    def test_report_commit_url_drops_authentication_and_http_remote_options(self):
+        rcfg = SimpleNamespace(
+            current_time="20261119_120000_000001",
+            options=SimpleNamespace(simulator="VCS"),
+            proj_dir="/tmp/fallback_project",
+        )
+        remotes = {
+            "https://ci-user:ci-password@[2001:db8::5]:8443/group/bench.git/?token=fixture#transport":
+            "https://[2001:db8::5]:8443/group/bench/commit/deadbeef",
+            "http://ci-user@code.example.test/group/bench.git": "http://code.example.test/group/bench/commit/deadbeef",
+        }
+        for remote, expected in remotes.items():
+            with self.subTest(scheme=remote.split(":", 1)[0]):
+                git = {("remote", "get-url", "origin"): remote, ("rev-parse", "HEAD"): "deadbeef"}
+                with mock.patch("lib.rv_utils._git_output", side_effect=lambda _cwd, *args: git.get(args, "")):
+                    header = rv_utils.get_report_header(rcfg)
+                self.assertEqual("bench", header["project_name"])
+                self.assertEqual(expected, header["commit"])
+
 
 if __name__ == "__main__":
     unittest.main()

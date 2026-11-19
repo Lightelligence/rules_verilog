@@ -188,16 +188,27 @@ class VcsCoverageIncrementalTest(unittest.TestCase):
 
     def test_input_change_during_urg_does_not_publish(self):
         before = self.baseline()
-        self.inputs(new="two")
+        self.inputs(new="two", removed="three")
 
         def run(argv, **kwargs):
             result = self.fake_urg(argv, **kwargs)
-            (Path(self.job.cov_work_dir) / "snps/coverage/db/testdata/new/hits.xml").write_text("changed while merging")
+            work = Path(self.job.cov_work_dir)
+            data = work / "snps/coverage/db/testdata"
+            self.model(work).write_text("<updated-model/>")
+            (data / "new/hits.xml").write_text("changed while merging")
+            shutil.rmtree(data / "removed")
+            (data / "added").mkdir()
+            (data / "added/hits.xml").write_text("appeared during merge")
             return result
 
-        with mock.patch("lib.simulators.vcs.run_bounded_process", side_effect=run):
+        with mock.patch("lib.simulators.vcs.run_bounded_process",
+                        side_effect=run), self.assertLogs("lib.simulators.vcs", level="ERROR") as messages:
             self.assertTrue(self.simulator.run_report_coverage_merge({"//bench:tb": self.job}))
         self.assertEqual(before, self.snapshot())
+        self.assertIn("static coverage model changed", messages.output[-1])
+        self.assertIn("datasets added (1): 'added'", messages.output[-1])
+        self.assertIn("datasets removed (1): 'removed'", messages.output[-1])
+        self.assertIn("datasets modified (1): 'new'", messages.output[-1])
 
     def test_legacy_summary_upgrades_without_reopening_old_case_data(self):
         self.baseline()
