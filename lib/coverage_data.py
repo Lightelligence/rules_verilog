@@ -82,12 +82,16 @@ def _format_percentage(value):
 
 def aggregate_coverage_metrics(metrics):
     """Apply the OpenTitan DVSim coverage averages to canonical metrics."""
+    line = _percentage(metrics.get("Line"))
+    if line is None:
+        line = _percentage(metrics.get("Block"))
+
     condition = _percentage(metrics.get("Condition"))
     if condition is None:
         condition = _percentage(metrics.get("Expression"))
 
     code_average = _average([
-        _percentage(metrics.get("Line")),
+        line,
         _percentage(metrics.get("Branch")),
         condition,
         _percentage(metrics.get("Toggle")),

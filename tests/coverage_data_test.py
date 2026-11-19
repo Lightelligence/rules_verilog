@@ -192,6 +192,17 @@ Cumulative 82.00% 81.00% 80.00% 79.00% 78.00% 77.00% 76.00%
         self.assertEqual("70.00%", coverage["total"])
         self.assertEqual("1.00%", coverage["cc"]["Block"])
 
+    def test_aggregation_falls_back_to_block_when_line_is_absent(self):
+        coverage = aggregate_coverage_metrics({
+            "Block": "80.00%",
+            "Branch": "60.00%",
+            "Assertion": "70.00%",
+        })
+
+        self.assertEqual("70.00%", coverage["cc"]["Overall"])
+        self.assertEqual("70.00%", coverage["total"])
+        self.assertEqual("80.00%", coverage["cc"]["Block"])
+
     def test_aggregation_returns_unavailable_for_empty_metrics(self):
         self.assertEqual(
             {

@@ -3197,15 +3197,15 @@ exit 0
         simulator = VcsSimulator(parse_args(["--simulator", "VCS"]), DummyRegressionConfig(), None)
         script = "vcs +define+OPTION=-j4 /tmp/-j5 -j3 -full64"
         self.assertEqual(
-            "vcs +define+OPTION=-j4 /tmp/-j5 -jAUTO -full64",
+            "vcs +define+OPTION=-j4 /tmp/-j5 -full64",
             simulator.compile_script_for_fingerprint(script),
         )
 
     def test_vcs_slot_count_change_preserves_an_identical_compile_fingerprint(self):
-        # The same compile rendered on a 4-slot and an 8-slot allocation must
+        # The same compile rendered on 1-slot, 4-slot and 8-slot allocations must
         # fingerprint identically, or every requeue on a different host rebuilds.
         payloads = []
-        for slots in (4, 8):
+        for slots in (1, 4, 8):
             simulator = VcsSimulator(
                 parse_args(["-t", "unit:test", "--simulator", "VCS", "--no-vcs-partcomp"]),
                 DummyRegressionConfig(),
@@ -3217,7 +3217,7 @@ exit 0
                 payloads.append(
                     simulator.compile_script_for_fingerprint("vcs {} {}".format(generated["partcomp_opts"],
                                                                                 generated["make_jobs_opts"])).split())
-        self.assertEqual([["vcs", "-jAUTO"], ["vcs", "-jAUTO"]], payloads)
+        self.assertEqual([["vcs"], ["vcs"], ["vcs"]], payloads)
 
     def test_vcs_compile_template_defaults_to_incremental_compile(self):
         template = self._read_repo_file("bin/templates/vcs_compile_template.sh.j2")

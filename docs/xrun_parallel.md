@@ -49,13 +49,14 @@ as do compile locks, per-test directory locks, fingerprint checks and cleanup
 ownership checks. Other invocations may therefore still wait for those shared
 directories. This change does not implement cross-host distribution.
 
-Coverage, MCE, all MSIE stages and emulator modes remain automatically serial.
-An explicit `--xrun-parallel` with one of those modes is rejected during option
-validation; the implicit default does not reject existing commands. Programmatic
-callers that skip validation also retain serialization for these modes. GUI is
-already unsupported for XRUN. Both explicit switches are registered as XRUN-only
-so the existing VCS backend's explicit-option check can reject them. The shared
-parser default does not change VCS execution policy.
+MCE, all MSIE stages and emulator modes remain automatically serial (standard
+coverage runs are parallel by default). An explicit `--xrun-parallel` with one
+of those serial-only modes is rejected during option validation; the implicit
+default does not reject existing commands. Programmatic callers that skip
+validation also retain serialization for these modes. GUI is already
+unsupported for XRUN. Both explicit switches are registered as XRUN-only so the
+existing VCS backend's explicit-option check can reject them. The shared parser
+default does not change VCS execution policy.
 
 ## What must be checked on the EDA host
 

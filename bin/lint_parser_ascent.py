@@ -14,7 +14,7 @@ import cmn_logging
 
 ################################################################################
 # Constants
-LINE_WAIVER_REGEXP = re.compile(r"\S\s// lint: disable=(.*)")
+LINE_WAIVER_REGEXP = re.compile(r"\S[ \t]+// lint: disable=(.*)")
 BLOCK_WAIVER_START_REGEXP = re.compile(r"\s*// lint: disable=(.*)")
 BLOCK_WAIVER_END_REGEXP = re.compile(r"\s*// lint: enable=(.*)")
 
@@ -197,7 +197,7 @@ class AscentLintLog(object):
             if rule not in block_waivers[filename]:
                 log.error("In %s, 'enable' pragma for %s on line %s appears before any 'disable' pragmas", filename,
                           rule, lineno)
-                return
+                continue
             if block_waivers[filename][rule][-1][1] is None:
                 block_waivers[filename][rule][-1][1] = lineno
             else:
@@ -250,38 +250,39 @@ class AscentLintLog(object):
         waived = sum([i.waived for i in issues])
         unwaived = len(issues) - waived
         if unwaived:
-            log.error("Found %3d %s (+%3d waived)", unwaived, level, waived)
+            self.log.error("Found %3d %s (+%3d waived)", unwaived, level, waived)
         else:
-            log.info("Found %3d %s (+%3d waived)", unwaived, level, waived)
+            self.log.info("Found %3d %s (+%3d waived)", unwaived, level, waived)
 
-    def stats(self):
+    def stats(self, options=None):
+        show_waived = getattr(options, "show_waived", False)
         for info in self.infos:
             if not info.waived:
-                log.error("%s", info)
-            elif options.show_waived:
-                log.info("%s", info)
+                self.log.error("%s", info)
+            elif show_waived:
+                self.log.info("%s", info)
 
         for warning in self.warnings:
             if not warning.waived:
-                log.error("%s", warning)
-            elif options.show_waived:
-                log.info("%s", warning)
+                self.log.error("%s", warning)
+            elif show_waived:
+                self.log.info("%s", warning)
 
         for error in self.errors:
             if not error.waived:
-                log.error("%s", error)
-            elif options.show_waived:
-                log.info("%s", error)
+                self.log.error("%s", error)
+            elif show_waived:
+                self.log.info("%s", error)
 
-        log.debug("The following files have unwaived issues:")
+        self.log.debug("The following files have unwaived issues:")
         sorted_files = sorted(self.files_with_notes.items(), key=lambda x: x[1])
         for file_tuple in sorted_files:
-            log.debug("{file_name}: {count}".format(file_name=file_tuple[0], count=file_tuple[1]))
+            self.log.debug("{file_name}: {count}".format(file_name=file_tuple[0], count=file_tuple[1]))
 
-        log.debug("The following directories have unwaived issues:")
+        self.log.debug("The following directories have unwaived issues:")
         sorted_dirs = sorted(self.dirs_with_notes.items(), key=lambda x: x[1])
         for dir_tuple in sorted_dirs:
-            log.debug("{}: {}".format(dir_tuple[0], dir_tuple[1]))
+            self.log.debug("{}: {}".format(dir_tuple[0], dir_tuple[1]))
 
         self._waived_unwaived('infos')
         self._waived_unwaived('warnings')
@@ -291,15 +292,15 @@ class AscentLintLog(object):
 def main(options, log):
     try:
         newest_lint_log = AscentLintLog("lint.rpt", log)
-        newest_lint_log.stats()
-    except Exception:
-        log.error("Failed to parse lint.rpt")
+        newest_lint_log.stats(options)
+    except Exception as exc:
+        log.error("Failed to parse lint.rpt: %s", exc)
 
     log.exit_if_warnings_or_errors("Lint parsing failed due to previous errors")
 
 
 if __name__ == '__main__':
     options = parse_args(sys.argv[1:])
-    verbosity = cmn_logging.INFO if options.tool_debug else cmn_logging.DEBUG
+    verbosity = cmn_logging.DEBUG if options.tool_debug else cmn_logging.INFO
     log = cmn_logging.build_logger("bazel_lint.log", level=verbosity)
     main(options, log)

@@ -520,11 +520,19 @@ class SubprocessJobRunner(JobRunner):
         self._close_output_streams()
         return True
 
+    def _state_lock(self):
+        lock = getattr(self, "_kill_lock", None)
+        if lock is None:
+            lock = threading.Lock()
+            self._kill_lock = lock
+        return lock
+
     def _paused_duration_since(self, timeout_start, now):
         duration = datetime.timedelta()
         intervals = list(getattr(self, "_pause_intervals", ()))
-        if getattr(self, "_paused", False) and self._paused_at is not None:
-            intervals.append((self._paused_at, now))
+        paused_at = getattr(self, "_paused_at", None)
+        if getattr(self, "_paused", False) and paused_at is not None:
+            intervals.append((paused_at, now))
         for paused_at, resumed_at in intervals:
             overlap_start = max(timeout_start, paused_at)
             overlap_end = min(now, resumed_at)
@@ -533,15 +541,21 @@ class SubprocessJobRunner(JobRunner):
         return duration
 
     def check_for_done(self):
-        if self.done:
-            return self.done
+        lock = self._state_lock()
         try:
-            result = self._check_for_done()
+            with lock:
+                if self.done:
+                    return self.done
+                result = self._check_for_done()
+                if result:
+                    self.done = result
+                return result
         except Exception as exc:
-            self._monitoring_failed = True
-            self.log.error("Job failed %s:\n%s", self.job, exc)
-            self._signal_process_group(signal.SIGKILL)
-            self._signal_sidecar_process_groups(signal.SIGKILL)
+            with lock:
+                self._monitoring_failed = True
+                self.log.error("Job failed %s:\n%s", self.job, exc)
+                self._signal_process_group(signal.SIGKILL)
+                self._signal_sidecar_process_groups(signal.SIGKILL)
             direct_child_reaped = True
             try:
                 self._p.wait(timeout=self.KILL_GRACE_SECONDS)
@@ -555,15 +569,15 @@ class SubprocessJobRunner(JobRunner):
                     pass
             try:
                 group_reaped = self._wait_for_process_group_exit(time.monotonic() + self.KILL_GRACE_SECONDS)
-                self.shutdown_incomplete = not direct_child_reaped or not group_reaped
+                shutdown_incomplete = not direct_child_reaped or not group_reaped
             except Exception as cleanup_exc:
                 self.log.error("Could not verify process cleanup for %s: %s", self.job, cleanup_exc)
-                self.shutdown_incomplete = True
-            self._close_output_streams()
-            result = True
-        if result:
-            self.done = result
-        return result
+                shutdown_incomplete = True
+            with lock:
+                self.shutdown_incomplete = shutdown_incomplete
+                self._close_output_streams()
+                self.done = True
+            return True
 
     def _check_for_done(self):
         if self._p.poll() is not None:
@@ -585,6 +599,7 @@ class SubprocessJobRunner(JobRunner):
                 return False
             if self._kill_sent:
                 return self._ownership_wait_expired(now)
+            return False
 
         now = datetime.datetime.now()
         if getattr(self, "_paused", False):

@@ -308,8 +308,20 @@ class VcsSimulator(SimulatorInterface):
         # module ordering that can change without changing the VCS tool.
         for key in ("LOADEDMODULES", "MODULEPATH", "PATH"):
             inputs["environment"].pop(key, None)
-        if self.options.vcs_cm_hier:
-            inputs["extra_input_paths"].append(self.options.vcs_cm_hier)
+        cm_hier = self.options.vcs_cm_hier or getattr(vcomp_job, "tb_options", {}).get("vcs_cm_hier")
+        if cm_hier:
+            runfiles_main = getattr(vcomp_job, "bazel_runfiles_main", None)
+            if not os.path.isabs(cm_hier) and runfiles_main:
+                cm_hier = os.path.join(runfiles_main, cm_hier)
+            inputs["extra_input_paths"].append(cm_hier)
+        if getattr(vcomp_job, "vcs_three_step", False):
+            for path in (
+                    getattr(vcomp_job, "vcs_vlogan_args", None),
+                    getattr(vcomp_job, "vcs_vlogan_filelists", None),
+                    getattr(vcomp_job, "vcs_elab_args", None),
+            ):
+                if path:
+                    inputs["extra_input_paths"].append(path)
         xprop_config = getattr(vcomp_job, "vcs_xprop_config_path", None)
         if xprop_config:
             inputs["extra_input_paths"].append(xprop_config)
@@ -323,7 +335,9 @@ class VcsSimulator(SimulatorInterface):
         # script. Only a standalone option token is normalized: a path or a
         # +define+ value that merely ends in -jN is a real compile input.
         normalized = re.sub(r"(?<!\S)-fastpartcomp=j\d+(?=\s|$)", "-fastpartcomp=jAUTO", compile_script)
-        return re.sub(r"(?<!\S)-j\d+(?=\s|$)", "-jAUTO", normalized)
+        normalized = re.sub(r"(?m)^[ \t]*-j\d+[ \t]*\\\r?\n", "", normalized)
+        normalized = re.sub(r"[ \t]+-j\d+(?=\s|$)", "", normalized)
+        return re.sub(r"(?<!\S)-j\d+(?:\s+|$)", "", normalized)
 
     def should_auto_reuse_compile(self):
         return self.options.vcs_auto_compile_cache

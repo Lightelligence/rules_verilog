@@ -89,8 +89,12 @@ class CompileBuildLease:
             if not self.gate.acquire(blocking=False):
                 return False
             if self.legacy is not None and not self.legacy.acquire(blocking=False):
+                if self.shared:
+                    self.release()
                 return False
             if not self.contents.acquire(blocking=False):
+                if self.shared:
+                    self.release()
                 return False
             self.acquired = True
             if self.shared:

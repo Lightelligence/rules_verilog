@@ -452,7 +452,7 @@ def _verilog_dv_library_impl(ctx):
         "transitive_sources",
         allow_other_outputs = True,
     )
-    trans_flists = get_transitive_srcs([out], ctx.attr.deps, VerilogInfo, "transitive_flists", allow_other_outputs = False)
+    trans_flists = get_transitive_srcs([out], ctx.attr.deps, VerilogInfo, "transitive_flists", allow_other_outputs = False, skip_missing_provider = True)
     trans_vcs_flists = get_transitive_srcs(
         [vcs_out],
         ctx.attr.deps,
@@ -460,8 +460,9 @@ def _verilog_dv_library_impl(ctx):
         "transitive_vcs_flists",
         allow_other_outputs = False,
         fallback_attr_name = "transitive_flists",
+        skip_missing_provider = True,
     )
-    trans_dpi = get_transitive_srcs(all_sos, ctx.attr.deps, VerilogInfo, "transitive_dpi", allow_other_outputs = False)
+    trans_dpi = get_transitive_srcs(all_sos, ctx.attr.deps, VerilogInfo, "transitive_dpi", allow_other_outputs = False, skip_missing_provider = True)
 
     # Preserve DPI outputs in DefaultInfo/runfiles while keeping them out of
     # VerilogInfo.transitive_sources, which is used for compile-input tracking.
