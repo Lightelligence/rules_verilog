@@ -339,16 +339,22 @@ def _git_output(cwd, *args):
 
 
 def normalize_git_remote(remote):
-    """Convert common SSH remotes to an HTTPS URL and remove one .git suffix."""
+    """Convert a Git remote into a credential-free base URL for reports."""
     if remote.startswith("git@") and ":" in remote:
         host, path = remote.split(":", 1)
         remote = "https://{}/{}".format(host.split("@", 1)[1], path)
     elif remote.startswith("ssh://"):
         parsed = urlparse(remote)
         remote = "https://{}{}".format(parsed.hostname, parsed.path)
+    parsed = urlparse(remote)
+    if parsed.scheme in ("http", "https"):
+        # The public report needs only the repository URL. Keep host/port but
+        # discard authentication and other transport-only URL components.
+        remote = parsed._replace(netloc=parsed.netloc.rsplit("@", 1)[-1], params="", query="", fragment="").geturl()
+    remote = remote.rstrip("/")
     if remote.endswith(".git"):
         remote = remote[:-4]
-    return remote.rstrip("/")
+    return remote
 
 
 def get_report_header(rcfg):
