@@ -214,6 +214,17 @@ class SimmerResultsTest(unittest.TestCase):
 
         self.assertEqual("FAILED", run["status"])
 
+    def test_coverage_failure_is_persisted_separately_from_other_failures(self):
+        for other_failed in (False, True):
+            with self.subTest(other_failed=other_failed):
+                run = self._completed_run()
+                simmer_results.finalize_run(run, backend_finalize_failed=other_failed, coverage_merge_failed=True)
+                simmer_results.save_run(self.project_dir, run)
+                stored = simmer_results.load_store(self.project_dir)["last_run"]
+                self.assertEqual("FAILED", stored["status"])
+                self.assertEqual(1, stored["summary"]["passed"])
+                self.assertEqual({"coverage_merge_failed": True, "other_failed": other_failed}, stored["finalization"])
+
     def test_result_duration_is_simulator_time_and_retains_job_wall_time(self):
         run = simmer_results.create_run(["simmer", "-t", "tb:test"], self.rcfg, 1)
         test_job = SimpleNamespace(
