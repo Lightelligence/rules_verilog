@@ -1052,9 +1052,15 @@ class VcsSimulator(SimulatorInterface):
             raise ValueError("RV_VCS_COVERAGE_VIEWER cannot be empty")
         return argv
 
-    def _coverage_viewer_path(self, job):
-        return getattr(job, "coverage_view_script_output_path",
-                       os.path.join(self.rcfg.regression_dir, "{}__run_coverage.sh".format(job.name)))
+    def _coverage_viewer_path(self, job, default_name=None):
+        path = getattr(job, "coverage_view_script_output_path", None)
+        if path:
+            return path
+        name = getattr(job, "name", default_name)
+        regression_dir = getattr(self.rcfg, "regression_dir", None)
+        if not name or not regression_dir:
+            return None
+        return os.path.join(regression_dir, "{}__run_coverage.sh".format(name))
 
     def _write_coverage_viewer(self, job):
         """Publish a viewer only after this run's merged outputs were validated."""
@@ -1264,16 +1270,19 @@ source annotation and hierarchy details.</p></html>
             }
         coverage = {}
         for vcomp, job in vcomp_jobs.items():
+            name = getattr(job, "name", vcomp.split(":")[-1])
             report_dir = getattr(job, "coverage_report_dir", None)
             metrics = (parse_coverage_summary(os.path.join(report_dir, "dashboard.txt"))
                        if report_dir and getattr(job, "coverage_merge_succeeded", True) else {})
             data = aggregate_coverage_metrics(metrics)
-            viewer = self._coverage_viewer_path(job)
-            if getattr(job, "coverage_merge_succeeded", True) and os.path.isfile(viewer):
+            viewer = self._coverage_viewer_path(job, default_name=name)
+            if viewer and getattr(job, "coverage_merge_succeeded", True) and os.path.isfile(viewer):
                 data["viewer_script"] = os.path.abspath(viewer)
-                data["merged_db"] = os.path.abspath(
-                    getattr(job, "coverage_published_merged_dir", None) or job.merged_coverage_dir)
-            coverage[getattr(job, "name", vcomp.split(":")[-1])] = data
+                merged_db = getattr(job, "coverage_published_merged_dir", None) or getattr(
+                    job, "merged_coverage_dir", None)
+                if merged_db:
+                    data["merged_db"] = os.path.abspath(merged_db)
+            coverage[name] = data
         return coverage
 
     def get_log_parsing_info(self):

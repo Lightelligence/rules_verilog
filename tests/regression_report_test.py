@@ -213,10 +213,11 @@ class RegressionReportTest(unittest.TestCase):
                 ("", "bad_test", "", "", "", "1", "1", "", ""),
                 ("", "skip_test", "", "", "1", "", "1", "", ""),
             ]
-            report.run(header, trd, {"bench": {
-                "viewer_script": "/regr/vcomp__run_coverage.sh",
-                "merged_db": "/regr/merged.vdb",
-            }}, {})
+            report.run(header, trd,
+                       {"bench": {
+                           "viewer_script": "/regr/vcomp__run_coverage.sh",
+                           "merged_db": "/regr/merged.vdb",
+                       }}, {})
             bench_path = Path(temporary_dir) / "regression_report" / "project" / "bench"
             html = (bench_path / "index.html").read_text(encoding="utf-8")
             self.assertIn('href="#failed"', html)
