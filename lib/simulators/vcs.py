@@ -1267,7 +1267,13 @@ source annotation and hierarchy details.</p></html>
             report_dir = getattr(job, "coverage_report_dir", None)
             metrics = (parse_coverage_summary(os.path.join(report_dir, "dashboard.txt"))
                        if report_dir and getattr(job, "coverage_merge_succeeded", True) else {})
-            coverage[getattr(job, "name", vcomp.split(":")[-1])] = aggregate_coverage_metrics(metrics)
+            data = aggregate_coverage_metrics(metrics)
+            viewer = self._coverage_viewer_path(job)
+            if getattr(job, "coverage_merge_succeeded", True) and os.path.isfile(viewer):
+                data["viewer_script"] = os.path.abspath(viewer)
+                data["merged_db"] = os.path.abspath(
+                    getattr(job, "coverage_published_merged_dir", None) or job.merged_coverage_dir)
+            coverage[getattr(job, "name", vcomp.split(":")[-1])] = data
         return coverage
 
     def get_log_parsing_info(self):

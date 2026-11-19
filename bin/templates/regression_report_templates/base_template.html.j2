@@ -294,6 +294,25 @@
       overflow-wrap: anywhere;
     }
 
+    .metric-value a {
+      color: inherit;
+      text-decoration: underline;
+    }
+
+    .filter-note {
+      display: none;
+    }
+
+    body:has(#failed:target) .filter-note,
+    body:has(#skipped:target) .filter-note {
+      display: inline;
+    }
+
+    body:has(#failed:target) section[aria-labelledby="test-results"] tbody tr:not(.row-failed),
+    body:has(#skipped:target) section[aria-labelledby="test-results"] tbody tr:not(.row-skipped) {
+      display: none;
+    }
+
     .metadata {
       border-bottom: 1px solid var(--line);
       border-top: 1px solid var(--line);

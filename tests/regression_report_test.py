@@ -195,6 +195,37 @@ class RegressionReportTest(unittest.TestCase):
             self.assertIn("<td>N/A</td>", report_html)
             self.assertIn(">No tests</span>", report_html)
 
+    def test_report_links_failed_skipped_and_shows_coverage_viewer_script(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            report = RegressionReport(SimpleNamespace(log=_Log()), self._report_environment(), temporary_dir)
+            header = {
+                "branch": "main",
+                "commit": "",
+                "project_name": "project",
+                "revision": "abc",
+                "simulator": "VCS",
+                "tag": "",
+                "time": "20260711_120000_000001",
+                "username": "user",
+            }
+            trd = [
+                ("bench", "vcomp", "", "1", "", "", "1", "", ""),
+                ("", "bad_test", "", "", "", "1", "1", "", ""),
+                ("", "skip_test", "", "", "1", "", "1", "", ""),
+            ]
+            report.run(header, trd, {"bench": {
+                "viewer_script": "/regr/vcomp__run_coverage.sh",
+                "merged_db": "/regr/merged.vdb",
+            }}, {})
+            bench_path = Path(temporary_dir) / "regression_report" / "project" / "bench"
+            html = (bench_path / "index.html").read_text(encoding="utf-8")
+            self.assertIn('href="#failed"', html)
+            self.assertIn('href="#skipped"', html)
+            self.assertIn("row-failed", html)
+            self.assertIn("row-skipped", html)
+            self.assertIn("/regr/vcomp__run_coverage.sh", html)
+            self.assertIn("/regr/merged.vdb", html)
+
     def test_compile_only_reports_preserve_compile_failure_and_never_claim_test_pass(self):
         for compile_failed in (False, True):
             with self.subTest(compile_failed=compile_failed), tempfile.TemporaryDirectory() as temporary_dir:
