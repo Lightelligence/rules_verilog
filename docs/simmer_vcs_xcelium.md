@@ -1332,6 +1332,12 @@ from starting are not recorded. The file is local run state and is intended for
 quick lookup of recent outputs. Existing project-root `.simmer_results.json`
 files are merged and migrated automatically on the first history query or save.
 
+Newly finalized runs record `finalization.coverage_merge_failed` and
+`finalization.other_failed` separately. The latter covers workflow
+finalization and errors outside the coverage step. Compile and test outcomes
+remain in their respective records, and the run status and CLI exit status
+still reflect the overall result. Older records may lack `finalization`.
+
 Print the most recent 10 runs:
 
 ```bash

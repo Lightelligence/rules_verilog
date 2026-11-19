@@ -395,11 +395,15 @@ def record_test_job(run, test_job, waves_script=None, waves_path=None, status=No
     records.upsert(test_record)
 
 
-def finalize_run(run, regression_log_path=None, backend_finalize_failed=False):
+def finalize_run(run, regression_log_path=None, backend_finalize_failed=False, coverage_merge_failed=False):
     if run is None:
         return
     run["finished_at"] = _timestamp()
     run["regression_log"] = regression_log_path
+    run["finalization"] = {
+        "coverage_merge_failed": bool(coverage_merge_failed),
+        "other_failed": bool(backend_finalize_failed),
+    }
 
     tests = run.get("tests", [])
     planned_tests = int(run.get("planned_tests") or len(tests))
@@ -418,7 +422,7 @@ def finalize_run(run, regression_log_path=None, backend_finalize_failed=False):
     _finalize_timing(run)
     run["benches"] = _collect_benches(run)
 
-    if backend_finalize_failed:
+    if backend_finalize_failed or coverage_merge_failed:
         run["status"] = "FAILED"
         return
 

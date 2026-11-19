@@ -1784,6 +1784,7 @@ def main(rcfg, options, active_run=None):
     dynamic_test_plan = simulator.uses_dynamic_test_plan()
     workflow_finalize_failed = False
     coverage_merge_failed = False
+    coverage_log_errors = 0
 
     rcfg.all_vcomp = seed_plan.ordered_regression_tests(rcfg.all_vcomp)
     planned_seeds = {}
@@ -1998,11 +1999,13 @@ def main(rcfg, options, active_run=None):
         report_header = {}
         if options.report and not unsafe_runtime:
             if simulator.coverage_enabled():
+                errors_before_coverage = rcfg.log.error_count
                 coverage_merge_failed = rcfg._profile_step(
                     "coverage_merge",
                     "merge simulator coverage databases",
                     lambda: simulator.run_report_coverage_merge(vcomp_jobs),
                 )
+                coverage_log_errors = rcfg.log.error_count - errors_before_coverage
 
             report_header = rv_utils.get_report_header(rcfg)
             rrt = regression_report.RegressionReport(rcfg, report_jinja2_env, webroot_path)
@@ -2068,8 +2071,9 @@ def main(rcfg, options, active_run=None):
                 simmer_results.finalize_run(
                     rcfg.simmer_results_run,
                     regression_log_path=regression_log_path,
-                    backend_finalize_failed=(workflow_finalize_failed or coverage_merge_failed
-                                             or not post_processing_complete or bool(rcfg.log.error_count)),
+                    backend_finalize_failed=(workflow_finalize_failed or not post_processing_complete
+                                             or rcfg.log.error_count > coverage_log_errors),
+                    coverage_merge_failed=(coverage_merge_failed or coverage_log_errors > 0),
                 )
                 persist_simmer_results(rcfg)
             except (KeyboardInterrupt, _TerminationRequested) as interrupt:
