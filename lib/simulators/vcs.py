@@ -1316,6 +1316,7 @@ source annotation and hierarchy details.</p></html>
                 content = probe.read()
         except (OSError, IOError):
             return set()
+        content = content.lower()
         if b"make" not in content or b"warning" not in content:
             return set()
         # At least one "make" and one "warning" → run the regex pass.
@@ -1326,15 +1327,18 @@ source annotation and hierarchy details.</p></html>
                                       r"your build may be incomplete\.")
         benign_future_mtime_lines = set()
         clock_skew_summary_lines = set()
+        non_benign_future_mtime = False
         continued_future_mtime = None
 
         with open(log_path, 'r', encoding='utf-8', errors='ignore') as logp:
             for line_number, line in enumerate(logp, start=1):
                 if continued_future_mtime is not None:
                     warning_line_number, skew_seconds = continued_future_mtime
-                    if (future_mtime_continuation_regex.search(line)
-                            and skew_seconds < _MAX_BENIGN_MAKE_CLOCK_SKEW_SECONDS):
-                        benign_future_mtime_lines.add(warning_line_number)
+                    if future_mtime_continuation_regex.search(line):
+                        if skew_seconds < _MAX_BENIGN_MAKE_CLOCK_SKEW_SECONDS:
+                            benign_future_mtime_lines.add(warning_line_number)
+                        else:
+                            non_benign_future_mtime = True
                     continued_future_mtime = None
 
                 match = future_mtime_regex.search(line)
@@ -1344,12 +1348,16 @@ source annotation and hierarchy details.</p></html>
                         continued_future_mtime = (line_number, skew_seconds)
                     elif skew_seconds < _MAX_BENIGN_MAKE_CLOCK_SKEW_SECONDS:
                         benign_future_mtime_lines.add(line_number)
+                    else:
+                        non_benign_future_mtime = True
                 if clock_skew_regex.search(line):
                     clock_skew_summary_lines.add(line_number)
 
-        if benign_future_mtime_lines:
-            return benign_future_mtime_lines | clock_skew_summary_lines
-        return set()
+        if not benign_future_mtime_lines:
+            return set()
+        if non_benign_future_mtime:
+            return benign_future_mtime_lines
+        return benign_future_mtime_lines | clock_skew_summary_lines
 
     def get_gui_command_options(self):
         # Enable Verdi debug features along with DVE/Verdi GUI

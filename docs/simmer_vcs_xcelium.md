@@ -703,7 +703,7 @@ simmer -t <bench>:<test> --simulator VCS --smartlog
 simmer -t <bench>:<test> --simulator VCS --vcs-xprop F
 ```
 
-All VCS compile modes use `-debug_access+r+w+f`, which gives RTL and selected
+Standard VCS compile modes use `-debug_access+r+w+f` by default, which gives RTL and selected
 SystemVerilog interface signals the read/write/force access required for UVM HDL
 deposit/force operations and DUT memory backdoor loads. VCS `--waves` is the
 lightweight signal-dump mode and additionally compiles with `-kdb`; it does not

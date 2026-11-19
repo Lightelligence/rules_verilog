@@ -59,7 +59,7 @@ def create_regression_log_file(rcfg):
     target_folder = os.path.join(rcfg.regression_dir, 'regression_results')
 
     if not os.path.exists(target_folder):
-        os.makedirs(target_folder)
+        os.makedirs(target_folder, exist_ok=True)
         print(f"Folder created at: {target_folder}")
 
     current_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
@@ -307,7 +307,7 @@ def calc_simresults_location(checkout_path):
     """
     username = getpass.getuser()
 
-    state_home = os.environ.get("XDG_STATE_HOME", os.path.expanduser("~/.local/state"))
+    state_home = os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state")
     sim_results_root = os.path.expanduser(os.environ.get("SIMRESULTS") or os.path.join(state_home, "simmer"))
     sim_results_home = os.path.join(sim_results_root, username)
     os.makedirs(sim_results_home, exist_ok=True)

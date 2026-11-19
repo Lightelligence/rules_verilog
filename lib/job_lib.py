@@ -260,7 +260,7 @@ class Job():
 
         if not os.path.exists(self.job_dir):
             self.log.debug("Creating job_dir: %s", self.job_dir)
-            os.mkdir(self.job_dir)
+            os.makedirs(self.job_dir, exist_ok=True)
         output_dir = getattr(self, "output_dir", None)
         if output_dir:
             os.makedirs(output_dir, exist_ok=True)
