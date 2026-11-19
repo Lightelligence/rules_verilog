@@ -248,7 +248,7 @@ def gather_shell_defines(shells):
         defines["gumi_use_{}".format(shell.label.name)] = ""
     return defines
 
-def get_transitive_srcs(srcs, deps, provider, attr_name, allow_other_outputs = False, fallback_attr_name = None):
+def get_transitive_srcs(srcs, deps, provider, attr_name, allow_other_outputs = False, fallback_attr_name = None, skip_missing_provider = False):
     """Obtain the source files for a target and its transitive dependencies.
 
     Args:
@@ -269,6 +269,8 @@ def get_transitive_srcs(srcs, deps, provider, attr_name, allow_other_outputs = F
                 fail("{} does not provide the required '{}' field".format(dep.label, attr_name))
         elif allow_other_outputs:
             trans.append(dep[DefaultInfo].files)
+        elif skip_missing_provider:
+            continue
         else:
             fail("{} does not provide the required provider".format(dep.label))
 
@@ -360,6 +362,7 @@ def verilog_input_manifest(ctx, deps, extra_files, flist_field = "transitive_fli
         VerilogInfo,
         flist_field,
         fallback_attr_name = fallback_field,
+        skip_missing_provider = True,
     )
     args = ctx.actions.args()
     args.set_param_file_format("multiline")
@@ -388,6 +391,7 @@ def verilog_input_inventory_records(deps, extra_files, flist_field = "transitive
         flist_field,
         allow_other_outputs = False,
         fallback_attr_name = fallback_field,
+        skip_missing_provider = True,
     )
     for source in sources.to_list():
         records["source\t{}".format(runfiles_relative_short_path(source))] = source
@@ -454,9 +458,9 @@ def _verilog_test_impl(ctx):
 
     if ctx.attr.tool:
         tool_executable = ctx.attr.tool[DefaultInfo].files_to_run.executable
-        content.append(tool_executable.short_path)
+        content.append(runfiles_relative_short_path(tool_executable))
 
-    flists_args = ["-f {}".format(f.short_path) for f in flists_list]
+    flists_args = ["-f {}".format(runfiles_relative_short_path(f)) for f in flists_list]
     content += ctx.attr.pre_flist_args
 
     for key, value in gather_shell_defines(ctx.attr.shells).items():
@@ -465,10 +469,10 @@ def _verilog_test_impl(ctx):
     content += flists_args
     for dep in ctx.attr.deps:
         if VerilogInfo in dep and dep[VerilogInfo].last_module:
-            content.append(dep[VerilogInfo].last_module.short_path)
+            content.append(runfiles_relative_short_path(dep[VerilogInfo].last_module))
     content += ctx.attr.post_flist_args
 
-    content = ctx.expand_location("\n".join([content[0], " ".join(content[1:])]) + "\n", targets = ctx.attr.data)
+    content = expand_runfiles_locations(ctx, "\n".join([content[0], " ".join(content[1:])]) + "\n", targets = ctx.attr.data)
 
     ctx.actions.write(
         output = ctx.outputs.out,

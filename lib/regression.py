@@ -433,13 +433,16 @@ class RegressionConfig():
     def _git_submodule_state(self):
         if not os.path.isfile(os.path.join(self.proj_dir, ".gitmodules")):
             return []
-        result = subprocess.run(
-            ["git", "submodule", "status", "--recursive"],
-            cwd=self.proj_dir,
-            check=False,
-            capture_output=True,
-            text=True,
-        )
+        try:
+            result = subprocess.run(
+                ["git", "submodule", "status", "--recursive"],
+                cwd=self.proj_dir,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+        except OSError:
+            return []
         return sorted(line.strip() for line in result.stdout.splitlines()) if result.returncode == 0 else []
 
     @staticmethod
@@ -488,37 +491,41 @@ class RegressionConfig():
         self._publish_discovery_cache(manifest)
 
     def _iter_project_discovery_dependency_paths(self, submodule_state):
-        indexed_result = subprocess.run(
-            [
-                "git",
-                "ls-files",
-                "--cached",
-                "--others",
-                "--exclude-standard",
-                "--",
-                *DISCOVERY_GIT_METADATA_PATHS,
-            ],
-            cwd=self.proj_dir,
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-        ignored_result = subprocess.run(
-            [
-                "git",
-                "ls-files",
-                "--others",
-                "--ignored",
-                "--exclude-standard",
-                "--",
-                *DISCOVERY_GIT_METADATA_PATHS,
-            ],
-            cwd=self.proj_dir,
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-        if indexed_result.returncode == 0 and ignored_result.returncode == 0:
+        try:
+            indexed_result = subprocess.run(
+                [
+                    "git",
+                    "ls-files",
+                    "--cached",
+                    "--others",
+                    "--exclude-standard",
+                    "--",
+                    *DISCOVERY_GIT_METADATA_PATHS,
+                ],
+                cwd=self.proj_dir,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            ignored_result = subprocess.run(
+                [
+                    "git",
+                    "ls-files",
+                    "--others",
+                    "--ignored",
+                    "--exclude-standard",
+                    "--",
+                    *DISCOVERY_GIT_METADATA_PATHS,
+                ],
+                cwd=self.proj_dir,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+        except OSError:
+            indexed_result = None
+            ignored_result = None
+        if indexed_result is not None and indexed_result.returncode == 0 and ignored_result.returncode == 0:
             discovery_paths = []
             seen_paths = set()
             for relative_path in indexed_result.stdout.splitlines() + ignored_result.stdout.splitlines():
@@ -625,11 +632,15 @@ class RegressionConfig():
         try:
             bglob, tglob = btglob.split(":")
         except ValueError:
-            pwd = os.getcwd()
-            benches_dir = os.path.join(self.proj_dir, BENCHES_REL_DIR)
-            if not (benches_dir in pwd and len(benches_dir) < len(pwd)):
+            pwd = os.path.realpath(os.getcwd())
+            benches_dir = os.path.realpath(os.path.join(self.proj_dir, BENCHES_REL_DIR))
+            try:
+                in_benches = os.path.commonpath([benches_dir, pwd]) == benches_dir and pwd != benches_dir
+            except ValueError:
+                in_benches = False
+            if not in_benches:
                 self.log.critical("Not in a benches/ directory. Must provide bench:test style glob.")
-            bglob = pwd[len(benches_dir) + 1:]
+            bglob = os.path.relpath(pwd, benches_dir).replace(os.sep, "/")
             tglob = btglob
         return bglob, tglob, iterations
 
@@ -690,6 +701,7 @@ class RegressionConfig():
         try:
             result = subprocess.run(
                 command,
+                cwd=self.proj_dir,
                 check=False,
                 capture_output=True,
                 text=True,

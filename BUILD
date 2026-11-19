@@ -94,6 +94,7 @@ buildifier_test(
 
 buildifier(
     name = "buildifier_lint",
+    exclude_patterns = BUILDIFIER_EXCLUDE,
     lint_mode = "warn",
     lint_warnings = [
         "-function-docstring-args",

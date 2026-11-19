@@ -250,7 +250,7 @@ function run_test {
  {%- if pre_run_cmd %}
     echo "--- Running Pre-Simulation Command ---"
     cd "$PROJ_DIR"
-    echo "Executing: bazel run {{ pre_run_cmd }}"
+    printf 'Executing: bazel run %s\n' {{ pre_run_cmd }}
     local pre_run_exit_code
     if bazel run {{ pre_run_cmd }} | tee {{ (job.job_dir ~ '/pre_run.stdout')|shell_quote }}; then
         pre_run_exit_code=0
@@ -350,7 +350,7 @@ function run_test {
             graceful_wait_seconds=$((graceful_wait_seconds + 1))
         done
         if socket_sidecar_group_is_owned "$sidecar_pid" "$sidecar_start_time"; then
-            echo "Stopping socket {{ socket_name }} after simulation."
+            printf 'Stopping socket %s after simulation.\n' {{ socket_name|shell_quote }}
             if socket_sidecar_process_is_running "$sidecar_pid" "$sidecar_start_time"; then
                 sidecar_stop_requested=1
             fi
@@ -372,7 +372,7 @@ function run_test {
         else
             sidecar_exit_code=$?
         fi
-        echo "Socket {{ socket_name }} exited with code: $sidecar_exit_code"
+        printf 'Socket %s exited with code: %s\n' {{ socket_name|shell_quote }} "$sidecar_exit_code"
         local requested_signal_exit=0
         if [ "$sidecar_stop_requested" -ne 0 ] && \
            { [ "$sidecar_exit_code" -eq 137 ] || [ "$sidecar_exit_code" -eq 143 ]; }; then
@@ -384,7 +384,7 @@ function run_test {
             sidecar_failure_detected=1
         fi
     else
-        echo "%W- WARNING: PID variable '$sidecar_pid_variable' not found for socket {{ socket_name }}. Cannot wait/check status."
+        printf '%%W- WARNING: PID variable '\''%s'\'' not found for socket %s. Cannot wait/check status.\n' "$sidecar_pid_variable" {{ socket_name|shell_quote }}
     fi
     rm -f {{ socket_endpoint|shell_quote }}
  {% endfor %}

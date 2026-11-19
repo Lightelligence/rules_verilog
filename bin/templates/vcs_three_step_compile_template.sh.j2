@@ -87,7 +87,7 @@ run_vlogan_group() {
   local group_name="$1"
   local filelist_count="$2"
   shift 2
-  (($# > 0)) || return 0
+  ((filelist_count > 0 && $# > 0)) || return 0
   printf 'VCS incremental analysis group: %s (%s filelists)\n' \
     "${group_name}" "${filelist_count}" |
     tee -a {{ (VCOMP_DIR ~ '/cmp.log')|shell_quote }}

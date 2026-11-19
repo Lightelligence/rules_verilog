@@ -59,7 +59,7 @@ def create_regression_log_file(rcfg):
     target_folder = os.path.join(rcfg.regression_dir, 'regression_results')
 
     if not os.path.exists(target_folder):
-        os.makedirs(target_folder)
+        os.makedirs(target_folder, exist_ok=True)
         print(f"Folder created at: {target_folder}")
 
     current_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
@@ -123,7 +123,7 @@ def print_summary(rcfg, vcomp_jobs, jm, trd):
         vcomp = vcomp_jobs[vcomp_name]
         tb_set = (vcomp.name, "vcomp", '', '1' if vcomp.jobstatus.successful else '',
                   '1' if vcomp.jobstatus == vcomp.jobstatus.SKIPPED else '',
-                  '1' if not vcomp.jobstatus.successful else '', '1',
+                  '1' if vcomp.jobstatus == vcomp.jobstatus.FAILED else '', '1',
                   '' if vcomp.jobstatus.successful else str(vcomp.log_path), '')
         table_data.append(tb_set)
         trd.append(tb_set)
@@ -142,7 +142,7 @@ def print_summary(rcfg, vcomp_jobs, jm, trd):
             max_sim_time = max(timed_jobs, key=lambda x: x.job_time)._get_job_time_str() if timed_jobs else ""
             passed = [j for j in icfg.jobs if j.jobstatus.completed and j.jobstatus.successful]
             failed = [j for j in icfg.jobs if j.jobstatus == j.jobstatus.FAILED]
-            skipped = [j for j in icfg.jobs if j.jobstatus not in [j.jobstatus.FAILED, j.jobstatus.PASSED]]
+            skipped = [j for j in icfg.jobs if not j.jobstatus.successful and j.jobstatus != j.jobstatus.FAILED]
 
             total_passed += len(passed)
             total_failed += len(failed)
@@ -307,7 +307,7 @@ def calc_simresults_location(checkout_path):
     """
     username = getpass.getuser()
 
-    state_home = os.environ.get("XDG_STATE_HOME", os.path.expanduser("~/.local/state"))
+    state_home = os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state")
     sim_results_root = os.path.expanduser(os.environ.get("SIMRESULTS") or os.path.join(state_home, "simmer"))
     sim_results_home = os.path.join(sim_results_root, username)
     os.makedirs(sim_results_home, exist_ok=True)
@@ -331,7 +331,10 @@ def calc_simresults_location(checkout_path):
 
 
 def _git_output(cwd, *args):
-    result = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=False)
+    try:
+        result = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=False)
+    except OSError:
+        return ""
     return result.stdout.strip() if result.returncode == 0 else ""
 
 

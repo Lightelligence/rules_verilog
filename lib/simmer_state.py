@@ -136,10 +136,15 @@ def format_lsf_summary(lsf, include_bkill=False):
     return " | ".join(parts)
 
 
-def _linux_process_start_time(process_id):
+_PROC_START_TIME_UNREADABLE = object()
+
+
+def _linux_process_start_time(process_id, distinguish_permission_error=False):
     try:
         with open("/proc/{}/stat".format(process_id), "r", encoding="ascii") as filep:
             return filep.read().rsplit(")", 1)[1].split()[19]
+    except PermissionError:
+        return _PROC_START_TIME_UNREADABLE if distinguish_permission_error else None
     except (OSError, IndexError):
         return None
 
@@ -373,7 +378,10 @@ def _local_state_is_active(state, hostname):
     expected_start_time = process.get("start_time")
     if expected_start_time is None:
         return True
-    return _linux_process_start_time(process_id) == expected_start_time
+    actual_start_time = _linux_process_start_time(process_id, distinguish_permission_error=True)
+    if actual_start_time is _PROC_START_TIME_UNREADABLE:
+        return True
+    return actual_start_time == expected_start_time
 
 
 def _query_lsf_states(job_ids, runner=subprocess.run):

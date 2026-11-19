@@ -29,6 +29,7 @@ jobs:
         shell: pwsh
         run: |
           $testModules = @(
+            "tests.analog_file_test",
             "tests.args_parser_validation_test",
             "tests.bazel_profile_test",
             "tests.check_test_test",
@@ -43,7 +44,8 @@ jobs:
             "tests.simmer_results_test",
             "tests.simmer_runtime_hardening_test",
             "tests.simmer_state_test",
-            "tests.vcs_coverage_test"
+            "tests.vcs_coverage_test",
+            "tests.xrun_parallel_test"
           )
           python -m unittest $testModules
 

@@ -1,7 +1,7 @@
 # UCLI returns the actual dump file ID; do not assume a fixed identifier.
 set wave_fid [dump -file {{ waves_db|tcl_quote }} -type FSDB]
 {% set fsdb_hierarchy_depth = 0 if options.wave_depth == 999 else options.wave_depth -%}
-{% for probe in options.probes -%}
+{% for probe in probes|default(options.probes) -%}
 # simmer's sentinel depth 999 maps to UCLI depth 0, meaning all descendants.
 dump -add {{ probe|tcl_quote }} -fid $wave_fid -depth {{ fsdb_hierarchy_depth }} -aggregates -fsdb_opt +packedmda+struct+parameter
 {% endfor -%}

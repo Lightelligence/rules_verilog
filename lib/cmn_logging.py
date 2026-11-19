@@ -101,7 +101,8 @@ class CmnLogger(logging.getLoggerClass()):
 
     @property
     def duration_in_microseconds(self):
-        return self.duration.seconds * (10**6) + self.duration.microseconds
+        duration = self.duration
+        return (duration.days * 86400 + duration.seconds) * (10**6) + duration.microseconds
 
     @property
     def timestamp(self):
@@ -114,7 +115,7 @@ class CmnLogger(logging.getLoggerClass()):
     @property
     def timestamp_in_microseconds(self):
         delta = self.timestamp_delta
-        return delta.seconds * (10**6) + delta.microseconds
+        return (delta.days * 86400 + delta.seconds) * (10**6) + delta.microseconds
 
 
 class CmnFormatter(logging.Formatter):

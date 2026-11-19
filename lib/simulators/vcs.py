@@ -134,7 +134,9 @@ class VcsSimulator(SimulatorInterface):
 
     def get_tool_runner(self):
         runner = self.options.vcs_runner or os.environ.get("RV_VCS_RUNNER") or ""
-        return "" if runner.lower() in ("none", "") else runner
+        if runner.lower() in ("none", ""):
+            return ""
+        return shlex.join(shlex.split(runner))
 
     def get_vcs_home(self):
         """Return the VCS installation root, resolved once per simulator instance.
@@ -242,6 +244,8 @@ class VcsSimulator(SimulatorInterface):
     def finalize_regression_workflow(self):
         if not self.options.vso or self.options.no_run:
             return False
+        if self._vso_init_job is None or self._vso_ask_job is None:
+            return False
         if not self._vso_init_job.jobstatus.successful or not self._vso_ask_job.jobstatus.successful:
             return False
         try:
@@ -308,8 +312,20 @@ class VcsSimulator(SimulatorInterface):
         # module ordering that can change without changing the VCS tool.
         for key in ("LOADEDMODULES", "MODULEPATH", "PATH"):
             inputs["environment"].pop(key, None)
-        if self.options.vcs_cm_hier:
-            inputs["extra_input_paths"].append(self.options.vcs_cm_hier)
+        cm_hier = self.options.vcs_cm_hier or getattr(vcomp_job, "tb_options", {}).get("vcs_cm_hier")
+        if cm_hier:
+            runfiles_main = getattr(vcomp_job, "bazel_runfiles_main", None)
+            if not os.path.isabs(cm_hier) and runfiles_main:
+                cm_hier = os.path.join(runfiles_main, cm_hier)
+            inputs["extra_input_paths"].append(cm_hier)
+        if getattr(vcomp_job, "vcs_three_step", False):
+            for path in (
+                    getattr(vcomp_job, "vcs_vlogan_args", None),
+                    getattr(vcomp_job, "vcs_vlogan_filelists", None),
+                    getattr(vcomp_job, "vcs_elab_args", None),
+            ):
+                if path:
+                    inputs["extra_input_paths"].append(path)
         xprop_config = getattr(vcomp_job, "vcs_xprop_config_path", None)
         if xprop_config:
             inputs["extra_input_paths"].append(xprop_config)
@@ -323,7 +339,9 @@ class VcsSimulator(SimulatorInterface):
         # script. Only a standalone option token is normalized: a path or a
         # +define+ value that merely ends in -jN is a real compile input.
         normalized = re.sub(r"(?<!\S)-fastpartcomp=j\d+(?=\s|$)", "-fastpartcomp=jAUTO", compile_script)
-        return re.sub(r"(?<!\S)-j\d+(?=\s|$)", "-jAUTO", normalized)
+        normalized = re.sub(r"(?m)^[ \t]*-j\d+[ \t]*\\\r?\n", "", normalized)
+        normalized = re.sub(r"[ \t]+-j\d+(?=\s|$)", "", normalized)
+        return re.sub(r"(?<!\S)-j\d+(?:\s+|$)", "", normalized)
 
     def should_auto_reuse_compile(self):
         return self.options.vcs_auto_compile_cache
@@ -935,7 +953,7 @@ class VcsSimulator(SimulatorInterface):
             viewer_path = self._coverage_viewer_path(vcomp_job)
             vcomp_job.coverage_view_script_path = None
             try:
-                if os.path.lexists(viewer_path):
+                if viewer_path and os.path.lexists(viewer_path):
                     os.unlink(viewer_path)
             except OSError as exc:
                 log.error("Cannot invalidate previous VCS coverage viewer %s: %s", viewer_path, exc)
@@ -1067,6 +1085,8 @@ class VcsSimulator(SimulatorInterface):
         directory = os.path.abspath(self.rcfg.regression_dir)
         template = self.env.get_template("run_coverage_template.sh.j2")
         path = self._coverage_viewer_path(job)
+        if not path:
+            return
         contents = template.render(
             merged_db_relative=os.path.relpath(getattr(job, "coverage_published_merged_dir", job.merged_coverage_dir),
                                                directory),
@@ -1296,6 +1316,7 @@ source annotation and hierarchy details.</p></html>
                 content = probe.read()
         except (OSError, IOError):
             return set()
+        content = content.lower()
         if b"make" not in content or b"warning" not in content:
             return set()
         # At least one "make" and one "warning" → run the regex pass.
@@ -1306,15 +1327,18 @@ source annotation and hierarchy details.</p></html>
                                       r"your build may be incomplete\.")
         benign_future_mtime_lines = set()
         clock_skew_summary_lines = set()
+        non_benign_future_mtime = False
         continued_future_mtime = None
 
         with open(log_path, 'r', encoding='utf-8', errors='ignore') as logp:
             for line_number, line in enumerate(logp, start=1):
                 if continued_future_mtime is not None:
                     warning_line_number, skew_seconds = continued_future_mtime
-                    if (future_mtime_continuation_regex.search(line)
-                            and skew_seconds < _MAX_BENIGN_MAKE_CLOCK_SKEW_SECONDS):
-                        benign_future_mtime_lines.add(warning_line_number)
+                    if future_mtime_continuation_regex.search(line):
+                        if skew_seconds < _MAX_BENIGN_MAKE_CLOCK_SKEW_SECONDS:
+                            benign_future_mtime_lines.add(warning_line_number)
+                        else:
+                            non_benign_future_mtime = True
                     continued_future_mtime = None
 
                 match = future_mtime_regex.search(line)
@@ -1324,12 +1348,16 @@ source annotation and hierarchy details.</p></html>
                         continued_future_mtime = (line_number, skew_seconds)
                     elif skew_seconds < _MAX_BENIGN_MAKE_CLOCK_SKEW_SECONDS:
                         benign_future_mtime_lines.add(line_number)
+                    else:
+                        non_benign_future_mtime = True
                 if clock_skew_regex.search(line):
                     clock_skew_summary_lines.add(line_number)
 
-        if benign_future_mtime_lines:
-            return benign_future_mtime_lines | clock_skew_summary_lines
-        return set()
+        if not benign_future_mtime_lines:
+            return set()
+        if non_benign_future_mtime:
+            return benign_future_mtime_lines
+        return benign_future_mtime_lines | clock_skew_summary_lines
 
     def get_gui_command_options(self):
         # Enable Verdi debug features along with DVE/Verdi GUI

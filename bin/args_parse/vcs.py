@@ -24,7 +24,7 @@ def add_vcs_arguments(parser):
         '--gui',
         default=False,
         action='store_true',
-        help=('Compile one selected test with full Verdi debug access, SmartLog, and UVM transaction recording, '
+        help=('Compile one selected test with full Verdi debug access and UVM transaction recording, '
               'then launch simv in the Verdi GUI.\n'
               'Preparation: select exactly one VCS test and ensure a Verdi license/display is available.'))
     gvcs.add_argument('--vcs-cm',

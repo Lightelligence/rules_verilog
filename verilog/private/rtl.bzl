@@ -197,7 +197,7 @@ def _verilog_rtl_library_impl(ctx):
     )
 
     trans_srcs = get_transitive_srcs(srcs, ctx.attr.deps, VerilogInfo, "transitive_sources", allow_other_outputs = True)
-    trans_flists = get_transitive_srcs([ctx.outputs.flist], ctx.attr.deps, VerilogInfo, "transitive_flists", allow_other_outputs = False)
+    trans_flists = get_transitive_srcs([ctx.outputs.flist], ctx.attr.deps, VerilogInfo, "transitive_flists", allow_other_outputs = False, skip_missing_provider = True)
     trans_vcs_flists = get_transitive_srcs(
         [vcs_flist],
         ctx.attr.deps,
@@ -205,8 +205,9 @@ def _verilog_rtl_library_impl(ctx):
         "transitive_vcs_flists",
         allow_other_outputs = False,
         fallback_attr_name = "transitive_flists",
+        skip_missing_provider = True,
     )
-    trans_dpi = get_transitive_srcs([], ctx.attr.deps, VerilogInfo, "transitive_dpi", allow_other_outputs = False)
+    trans_dpi = get_transitive_srcs([], ctx.attr.deps, VerilogInfo, "transitive_dpi", allow_other_outputs = False, skip_missing_provider = True)
 
     runfiles = merge_default_runfiles(
         ctx,
@@ -774,7 +775,7 @@ def _verilog_rtl_lint_test_impl(ctx):
             "{DEFINES}": " ".join(defines),
             "{FLISTS}": " ".join(["{} {}".format("-file" if simulator == "VCS" else "-f", runfiles_relative_short_path(f)) for f in trans_flists.to_list()]),
             "{TOP_PATH}": top_path,
-            "{DESIGN_INFO}": " ".join([runfiles_relative_short_path(design_info) for design_info in ctx.files.design_info]),
+            "{DESIGN_INFO}": " ".join(["-design_info {}".format(runfiles_relative_short_path(design_info)) for design_info in ctx.files.design_info]),
             "{RULEFILE}": runfiles_relative_short_path(rulefile),
             "{INST_TOP}": ctx.attr.top,
             "{LINT_PARSER}": runfiles_relative_short_path(lint_parser),
@@ -782,6 +783,7 @@ def _verilog_rtl_lint_test_impl(ctx):
             "{WAIVER_DIRECT}": ctx.attr.waiver_direct,
             "{WAIVER_DIRECT_SHELL_QUOTED}": _shell_single_quote(ctx.attr.waiver_direct),
         },
+        is_executable = True,
     )
 
     trans_flists = get_transitive_srcs(
@@ -972,6 +974,7 @@ def _verilog_rtl_cdc_test_impl(ctx):
             "{CMD_FILES}": " ".join([runfiles_relative_short_path(cmd_file) for cmd_file in ctx.files.cmd_files]),
             "{EPILOGUE_CMDS}": runfiles_relative_short_path(ctx.outputs.epilogue_cmds),
         },
+        is_executable = True,
     )
 
     defines = ["+define+LINT", "+define+CDC"]

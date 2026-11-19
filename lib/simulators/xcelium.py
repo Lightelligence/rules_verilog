@@ -13,6 +13,7 @@ import tempfile
 
 import jinja2
 
+from lib import compile_cache
 from lib.coverage_data import aggregate_coverage_metrics, parse_coverage_summary
 from .base import SimulatorInterface, ValidationErrorParser, run_bounded_process
 from .options import validate_explicit_switches
@@ -263,6 +264,12 @@ class XceliumSimulator(SimulatorInterface):
     def _msie_identity(self, vcomp_job):
         inputs_sha256, input_count = self._msie_input_digest(vcomp_job)
         covfile = self._effective_covfile(vcomp_job)
+        compile_args_file_sha256 = None
+        if self.options.compile_args_file:
+            extra_paths = compile_cache.discover_filelist_inputs(self.options.compile_args_file,
+                                                                 vcomp_job.bazel_runfiles_main)
+            compile_args_file_sha256, _ = compile_cache._extra_input_digests(extra_paths
+                                                                             or [self.options.compile_args_file])
         return {
             "schema_version": 2,
             "bazel_target": vcomp_job.bazel_vcomp_target,
@@ -279,6 +286,7 @@ class XceliumSimulator(SimulatorInterface):
             },
             "coverage": self.options.coverage or "",
             "covfile_sha256": _sha256_file(covfile) if covfile else None,
+            "compile_args_file_sha256": compile_args_file_sha256,
             "rtl_defines": sorted(self.options.rtl_defines or []),
             "debug": self.options.waves is not None,
             "xcelium_tool_id": self.get_tool_identity(),
@@ -407,6 +415,13 @@ class XceliumSimulator(SimulatorInterface):
         return ("XRUN", os.path.normcase(os.path.realpath(test_job.vcomper.job_dir)))
 
     def prepare_compile_execution(self, vcomp_job, reusing_compile):
+        if self.options.coverage and not self.options.no_run and getattr(vcomp_job, "cov_work_dir", None):
+            for stale_path in [
+                    os.path.join(vcomp_job.cov_work_dir, "scope"),
+                    os.path.join(vcomp_job.cov_work_dir, "merged_db"),
+                    os.path.join(vcomp_job.cov_work_dir, "imc_report"),
+            ]:
+                shutil.rmtree(stale_path, ignore_errors=True)
         if reusing_compile:
             return
         runfiles = os.path.normcase(os.path.realpath(vcomp_job.bazel_runfiles_main))
@@ -447,12 +462,6 @@ class XceliumSimulator(SimulatorInterface):
             if getattr(vcomp_job, "cov_work_dir", None) is None:
                 vcomp_job.cov_work_dir = os.path.join(self.rcfg.regression_dir, vcomp_job.name + "__COV_WORK")
             vcomp_job.acquire_shared_runtime_lock(vcomp_job.cov_work_dir)
-            for stale_path in [
-                    os.path.join(vcomp_job.cov_work_dir, "scope"),
-                    os.path.join(vcomp_job.cov_work_dir, "merged_db"),
-                    os.path.join(vcomp_job.cov_work_dir, "imc_report"),
-            ]:
-                shutil.rmtree(stale_path, ignore_errors=True)
             os.makedirs(vcomp_job.cov_work_dir, exist_ok=True) # Use makedirs
             merge_exec_tcl = os.path.join(vcomp_job.cov_work_dir, "merge_exec.tcl")
             imc_report_tcl = os.path.join(vcomp_job.cov_work_dir, "imc_report.tcl")
@@ -537,7 +546,10 @@ class XceliumSimulator(SimulatorInterface):
                 "-covbaserun",
                 coverage_name,
             ])
-            test_job.coverage_db_path = os.path.join(test_job.vcomper.cov_work_dir, "scope", coverage_name)
+            if hasattr(test_job.vcomper, 'cov_work_dir') and test_job.vcomper.cov_work_dir:
+                test_job.coverage_db_path = os.path.join(test_job.vcomper.cov_work_dir, "scope", coverage_name)
+            else:
+                test_job.coverage_db_path = None
             if 'A' in self.options.coverage or 'U' in self.options.coverage:
                 sim_args.append("+SVFCOV=1")
         # MCE

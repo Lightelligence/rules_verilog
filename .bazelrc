@@ -28,6 +28,5 @@ test --test_env=LD_LIBRARY_PATH
 # Select VCS. Use with `--config=vcs`.
 build:vcs --//:verilog_unit_test_simulator=VCS
 
-#If true, Bazel tries to load external repositories from the Bzlmod system before looking into the WORKSPACE file
-## Enable Bzlmod for every Bazel command
+# Disable Bzlmod; this repository is WORKSPACE-based.
 common --noenable_bzlmod

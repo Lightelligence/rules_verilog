@@ -206,6 +206,16 @@ class CheckTestFastPathTest(unittest.TestCase):
         self.assertEqual([], errors)
         self.assertTrue(finished)
 
+    def test_idempotent_enable_disable_directive_does_not_fail_test(self):
+        path = self._log("TEST_CHECK_ENABLE: Error:\n"
+                         "TEST_CHECK_DISABLE: NONEXISTENT_ERROR\n"
+                         "$finish at simulation time 100\n")
+
+        errors, _, _, finished = check_test.scan_text_log(path, 25)
+
+        self.assertEqual([], errors)
+        self.assertTrue(finished)
+
 
 if __name__ == "__main__":
     unittest.main()

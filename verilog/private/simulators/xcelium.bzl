@@ -1,6 +1,6 @@
 """Xcelium backend helpers for DV rules."""
 
-load("//verilog/private:verilog.bzl", "ToolEncapsulationInfo", "VerilogInfo", "flists_to_arguments", "get_transitive_srcs", "merge_default_runfiles", "runfiles_relative_short_path", "verilog_input_inventory")
+load("//verilog/private:verilog.bzl", "ToolEncapsulationInfo", "VerilogInfo", "expand_runfiles_locations", "flists_to_arguments", "get_transitive_srcs", "merge_default_runfiles", "runfiles_relative_short_path", "verilog_input_inventory")
 
 def _validate_tb(ctx, has_msie_primary, has_msie_extras):
     if ctx.file.vcs_cm_hier:
@@ -36,7 +36,7 @@ def _compile_config(ctx, defines, compile_args):
         defines = "\n".join(["-define {}{}".format(key, value) for key, value in defines.items()]),
         fallback_flist_field = None,
         flist_field = "transitive_flists",
-        flists = flists_to_arguments(ctx.attr.deps + ctx.attr.shells, VerilogInfo, "transitive_flists", "\n-f"),
+        flists = flists_to_arguments(ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_flists", "\n-f"),
         template = ctx.file._compile_args_template_xrun,
     )
 
@@ -52,12 +52,14 @@ def _expand_msie_compile_args(ctx, compile_args, compile_defines):
     primary_compile_args = ctx.actions.declare_file(ctx.label.name + "_msie_primary_compile_args.f")
     incremental_compile_args = ctx.actions.declare_file(ctx.label.name + "_msie_incremental_compile_args.f")
     primary_inputs = ctx.actions.declare_file(ctx.label.name + "_msie_primary_inputs.txt")
-    common_xrun_args = ctx.expand_location("\n".join(compile_args), targets = ctx.attr.extra_runfiles)
-    primary_xrun_args = ctx.expand_location(
+    common_xrun_args = expand_runfiles_locations(ctx, "\n".join(compile_args), targets = ctx.attr.extra_runfiles)
+    primary_xrun_args = expand_runfiles_locations(
+        ctx,
         "\n".join(ctx.attr.msie_primary_extra_compile_args),
         targets = ctx.attr.extra_runfiles + ctx.attr.msie_primary_extra_runfiles,
     )
-    incremental_xrun_args = ctx.expand_location(
+    incremental_xrun_args = expand_runfiles_locations(
+        ctx,
         "\n".join(ctx.attr.msie_incremental_extra_compile_args),
         targets = ctx.attr.extra_runfiles + ctx.attr.msie_incremental_extra_runfiles,
     )
@@ -105,7 +107,7 @@ def _extra_compile_outputs(ctx, defines, selected_compile_args, compile_config):
 def _runtime_config(ctx):
     return struct(
         dpi = flists_to_arguments(
-            ctx.attr.shells + ctx.attr.deps,
+            ctx.attr.shells + ctx.attr.deps + ctx.attr.msie_primary_deps + ctx.attr.msie_incremental_deps,
             VerilogInfo,
             "transitive_dpi",
             "-sv_lib",

@@ -27,6 +27,7 @@ need absolute paths or an explicit ``bazel_runfiles_main/`` prefix instead.
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 import sys
 
@@ -42,19 +43,23 @@ def to_posix(path: Path) -> str:
     return path.as_posix()
 
 
-def find_runfiles_root(flist_path: Path) -> Path:
-    current = flist_path.absolute()
+def _find_logical_runfiles_root(flist_path: Path) -> Path:
+    current = Path(os.path.abspath(str(flist_path)))
     for parent in [current.parent] + list(current.parents):
         if parent.name == "bazel_runfiles_main":
-            return parent.resolve()
+            return parent
     raise ValueError("Could not find enclosing bazel_runfiles_main for '{}'".format(flist_path))
+
+
+def find_runfiles_root(flist_path: Path) -> Path:
+    return _find_logical_runfiles_root(flist_path).resolve()
 
 
 def rewrite_path_token(token: str, flist_dir: Path, runfiles_root: Path) -> str:
     if not token.startswith("../") and not token.startswith("./"):
         return token
 
-    resolved = (flist_dir / token).resolve()
+    resolved = Path(os.path.normpath(os.path.join(str(flist_dir), token)))
     try:
         relative = resolved.relative_to(runfiles_root)
     except ValueError:
@@ -77,13 +82,14 @@ def normalize_line(line: str, flist_dir: Path, runfiles_root: Path) -> str:
     else:
         content = line
 
+    leading = content[:len(content) - len(content.lstrip(" \t"))]
+    body = content[len(leading):]
     for prefix in PATH_PREFIXES:
-        if content.startswith(prefix):
-            token = content[len(prefix):].strip()
+        if body.startswith(prefix):
+            token = body[len(prefix):].strip()
             rewritten = rewrite_path_token(token, flist_dir, runfiles_root)
-            return "{}{}{}".format(prefix, rewritten, line_ending)
+            return "{}{}{}{}".format(leading, prefix, rewritten, line_ending)
 
-    leading = content[:len(content) - len(content.lstrip(" "))]
     token = content.strip()
     rewritten = rewrite_path_token(token, flist_dir, runfiles_root)
     if rewritten == token:
@@ -92,12 +98,16 @@ def normalize_line(line: str, flist_dir: Path, runfiles_root: Path) -> str:
 
 
 def normalize_flist(path: Path) -> bool:
-    runfiles_root = find_runfiles_root(path)
-    flist_dir = path.resolve().parent
+    logical_root = _find_logical_runfiles_root(path)
+    runfiles_root = logical_root.resolve()
+    logical_dir = Path(os.path.abspath(str(path))).parent
+    flist_dir = runfiles_root / logical_dir.relative_to(logical_root)
     original = path.read_text(encoding="utf-8").splitlines(keepends=True)
     updated = [normalize_line(line, flist_dir, runfiles_root) for line in original]
     if updated == original:
         return False
+    if path.is_symlink():
+        path.unlink()
     path.write_text("".join(updated), encoding="utf-8")
     return True
 

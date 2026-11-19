@@ -249,6 +249,9 @@ class RegressionReport:
 
     def prepare(self, header, trd, cov, category_stats):
         self.header = dict(header)
+        commit_url = self.header.get("commit")
+        if commit_url and not (isinstance(commit_url, str) and commit_url.startswith(("http://", "https://"))):
+            self.header["commit"] = ""
         self.proj_name = _validate_component(self.header["project_name"])
         _validate_timestamp(self.header["time"])
         self.cov = cov or {}
@@ -446,6 +449,7 @@ fi
             os.remove(history_page)
 
         bench_root = Path(bench_path).resolve()
+        logs_root = (bench_root / "logs").resolve()
         log_groups = summary.get("logs", [])
         for group in log_groups if isinstance(log_groups, list) else []:
             paths = [group] if isinstance(group, str) else group
@@ -461,7 +465,7 @@ fi
                     resolved = candidate.resolve()
                 except OSError:
                     continue
-                if resolved.is_relative_to(bench_root) and resolved.is_file():
+                if resolved.is_relative_to(logs_root) and resolved.is_file():
                     resolved.unlink()
 
     def _prune_history(self, bench_path, regressions):

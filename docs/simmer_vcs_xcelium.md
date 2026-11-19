@@ -21,15 +21,15 @@ simmer -t <bench>:<test> --simulator XRUN
 ```
 
 Normal Xcelium compilation is fingerprinted and protected by a compile-directory
-lock. Matching elaboration databases are reused, but regressions sharing a
+lock. Matching elaboration databases are reused, and regressions sharing a
 VCOMP database or Bazel runfiles tree hold a runtime lock through simulation
-and cleanup. Tests using the same database run serially; tests using distinct
-databases may run concurrently. This conservative policy does not assume that
-XRUN's `run.*.d` is read-only: licensed concurrent-database validation is still
-unavailable. Known top-level scratch created by the current compilation is
-removed before releasing the lock; pre-existing files and symlinks are preserved.
-Coverage retains its shared coverage-directory lock. These locks coordinate
-`simmer` only; do not modify active databases with external commands.
+and cleanup. Standard XRUN tests (including coverage) run concurrently against
+the shared elaboration database by default; pass `--no-xrun-parallel` to
+serialize tests per database. MCE, MSIE, emulator, and GUI modes remain
+automatically serial. Known top-level scratch created by the current compilation
+is removed before releasing the lock; pre-existing files and symlinks are
+preserved. Coverage retains its shared coverage-directory lock. These locks
+coordinate `simmer` only; do not modify active databases with external commands.
 
 VCS uses the two-step compile/sim flow:
 
@@ -703,7 +703,7 @@ simmer -t <bench>:<test> --simulator VCS --smartlog
 simmer -t <bench>:<test> --simulator VCS --vcs-xprop F
 ```
 
-All VCS compile modes use `-debug_access+r+w+f`, which gives RTL and selected
+Standard VCS compile modes use `-debug_access+r+w+f` by default, which gives RTL and selected
 SystemVerilog interface signals the read/write/force access required for UVM HDL
 deposit/force operations and DUT memory backdoor loads. VCS `--waves` is the
 lightweight signal-dump mode and additionally compiles with `-kdb`; it does not

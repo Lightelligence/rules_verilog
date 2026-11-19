@@ -641,7 +641,10 @@ class VCompJob(Job):
         self.compile_cache_hit = False
 
         if options.compile_args_file and not os.path.isabs(options.compile_args_file):
-            options.compile_args_file = os.path.abspath(os.path.join(self.rcfg.proj_dir, options.compile_args_file))
+            compile_args_file = os.path.abspath(os.path.join(self.rcfg.proj_dir, options.compile_args_file))
+        else:
+            compile_args_file = options.compile_args_file
+        self.compile_args_file = compile_args_file
         relpath, bazel_target = self.bazel_vcomp_target.split(':')
         relpath = relpath[2:] # Remove leading //
         self.resolve_bazel_runfiles_main()
@@ -777,7 +780,7 @@ class VCompJob(Job):
         if self.rcfg.options.no_compile:
             self.simulator.validate_reusable_compile_artifacts(self)
             compile_cache.validate_compile_fingerprint(self.job_dir, self.compile_fingerprint)
-            self.main_cmdline = "echo \"Bypassing {} due to --no-compile\"".format(self)
+            self.main_cmdline = shlex.join(["echo", "Bypassing {} due to --no-compile".format(self)])
         elif self.simulator.should_auto_reuse_compile() and not options.recompile:
             self.compile_cache_hit, miss_reason = compile_cache.can_reuse_compile(
                 self.job_dir,
@@ -795,7 +798,7 @@ class VCompJob(Job):
                           self.simulator.get_name().upper(), self, miss_reason)
                 self.main_cmdline = shlex.join(["bash", vcomp_sh_path])
             else:
-                self.main_cmdline = "echo \"Bypassing {} due to compile cache hit\"".format(self)
+                self.main_cmdline = shlex.join(["echo", "Bypassing {} due to compile cache hit".format(self)])
         else:
             self.main_cmdline = shlex.join(["bash", vcomp_sh_path])
 
@@ -858,7 +861,7 @@ class VCompJob(Job):
 
             # --- Promote unwaived warnings to errors ---
             # Only proceed if waivers were loaded/compiled without critical errors above
-            if self.jobstatus == JobStatus.PASSED or self.job_lib.returncode == 0: # Check warnings even if waivers failed loading? Maybe only if returncode=0
+            if self.jobstatus == JobStatus.PASSED:
                 try:
                     log.debug(f"Scanning compile log '{self.log_path}' for warnings...")
                     unwaived_count = 0
@@ -1210,7 +1213,7 @@ class TestJob(Job):
             wave_database_path = wave_capture_settings['waves_db']
             default_capture_scope = wave_capture_settings['default_capture']
 
-            options.probes = options.waves if options.waves != [] else [default_capture_scope]
+            probes = options.waves if options.waves != [] else [default_capture_scope]
             wave_delta_option = " -event" if options.wave_delta else ""
 
             # Simulator adapters own the template and artifact format; simmer
@@ -1219,7 +1222,7 @@ class TestJob(Job):
                 'options': options,
                 'job': self,
                 'waves_db': wave_database_path,
-                'probes': options.probes,
+                'probes': probes,
                 'delta': wave_delta_option,
                 'simulator_name': self.simulator.get_name(),
             }
@@ -1754,6 +1757,9 @@ def main(rcfg, options, active_run=None):
     """
     uname = os.uname()
     rcfg.log.info("Running on %s", uname[1])
+    compile_args_file = getattr(options, "compile_args_file", None)
+    if compile_args_file and not os.path.isabs(compile_args_file):
+        options.compile_args_file = os.path.abspath(os.path.join(rcfg.proj_dir, compile_args_file))
     resolve_run_simulator(rcfg, options)
 
     # --- Instantiate the selected simulator ---
@@ -2040,7 +2046,6 @@ def main(rcfg, options, active_run=None):
             shared_runtime_cleanup.cleanup()
         total_failures = sum(failures.values())
         post_processing_complete = True
-        rcfg.log.exit_if_warnings_or_errors("Previous errors")
     except (KeyboardInterrupt, _TerminationRequested) as interrupt:
         post_processing_interrupted = True
         with _IgnoreAdditionalInterrupts():
@@ -2064,8 +2069,7 @@ def main(rcfg, options, active_run=None):
                     rcfg.simmer_results_run,
                     regression_log_path=regression_log_path,
                     backend_finalize_failed=(workflow_finalize_failed or coverage_merge_failed
-                                             or not post_processing_complete
-                                             or bool(rcfg.log.warn_count or rcfg.log.error_count)),
+                                             or not post_processing_complete or bool(rcfg.log.error_count)),
                 )
                 persist_simmer_results(rcfg)
             except (KeyboardInterrupt, _TerminationRequested) as interrupt:
@@ -2089,6 +2093,9 @@ def main(rcfg, options, active_run=None):
         sys.exit(1)
     if total_failures > 0:
         log.info(f"Exiting with status 1 due to {total_failures} test failure(s).")
+        sys.exit(1)
+    if rcfg.log.error_count > 0:
+        log.info(f"Exiting with status 1 due to {rcfg.log.error_count} error(s).")
         sys.exit(1)
     else:
         log.info("All tests passed.")

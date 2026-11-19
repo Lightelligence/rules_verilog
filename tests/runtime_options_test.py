@@ -73,7 +73,7 @@ class RuntimeOptionsTest(unittest.TestCase):
 
         result = shlex.split(append_uvm_control_options("+UVM_VERBOSITY=UVM_LOW +TRACE", options))
 
-        self.assertEqual(["+UVM_VERBOSITY=UVM_DEBUG", "+TRACE"], result)
+        self.assertEqual(["+UVM_VERBOSITY=UVM_DEBUG", "+TRACE", "+UVM_TR_RECORD", "+UVM_LOG_RECORD"], result)
 
     def test_unrelated_verbosity_text_does_not_suppress_default(self):
         result = shlex.split(append_uvm_control_options("+MY_UVM_VERBOSITY_TRACE", _options()))

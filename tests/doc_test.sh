@@ -6,4 +6,5 @@ if [[ $# -ne 0 ]]; then
   exit 1
 fi
 
-exec python3.12 tests/docs_test.py
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+exec python3.12 "${repo_root}/tests/docs_test.py"

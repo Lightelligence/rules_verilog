@@ -42,7 +42,7 @@ def parse_coverage_summary(path):
             if tokens[0].upper() == "METRIC":
                 tokens = tokens[1:]
             if len(tokens) != len(headers) or len(set(headers)) != len(headers):
-                return {}
+                continue
             for value_line in filep:
                 # A blank or a new section closes this summary. Only horizontal
                 # table rules may separate the header from its single value row.
@@ -82,12 +82,16 @@ def _format_percentage(value):
 
 def aggregate_coverage_metrics(metrics):
     """Apply the OpenTitan DVSim coverage averages to canonical metrics."""
+    line = _percentage(metrics.get("Line"))
+    if line is None:
+        line = _percentage(metrics.get("Block"))
+
     condition = _percentage(metrics.get("Condition"))
     if condition is None:
         condition = _percentage(metrics.get("Expression"))
 
     code_average = _average([
-        _percentage(metrics.get("Line")),
+        line,
         _percentage(metrics.get("Branch")),
         condition,
         _percentage(metrics.get("Toggle")),

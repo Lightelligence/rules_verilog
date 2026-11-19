@@ -43,8 +43,10 @@ build --action_env=PATH
 Cadence Xcelium needs both `HOME` and `LM_LICENSE_FILE`; add them to your `.bazelrc` file:
 
 ```
-test --action_env=HOME
-test --action_env=LM_LICENSE_FILE
+build --action_env=HOME
+build --action_env=LM_LICENSE_FILE
+test --test_env=HOME
+test --test_env=LM_LICENSE_FILE
 ```
 
 VCS is the default simulator for `simmer`, DV testbenches, and one-step unit
@@ -391,7 +393,7 @@ At completion, `simmer` prints the executable launcher for that exact run. Open
 the report on a Red Hat workstation with the printed command, for example:
 
 ```bash
-/path/to/regression_report/project/open_reports/open_20260716_140000_000001.sh
+/path/to/regression_report/open_20260716_140000_000001.sh
 ```
 
 For a remote workstation, serve the static files on its loopback interface:

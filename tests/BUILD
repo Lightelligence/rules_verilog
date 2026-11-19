@@ -22,6 +22,16 @@ buildifier(
 )
 
 py_test(
+    name = "analog_file_test",
+    timeout = "short",
+    srcs = ["analog_file_test.py"],
+    data = [
+        "//bin:simmer.py",
+        "//verilog/private:dv.bzl",
+    ],
+)
+
+py_test(
     name = "args_parser_validation_test",
     timeout = "short",
     srcs = ["args_parser_validation_test.py"],
@@ -139,11 +149,13 @@ py_test(
     srcs = ["docs_test.py"],
     data = [
         "//:README.md",
+        "//docs:analog_file.md",
         "//docs:defs.md",
         "//docs:eda_workflow_review.md",
         "//docs:examples/vcs_fsdb_dump.tcl",
         "//docs:simmer_vcs_xcelium.md",
         "//docs:simulator_migration_checklist.md",
+        "//docs:xrun_parallel.md",
         "//verilog:defs.bzl",
         "//verilog/private:dv.bzl",
     ],
@@ -285,6 +297,17 @@ py_test(
     srcs = ["simmer_entrypoint_test.py"],
     args = ["$(location //bin:simmer)"],
     data = ["//bin:simmer"],
+)
+
+py_test(
+    name = "xrun_parallel_test",
+    timeout = "short",
+    srcs = ["xrun_parallel_test.py"],
+    data = [
+        "//bin:args_parser_lib",
+        "//lib/simulators:xcelium",
+        "//lib/simulators:xcelium_options",
+    ],
 )
 
 buildifier(

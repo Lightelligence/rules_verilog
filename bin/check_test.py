@@ -152,7 +152,8 @@ def scan_text_log(filepath, error_limit, extra_error_regex=None, required_finish
     found_finish = False
     with open(filepath, 'r', encoding='utf-8', errors='replace') as log_file:
         for line in log_file:
-            if "TEST_CHECK_" in line and update_signatures(line):
+            if "TEST_CHECK_" in line and (enable_regex.match(line) or disable_regex.match(line)):
+                update_signatures(line)
                 continue
             if err_regex.search(line) or (extra_error_regex is not None and extra_error_regex.search(line)):
                 error_lines.append(line)
@@ -255,15 +256,15 @@ def main():
     logfile = options.logfile
     output_base = os.path.basename(logfile)
 
-    # 3. Check File Size (MB)
-    if options.file_size_limit > 0:
-        size_mb = os.path.getsize(logfile) / (1024 * 1024.0)
-        if size_mb > options.file_size_limit:
-            with open(output_base + ".err", 'w') as err_log:
-                err_log.write(f"#E log file size {size_mb:.2f}MB exceeds limit {options.file_size_limit}MB\n")
-            sys.exit(1)
-
     try:
+        # 3. Check File Size (MB)
+        if options.file_size_limit > 0:
+            size_mb = os.path.getsize(logfile) / (1024 * 1024.0)
+            if size_mb > options.file_size_limit:
+                with open(output_base + ".err", 'w') as err_log:
+                    err_log.write(f"#E log file size {size_mb:.2f}MB exceeds limit {options.file_size_limit}MB\n")
+                sys.exit(1)
+
         scan_result = scan_static_log(
             logfile,
             options.error_limit,
