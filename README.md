@@ -289,14 +289,17 @@ simmer -t 'sys_tb:*@20' --simulator VCS --ico \
 simmer -t 'sys_tb:*@100' --simulator VCS --vso --vso-cbv --vcs-cm line \
   --vso-dbdir /nfs/project/vso/model --vso-phase stress:3
 
-simmer -t 'sys_tb:*@20' --simulator VCS --vso-ccex \
+# CCEX is automatic with --vcs-cm (opt out with --no-vso-ccex).
+simmer -t 'sys_tb:*@20' --simulator VCS --vcs-cm line \
   --vso-ccex-auto-merge-dir /nfs/project/ccex/shared
 ```
 
 ICO uses the runtime-only shared-CDB model from the Y-2026.03 ICO Guide. VSO.ai
 CSO uses the documented simplified init/ask-all/execute/finalize+merge model;
-CCEX adds `-vso ccex` at compile and runtime. They cannot be combined in one
-invocation and still require licensed Red Hat validation.
+CCEX adds `-vso ccex` at compile and runtime and is selected automatically with
+`--vcs-cm` unless CSO, ICO, `--gui`, `--dtl`, or `--no-run` is used. The three
+flows cannot be combined in one invocation and still require licensed Red Hat
+validation.
 
 ### Xcelium MSIE gatesim
 
@@ -356,7 +359,7 @@ simmer -t 'sys_tb:*@10' --simulator XRUN --coverage A \
 ```
 
 For VCS, `--vcs-cm-cond obs+event`, `--vcs-cm-tgl portsonly`,
-`--vcs-urg-parallel`, and `--vcs-urg-show-tests` expose the documented coverage
+`--vcs-urg-parallel`, `--vcs-urg-show-tests`, and `--no-vcs-urg-grade` expose the documented coverage
 collection and merge controls without leaking them into XRUN.
 
 Configure coverage files on the matching testbench target: use `vcs_cm_hier`

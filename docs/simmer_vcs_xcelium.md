@@ -144,7 +144,9 @@ simmer -t 'sys_tb:*@100' --simulator VCS --vso --vcs-cm A \
 simmer -t 'sys_tb:*@100' --simulator VCS --vso --vso-cbv --vcs-cm line \
   --vso-dbdir /nfs/project/vso/model --vso-phase stress:3
 
-# VSO.ai LCA Coverage Directed Solver, independent of CSO and ICO.
+# VSO.ai LCA Coverage Directed Solver, independent of CSO and ICO. It is on by
+# default whenever --vcs-cm is used; pass --vso-ccex to force it without coverage.
+simmer -t 'sys_tb:*@20' --simulator VCS --vcs-cm line
 simmer -t 'sys_tb:*@20' --simulator VCS --vso-ccex \
   --vso-ccex-auto-merge-dir /nfs/project/ccex/shared --vso-ccex-rca
 ```
@@ -962,14 +964,33 @@ the documented stress, acceleration and exploration selection. `--vso-cbv`
 adds the compile-time workdir tag required by Change-Based Verification and
 requires line or port-only toggle learning in the Day0 model.
 
-VSO.ai LCA Coverage Directed Solver (`--vso-ccex`) is a third independent flow.
-It adds `-vso ccex` at compile and runtime. `--vso-ccex-rca` enables static RCA;
-`--vso-ccex-auto-merge-dir` enables inter-simulation learning through shared
-storage. Advanced `-ccex_opts` can be supplied through `--sim-opts-file` only
-for runtime, or through `--file` for compile/elaboration, after checking the
-installed release documentation.
+VSO.ai LCA Coverage Directed Solver (CCEX) is a third independent flow. It adds
+`-vso ccex` at compile and runtime to bias constraint solving toward uncovered
+functional bins.
 
-These flows are not enabled by default because they require feature-specific
+CCEX is selected automatically for VCS when `--vcs-cm` is present, unless
+`--vso`, `--ico`, `--gui`, `--dtl`, or `--no-run` is selected, in which case that
+flow keeps its existing commands. Runs without `--vcs-cm` are unchanged. Pass
+`--no-vso-ccex` to opt out, or `--vso-ccex` to force it. CCEX does not support
+VHDL mixed-language (MX) designs; use `--no-vso-ccex` for those.
+
+While CCEX is enabled, simmer also passes `-ccex_opts rca` (disable with
+`--no-vso-ccex-rca`) and `-ccex_opts auto_merge_dir=<dir>` for inter-simulation
+learning. The directory defaults to `<regression>/ccex_artifacts/merge`;
+`--vso-ccex-auto-merge-dir` selects shared storage that every `simv` job can
+reach and that differs from the coverage directory. Because learning depends on
+the merged state of earlier jobs, replay a run with the documented
+`-ccex_opts replay` options. RCA is best-effort and requires the connection
+between random variables and covergroups to be established.
+
+Inspect results with `urg -ccex -dir <simv.vdb>` or
+`verdi -cov -ccex -covdir <simv.vdb>` (Verdi Apex license); plain
+`verdi -cov -covdir` omits the CCEX columns, RCA and Rand Hit data. The merge
+script prints the `-ccex` command for the unmerged VDB. Advanced `-ccex_opts`
+can be supplied through `--sim-opts-file` only for runtime, or through `--file`
+for compile/elaboration, after checking the installed release documentation.
+
+CSO and ICO are not enabled by default because they require feature-specific
 licenses, setup and real workload validation.
 
 ## Coverage generation and merge
@@ -1113,7 +1134,13 @@ sensitivity-list events. Use `--vcs-cm-tgl portsonly` to reduce toggle cost, or
 another documented mode when full signal coverage is required. Repeat
 `--vcs-cm-report` for `svpackages` and `noinitial`. URG merge can opt into
 `--vcs-urg-parallel` and `--vcs-urg-show-tests`; the latter retains test
-correlation but increases VDB size. Parallel merge remains disabled by default:
+correlation but increases VDB size. With `--vcs-cm`, simmer also runs
+`urg -grade testfile` on the original test VDBs after the merge and writes
+`gradedtests.txt` and `uniquetests.txt` to `<report>_grade` (best-first list of
+tests that reach the same coverage; not a guaranteed global minimum, so keep
+required directed tests outside the pruning). Grading failures only warn; use
+`--no-vcs-urg-grade` to skip it, which also avoids the larger `-show tests`
+VDB. It is not available with `--vcs-coverage-incremental`. Parallel merge remains disabled by default:
 measure each bench's merge elapsed time and input VDB size before enabling it,
 since parallel startup and coordination can outweigh the benefit for small
 databases. Simmer always logs wall times for old-output cleanup, combined URG,

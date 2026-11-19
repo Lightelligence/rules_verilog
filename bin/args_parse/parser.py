@@ -210,6 +210,8 @@ def parse_args(argv):
             '--vcs-urg-format',
             '--vcs-urg-summary-depth',
             '--vcs-urg-show-tests',
+            '--vcs-urg-grade',
+            '--no-vcs-urg-grade',
             '--vcs-partcomp',
             '--no-vcs-partcomp',
             '--vcs-partcomp-mode',
@@ -241,7 +243,9 @@ def parse_args(argv):
             '--vso-phase',
             '--vso-cbv',
             '--vso-ccex',
+            '--no-vso-ccex',
             '--vso-ccex-rca',
+            '--no-vso-ccex-rca',
             '--vso-ccex-auto-merge-dir',
         ] if argument_explicitly_requested(argv, argument)
     ]

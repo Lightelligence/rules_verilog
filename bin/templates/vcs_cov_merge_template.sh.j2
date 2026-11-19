@@ -46,6 +46,18 @@ case "${1:-all}" in
       -format {{ urg_format|shell_quote }} -report {{ report_dir|shell_quote }}{% if urg_summary_depth|default(none) is not none %} -show summary {{ urg_summary_depth|string|shell_quote }}{% endif %}
 {% endif %}
     ;;
+  grade)
+{% if urg_grade|default(false) %}
+    # Grade the original tests: a merged VDB coalesces their identities.
+    {{ urg_command }} -full64 -dir {% for path in cov_db_paths|default([cov_db_path]) %}{{ path|shell_quote }} {% endfor %}-flex_merge union \
+{% if urg_parallel -%}
+      -parallel \
+{% endif -%}
+      -grade testfile -format text -report {{ grade_report_dir|default("")|shell_quote }}
+{% else %}
+    printf '%s\n' 'Grading disabled.'
+{% endif %}
+    ;;
   *) printf 'Unknown coverage phase: %s\n' "$1" >&2; exit 2 ;;
 esac
 
@@ -53,3 +65,7 @@ esac
 printf '%s\n' {{ ('To view merged coverage: ' ~ verdi_command ~ ' -cov -covdir ' ~ merged_db_path)|shell_quote }}
 # Or launch Verdi for the unmerged simulation database.
 printf '%s\n' {{ ('To view unmerged coverage: ' ~ verdi_command ~ ' -cov -covdir ' ~ cov_db_path)|shell_quote }}
+{% if ccex_enabled|default(false) %}
+# CCEX columns and RCA need -ccex (Verdi Apex license); prefer the unmerged simv VDB.
+printf '%s\n' {{ ('To view CCEX/RCA: ' ~ verdi_command ~ ' -cov -ccex -covdir ' ~ cov_db_path)|shell_quote }}
+{% endif %}

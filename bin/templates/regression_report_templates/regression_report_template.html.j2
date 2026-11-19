@@ -29,8 +29,8 @@
 <div class="metric-strip" aria-label="Latest regression summary">
   <div class="metric"><span class="metric-label">Tests</span><span class="metric-value">{{ summary.total|default(0, true) }}</span></div>
   <div class="metric"><span class="metric-label">Passed</span><span class="metric-value">{{ summary.passed|default(0, true) }}</span></div>
-  <div class="metric"><span class="metric-label">Failed</span><span class="metric-value">{{ summary.failed|default(0, true) }}</span></div>
-  <div class="metric"><span class="metric-label">Skipped</span><span class="metric-value">{{ summary.skipped|default(0, true) }}</span></div>
+  <div class="metric"><span class="metric-label">Failed</span><span class="metric-value">{% if summary.failed|default(0, true)|int > 0 %}<a href="#failed">{{ summary.failed }}</a>{% else %}{{ summary.failed|default(0, true) }}{% endif %}</span></div>
+  <div class="metric"><span class="metric-label">Skipped</span><span class="metric-value">{% if summary.skipped|default(0, true)|int > 0 %}<a href="#skipped">{{ summary.skipped }}</a>{% else %}{{ summary.skipped|default(0, true) }}{% endif %}</span></div>
   <div class="metric {% if passrate >= 99.999 %}heat-good{% elif passrate >= 90 %}heat-warn{% else %}heat-bad{% endif %}"><span class="metric-label">Passing</span><span class="metric-value">{{ "%.2f"|format(passrate) }}%</span></div>
   <div class="metric {% if not total_available %}heat-neutral{% elif total_coverage >= 90 %}heat-good{% elif total_coverage >= 75 %}heat-warn{% else %}heat-bad{% endif %}"><span class="metric-label">Total Coverage</span><span class="metric-value">{% if total_available %}{{ "%.2f"|format(total_coverage) }}%{% else %}N/A{% endif %}</span></div>
   <div class="metric {% if not code_available %}heat-neutral{% elif code_coverage >= 90 %}heat-good{% elif code_coverage >= 75 %}heat-warn{% else %}heat-bad{% endif %}"><span class="metric-label">Code Coverage</span><span class="metric-value">{% if code_available %}{{ "%.2f"|format(code_coverage) }}%{% else %}N/A{% endif %}</span></div>
@@ -89,6 +89,8 @@
 <section class="section" aria-labelledby="test-results">
   <div class="section-heading">
     <h2 id="test-results">Test Results</h2>
+    <span id="failed" class="filter-anchor"></span><span id="skipped" class="filter-anchor"></span>
+    <span class="section-note filter-note">Filtered to failed/skipped tests &middot; <a href="#test-results">Show all</a></span>
   </div>
   <div class="table-wrap">
     <table>
@@ -110,7 +112,7 @@
       <tbody>
         {% for bench, test, tsim, passed, skipped, failed, total, row_pass_rate, logs, tags, logs_html in regression_details %}
         {% set row_rate = row_pass_rate|float %}
-        <tr>
+        <tr id="test-{{ loop.index }}"{% if failed|int > 0 or skipped|int > 0 %} class="{% if failed|int > 0 %}row-failed{% endif %}{% if skipped|int > 0 %} row-skipped{% endif %}"{% endif %}>
           <td class="cell-primary">{{ bench }}</td>
           <td class="align-left">{{ test }}</td>
           <td>{{ tags }}</td>
@@ -128,9 +130,15 @@
   </div>
 </section>
 
-{% if cc_info or cf_info %}
+{% if cc_info or cf_info or cov_viewer_script %}
 <section class="section" aria-labelledby="coverage-details">
   <div class="section-heading"><h2 id="coverage-details">Coverage Details</h2></div>
+  {% if cov_viewer_script %}
+  <div class="metadata" aria-label="Merged coverage viewer">
+    <div class="metadata-item"><span class="metadata-label">Merged coverage viewer script</span><span class="metadata-value"><code>{{ cov_viewer_script }}</code></span></div>
+    {% if cov_merged_db %}<div class="metadata-item"><span class="metadata-label">Merged coverage database</span><span class="metadata-value"><code>{{ cov_merged_db }}</code></span></div>{% endif %}
+  </div>
+  {% endif %}
   <div class="coverage-grid">
     {% if cc_info %}
     <div>
@@ -196,7 +204,7 @@
           <td>{% if history_total_available %}{{ "%.2f"|format(item.cov_total|float) }}%{% else %}N/A{% endif %}</td>
           <td>{% if history_code_available %}{{ "%.2f"|format(item.cov_code|float) }}%{% else %}N/A{% endif %}</td>
           <td>{% if history_functional_available %}{{ "%.2f"|format(item.cov_func|float) }}%{% else %}N/A{% endif %}</td>
-          <td class="{% if item.failed|default(0, true)|int > 0 %}heat-bad{% endif %}">{{ item.failed|default(0, true) }}</td>
+          <td class="{% if item.failed|default(0, true)|int > 0 %}heat-bad{% endif %}">{% if item.failed|default(0, true)|int > 0 %}<a href="{{ item.timestamp|urlencode }}.html#failed">{{ item.failed }}</a>{% else %}{{ item.failed|default(0, true) }}{% endif %}</td>
         </tr>
         {% endfor %}
       </tbody>
@@ -206,4 +214,5 @@
   <div class="empty-state">No historical run is available.</div>
   {% endif %}
 </section>
+
 {% endblock %}

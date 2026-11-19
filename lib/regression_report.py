@@ -506,6 +506,9 @@ fi
                 "cov_vendor_score": _coverage_value(coverage.get("vendor_score")),
                 "logs": logs_list,
             }
+            if coverage.get("viewer_script"):
+                regression_summary["cov_viewer_script"] = coverage["viewer_script"]
+                regression_summary["cov_merged_db"] = coverage.get("merged_db")
 
             json_file_path = _contained_path(bench_path, "regressions.json")
             regressions = self._load_history(bench_path)
@@ -529,6 +532,8 @@ fi
                 project=self.project_info,
                 cc_info=cc_info,
                 cf_info=cf_info,
+                cov_viewer_script=coverage.get("viewer_script"),
+                cov_merged_db=coverage.get("merged_db"),
                 processed_category_stats=self.processed_category_stats,
             )
 

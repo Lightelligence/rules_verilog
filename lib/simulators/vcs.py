@@ -679,8 +679,10 @@ class VcsSimulator(SimulatorInterface):
                 sim_args.extend(["-ccex_opts", "rca"])
             if self.options.vso_ccex_auto_merge_dir:
                 merge_dir = os.path.abspath(os.path.join(self.rcfg.proj_dir, self.options.vso_ccex_auto_merge_dir))
-                os.makedirs(merge_dir, exist_ok=True)
-                sim_args.extend(["-ccex_opts", "auto_merge_dir={}".format(merge_dir)])
+            else:
+                merge_dir = os.path.join(self.rcfg.regression_dir, "ccex_artifacts", "merge")
+            os.makedirs(merge_dir, exist_ok=True)
+            sim_args.extend(["-ccex_opts", "auto_merge_dir={}".format(merge_dir)])
         if self.options.ico:
             sim_args.extend([
                 "+ntb_solver_bias_mode_auto_config=2",
@@ -812,13 +814,42 @@ class VcsSimulator(SimulatorInterface):
                     report_dir=vcomp_job.coverage_report_dir,
                     urg_command=self.get_tool_command("urg"),
                     urg_parallel=self.options.vcs_urg_parallel,
-                    urg_show_tests=self.options.vcs_urg_show_tests,
+                    urg_show_tests=self.options.vcs_urg_show_tests or self.options.vcs_urg_grade,
+                    urg_grade=self.options.vcs_urg_grade,
+                    ccex_enabled=bool(self.options.vso_ccex),
+                    grade_report_dir=self._grade_report_dir(vcomp_job),
                     urg_format=report_format,
                     urg_summary_depth=summary_depth,
                     verdi_command=shlex.join(self._coverage_viewer_argv()),
                 ))
         st = os.stat(merge_sh)
         os.chmod(merge_sh, st.st_mode | stat.S_IEXEC)
+
+    @staticmethod
+    def _grade_report_dir(vcomp_job):
+        report_dir = getattr(vcomp_job, "coverage_report_dir", None)
+        return report_dir.rstrip(os.sep) + "_grade" if report_dir else None
+
+    def _run_coverage_grade(self, vcomp_job, merge_script, merge_log):
+        """Grade the original tests; grading is advisory and never fails the merge."""
+        grade_dir = self._grade_report_dir(vcomp_job)
+        try:
+            with open(merge_log, "a", encoding="utf-8") as output:
+                output.write("=== URG grade ===\n")
+                output.flush()
+                result = run_bounded_process(["bash", merge_script, "grade"],
+                                             stdout=output,
+                                             stderr=subprocess.STDOUT,
+                                             text=True)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            log.warning("VCS URG grading failed for %s: %s", vcomp_job, exc)
+            return
+        graded = os.path.join(grade_dir, "gradedtests.txt")
+        if result.returncode != 0 or not os.path.isfile(graded):
+            log.warning("VCS URG grading produced no gradedtests.txt for %s (log: %s)", vcomp_job, merge_log)
+            return
+        vcomp_job.coverage_graded_tests = graded
+        self.rcfg.deferred_messages.append("Graded VCS tests: {}".format(graded))
 
     def run_report_coverage_merge(self, vcomp_jobs):
         if not self.options.cm:
@@ -928,8 +959,9 @@ class VcsSimulator(SimulatorInterface):
                 with self._coverage_phase(vcomp_job, "coverage_total_duration_s"):
                     # Require outputs from this run, never an earlier dashboard.
                     with self._coverage_phase(vcomp_job, "output_cleanup_duration_s"):
-                        for attribute in ("coverage_report_dir", "merged_coverage_dir"):
-                            output_dir = getattr(vcomp_job, attribute, None)
+                        for attribute in ("coverage_report_dir", "merged_coverage_dir", "coverage_grade_dir"):
+                            output_dir = (self._grade_report_dir(vcomp_job)
+                                          if attribute == "coverage_grade_dir" else getattr(vcomp_job, attribute, None))
                             if output_dir and os.path.isdir(output_dir):
                                 shutil.rmtree(output_dir)
                     profile = getattr(self.options, "vcs_coverage_profile", False)
@@ -989,6 +1021,8 @@ class VcsSimulator(SimulatorInterface):
                                                 shutil.rmtree(entry.path)
                                             else:
                                                 os.unlink(entry.path)
+                        if getattr(self.options, "vcs_urg_grade", False):
+                            self._run_coverage_grade(vcomp_job, merge_script, merge_log)
                         if profile:
                             self._record_coverage_size(vcomp_job, "merged_db_bytes", vcomp_job.merged_coverage_dir)
                         with self._coverage_phase(vcomp_job, "viewer_script_write_duration_s"):
@@ -1018,9 +1052,15 @@ class VcsSimulator(SimulatorInterface):
             raise ValueError("RV_VCS_COVERAGE_VIEWER cannot be empty")
         return argv
 
-    def _coverage_viewer_path(self, job):
-        return getattr(job, "coverage_view_script_output_path",
-                       os.path.join(self.rcfg.regression_dir, "{}__run_coverage.sh".format(job.name)))
+    def _coverage_viewer_path(self, job, default_name=None):
+        path = getattr(job, "coverage_view_script_output_path", None)
+        if path:
+            return path
+        name = getattr(job, "name", default_name)
+        regression_dir = getattr(self.rcfg, "regression_dir", None)
+        if not name or not regression_dir:
+            return None
+        return os.path.join(regression_dir, "{}__run_coverage.sh".format(name))
 
     def _write_coverage_viewer(self, job):
         """Publish a viewer only after this run's merged outputs were validated."""
@@ -1230,10 +1270,19 @@ source annotation and hierarchy details.</p></html>
             }
         coverage = {}
         for vcomp, job in vcomp_jobs.items():
+            name = getattr(job, "name", vcomp.split(":")[-1])
             report_dir = getattr(job, "coverage_report_dir", None)
             metrics = (parse_coverage_summary(os.path.join(report_dir, "dashboard.txt"))
                        if report_dir and getattr(job, "coverage_merge_succeeded", True) else {})
-            coverage[getattr(job, "name", vcomp.split(":")[-1])] = aggregate_coverage_metrics(metrics)
+            data = aggregate_coverage_metrics(metrics)
+            viewer = self._coverage_viewer_path(job, default_name=name)
+            if viewer and getattr(job, "coverage_merge_succeeded", True) and os.path.isfile(viewer):
+                data["viewer_script"] = os.path.abspath(viewer)
+                merged_db = getattr(job, "coverage_published_merged_dir", None) or getattr(
+                    job, "merged_coverage_dir", None)
+                if merged_db:
+                    data["merged_db"] = os.path.abspath(merged_db)
+            coverage[name] = data
         return coverage
 
     def get_log_parsing_info(self):
