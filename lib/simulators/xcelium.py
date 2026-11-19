@@ -13,6 +13,7 @@ import tempfile
 
 import jinja2
 
+from lib import compile_cache
 from lib.coverage_data import aggregate_coverage_metrics, parse_coverage_summary
 from .base import SimulatorInterface, ValidationErrorParser, run_bounded_process
 from .options import validate_explicit_switches
@@ -263,6 +264,12 @@ class XceliumSimulator(SimulatorInterface):
     def _msie_identity(self, vcomp_job):
         inputs_sha256, input_count = self._msie_input_digest(vcomp_job)
         covfile = self._effective_covfile(vcomp_job)
+        compile_args_file_sha256 = None
+        if self.options.compile_args_file:
+            extra_paths = compile_cache.discover_filelist_inputs(self.options.compile_args_file,
+                                                                 vcomp_job.bazel_runfiles_main)
+            compile_args_file_sha256, _ = compile_cache._extra_input_digests(extra_paths
+                                                                             or [self.options.compile_args_file])
         return {
             "schema_version": 2,
             "bazel_target": vcomp_job.bazel_vcomp_target,
@@ -279,6 +286,7 @@ class XceliumSimulator(SimulatorInterface):
             },
             "coverage": self.options.coverage or "",
             "covfile_sha256": _sha256_file(covfile) if covfile else None,
+            "compile_args_file_sha256": compile_args_file_sha256,
             "rtl_defines": sorted(self.options.rtl_defines or []),
             "debug": self.options.waves is not None,
             "xcelium_tool_id": self.get_tool_identity(),

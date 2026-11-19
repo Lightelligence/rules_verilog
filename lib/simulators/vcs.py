@@ -134,7 +134,9 @@ class VcsSimulator(SimulatorInterface):
 
     def get_tool_runner(self):
         runner = self.options.vcs_runner or os.environ.get("RV_VCS_RUNNER") or ""
-        return "" if runner.lower() in ("none", "") else runner
+        if runner.lower() in ("none", ""):
+            return ""
+        return shlex.join(shlex.split(runner))
 
     def get_vcs_home(self):
         """Return the VCS installation root, resolved once per simulator instance.
@@ -241,6 +243,8 @@ class VcsSimulator(SimulatorInterface):
 
     def finalize_regression_workflow(self):
         if not self.options.vso or self.options.no_run:
+            return False
+        if self._vso_init_job is None or self._vso_ask_job is None:
             return False
         if not self._vso_init_job.jobstatus.successful or not self._vso_ask_job.jobstatus.successful:
             return False
@@ -949,7 +953,7 @@ class VcsSimulator(SimulatorInterface):
             viewer_path = self._coverage_viewer_path(vcomp_job)
             vcomp_job.coverage_view_script_path = None
             try:
-                if os.path.lexists(viewer_path):
+                if viewer_path and os.path.lexists(viewer_path):
                     os.unlink(viewer_path)
             except OSError as exc:
                 log.error("Cannot invalidate previous VCS coverage viewer %s: %s", viewer_path, exc)
@@ -1081,6 +1085,8 @@ class VcsSimulator(SimulatorInterface):
         directory = os.path.abspath(self.rcfg.regression_dir)
         template = self.env.get_template("run_coverage_template.sh.j2")
         path = self._coverage_viewer_path(job)
+        if not path:
+            return
         contents = template.render(
             merged_db_relative=os.path.relpath(getattr(job, "coverage_published_merged_dir", job.merged_coverage_dir),
                                                directory),

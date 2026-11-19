@@ -15,6 +15,7 @@ py_library(
         ":base",
         ":options",
         ":xcelium_options",
+        "//lib:compile_cache",
         "//lib:coverage_data",
     ],
 )

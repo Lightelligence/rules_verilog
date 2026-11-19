@@ -82,13 +82,14 @@ def normalize_line(line: str, flist_dir: Path, runfiles_root: Path) -> str:
     else:
         content = line
 
+    leading = content[:len(content) - len(content.lstrip(" \t"))]
+    body = content[len(leading):]
     for prefix in PATH_PREFIXES:
-        if content.startswith(prefix):
-            token = content[len(prefix):].strip()
+        if body.startswith(prefix):
+            token = body[len(prefix):].strip()
             rewritten = rewrite_path_token(token, flist_dir, runfiles_root)
-            return "{}{}{}".format(prefix, rewritten, line_ending)
+            return "{}{}{}{}".format(leading, prefix, rewritten, line_ending)
 
-    leading = content[:len(content) - len(content.lstrip(" "))]
     token = content.strip()
     rewritten = rewrite_path_token(token, flist_dir, runfiles_root)
     if rewritten == token:

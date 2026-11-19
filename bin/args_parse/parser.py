@@ -253,6 +253,8 @@ def parse_args(argv):
     options.reproduce_args = reproduction_args(argv)
 
     options.simulator = (options.simulator if options.simulator_was_explicit else SIM_PLATFORM).upper()
+    if options.simulator not in ('VCS', 'XRUN'):
+        parser.error("Unsupported simulator '{}'; expected VCS or XRUN.".format(options.simulator))
     wave_detail_switches = [
         '--wave-type',
         '--wave-tcl',

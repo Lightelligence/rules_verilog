@@ -17,6 +17,7 @@ exports_files([
 py_binary(
     name = "lint_parser_hal",
     srcs = ["lint_parser_hal.py"],
+    imports = ["../lib"],
     deps = [
         "//lib:cmn_logging",
     ],
@@ -25,12 +26,14 @@ py_binary(
 py_binary(
     name = "lint_parser_ascent",
     srcs = ["lint_parser_ascent.py"],
+    imports = ["../lib"],
     deps = ["//lib:cmn_logging"],
 )
 
 py_binary(
     name = "lint_parser_vcs",
     srcs = ["lint_parser_vcs.py"],
+    imports = ["../lib"],
     deps = ["//lib:cmn_logging"],
 )
 

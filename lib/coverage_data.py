@@ -42,7 +42,7 @@ def parse_coverage_summary(path):
             if tokens[0].upper() == "METRIC":
                 tokens = tokens[1:]
             if len(tokens) != len(headers) or len(set(headers)) != len(headers):
-                return {}
+                continue
             for value_line in filep:
                 # A blank or a new section closes this summary. Only horizontal
                 # table rules may separate the header from its single value row.

@@ -256,15 +256,15 @@ def main():
     logfile = options.logfile
     output_base = os.path.basename(logfile)
 
-    # 3. Check File Size (MB)
-    if options.file_size_limit > 0:
-        size_mb = os.path.getsize(logfile) / (1024 * 1024.0)
-        if size_mb > options.file_size_limit:
-            with open(output_base + ".err", 'w') as err_log:
-                err_log.write(f"#E log file size {size_mb:.2f}MB exceeds limit {options.file_size_limit}MB\n")
-            sys.exit(1)
-
     try:
+        # 3. Check File Size (MB)
+        if options.file_size_limit > 0:
+            size_mb = os.path.getsize(logfile) / (1024 * 1024.0)
+            if size_mb > options.file_size_limit:
+                with open(output_base + ".err", 'w') as err_log:
+                    err_log.write(f"#E log file size {size_mb:.2f}MB exceeds limit {options.file_size_limit}MB\n")
+                sys.exit(1)
+
         scan_result = scan_static_log(
             logfile,
             options.error_limit,

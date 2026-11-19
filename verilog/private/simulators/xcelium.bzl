@@ -36,7 +36,7 @@ def _compile_config(ctx, defines, compile_args):
         defines = "\n".join(["-define {}{}".format(key, value) for key, value in defines.items()]),
         fallback_flist_field = None,
         flist_field = "transitive_flists",
-        flists = flists_to_arguments(ctx.attr.deps + ctx.attr.shells, VerilogInfo, "transitive_flists", "\n-f"),
+        flists = flists_to_arguments(ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_flists", "\n-f"),
         template = ctx.file._compile_args_template_xrun,
     )
 
@@ -107,7 +107,7 @@ def _extra_compile_outputs(ctx, defines, selected_compile_args, compile_config):
 def _runtime_config(ctx):
     return struct(
         dpi = flists_to_arguments(
-            ctx.attr.shells + ctx.attr.deps,
+            ctx.attr.shells + ctx.attr.deps + ctx.attr.msie_primary_deps + ctx.attr.msie_incremental_deps,
             VerilogInfo,
             "transitive_dpi",
             "-sv_lib",

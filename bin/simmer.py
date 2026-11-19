@@ -780,7 +780,7 @@ class VCompJob(Job):
         if self.rcfg.options.no_compile:
             self.simulator.validate_reusable_compile_artifacts(self)
             compile_cache.validate_compile_fingerprint(self.job_dir, self.compile_fingerprint)
-            self.main_cmdline = "echo \"Bypassing {} due to --no-compile\"".format(self)
+            self.main_cmdline = shlex.join(["echo", "Bypassing {} due to --no-compile".format(self)])
         elif self.simulator.should_auto_reuse_compile() and not options.recompile:
             self.compile_cache_hit, miss_reason = compile_cache.can_reuse_compile(
                 self.job_dir,
@@ -798,7 +798,7 @@ class VCompJob(Job):
                           self.simulator.get_name().upper(), self, miss_reason)
                 self.main_cmdline = shlex.join(["bash", vcomp_sh_path])
             else:
-                self.main_cmdline = "echo \"Bypassing {} due to compile cache hit\"".format(self)
+                self.main_cmdline = shlex.join(["echo", "Bypassing {} due to compile cache hit".format(self)])
         else:
             self.main_cmdline = shlex.join(["bash", vcomp_sh_path])
 
@@ -861,7 +861,7 @@ class VCompJob(Job):
 
             # --- Promote unwaived warnings to errors ---
             # Only proceed if waivers were loaded/compiled without critical errors above
-            if self.jobstatus == JobStatus.PASSED or self.job_lib.returncode == 0: # Check warnings even if waivers failed loading? Maybe only if returncode=0
+            if self.jobstatus == JobStatus.PASSED:
                 try:
                     log.debug(f"Scanning compile log '{self.log_path}' for warnings...")
                     unwaived_count = 0

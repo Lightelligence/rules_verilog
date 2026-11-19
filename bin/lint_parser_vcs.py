@@ -15,7 +15,7 @@ HEADER_REGEXP = re.compile(r"^(?P<severity>Warning|Error|Fatal|Lint)-\[(?P<errco
 FILE_LINE_REGEXPS = [
     re.compile(r'"(?P<filename>[^"]+)",\s*(?:line\s*)?(?P<lineno>\d+)'),
     re.compile(r'(?P<filename>[A-Za-z]:[\\/][^,\n]+),\s*(?:line\s*)?(?P<lineno>\d+)'),
-    re.compile(r'(?P<filename>[/\w.\-\\]+),\s*(?:line\s*)?(?P<lineno>\d+)'),
+    re.compile(r'(?P<filename>(?:[/\w.\-\\]*[\\/][/\w.\-\\]+|[\w.\-]+\.[A-Za-z0-9_]+)),\s*(?:line\s*)?(?P<lineno>\d+)'),
 ]
 
 

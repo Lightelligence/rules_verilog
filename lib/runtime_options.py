@@ -105,8 +105,8 @@ def append_uvm_control_options(sim_opts, options):
             sim_opts = _UVM_VERBOSITY_RE.sub("+UVM_VERBOSITY=" + options.verbosity, sim_opts)
         else:
             sim_opts += " +UVM_VERBOSITY=" + options.verbosity
-            if options.verbosity == "UVM_DEBUG":
-                sim_opts += " +UVM_TR_RECORD +UVM_LOG_RECORD "
+        if options.verbosity == "UVM_DEBUG":
+            sim_opts += " +UVM_TR_RECORD +UVM_LOG_RECORD "
     elif not _UVM_VERBOSITY_RE.search(sim_opts):
         sim_opts += " +UVM_VERBOSITY=UVM_MEDIUM"
 

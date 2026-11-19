@@ -138,16 +138,19 @@ class HalLintLog(object):
         # Each entry in this set is a tuple of (filename, lineno, errcode)
         waivers = set()
         for filename in self.files_with_notes:
-            if filename == "":
+            if filename == "" or not os.path.exists(filename):
                 continue
 
-            with open(filename, errors='replace') as filep:
-                for i, line in enumerate(filep.readlines()):
-                    match = WAIVER_REGEXP.search(line)
-                    if match:
-                        rules = match.group(1).split(',')
-                        for rule in rules:
-                            waivers.add((filename, str(i + 1), rule.strip()))
+            try:
+                with open(filename, errors='replace') as filep:
+                    for i, line in enumerate(filep.readlines()):
+                        match = WAIVER_REGEXP.search(line)
+                        if match:
+                            rules = match.group(1).split(',')
+                            for rule in rules:
+                                waivers.add((filename, str(i + 1), rule.strip()))
+            except OSError:
+                continue
 
         for issue in self.issues:
             # Only apply a direct waiver if the filename and lineno are empty, meaning HAL didn't render the error correctly
@@ -199,21 +202,25 @@ class HalLintLog(object):
         else:
             log.info("Found %3d %s (+%3d waived)", unwaived, level, waived)
 
-    def stats(self):
+    def stats(self, options=None):
+        show_waived = getattr(options, "show_waived", False)
         for warning in self.warnings:
             if not warning.waived:
-                log.warn("%s", warning)
-            elif options.show_waived:
+                log.warning("%s", warning)
+            elif show_waived:
                 log.info("%s", warning)
 
         for error in self.errors:
             if not error.waived:
                 log.error("%s", error)
-            elif options.show_waived:
+            elif show_waived:
                 log.info("%s", error)
 
         for fatal in self.fatals:
-            log.error("%s", fatal)
+            if not fatal.waived:
+                log.error("%s", fatal)
+            elif show_waived:
+                log.info("%s", fatal)
 
         log.info("The following files have unwaived issues:")
         sorted_files = sorted(self.files_with_notes.items(), key=lambda x: x[1])
@@ -236,15 +243,19 @@ def main(options, log):
 
     if not os.path.exists(xml_logfile):
         log.error("XML logfile doesn't exist, something probably went pretty wrong earlier")
-    elif os.path.getsize(xml_logfile) == 0:
+        log.exit_if_warnings_or_errors("Previous errors")
+        return
+    if os.path.getsize(xml_logfile) == 0:
         log.error("XML Logfile was 0 bytes, something probably went pretty wrong earlier")
+        log.exit_if_warnings_or_errors("Previous errors")
+        return
 
     log.info("Text Logfile: %s", text_logfile)
     log.info("XML Logfile: %s", xml_logfile)
 
     try:
         newest_lint_log = HalLintLog(xml_logfile, options.waiver_direct)
-        newest_lint_log.stats()
+        newest_lint_log.stats(options)
     except Exception as exc:
         log.error("Failed to parse lint log file: %s", exc)
 

@@ -324,6 +324,8 @@ def _gatesim_target(label, corner):
     value = str(label)
     if ":" in value:
         return value + "_" + corner
+    if "/" not in value:
+        return value + "_" + corner
     target = value.rsplit("/", 1)[-1]
     return "{}:{}_{}".format(value, target, corner)
 
@@ -400,6 +402,8 @@ def verilog_dv_test_cfg(name = None, tags = None, abstract = None, inherits = No
                 rule_args["tb"] = _gatesim_target(tb, corner)
             if uvm_testname != None:
                 rule_args["uvm_testname"] = uvm_testname
+            elif not abstract and not inherits:
+                rule_args["uvm_testname"] = name
             _verilog_dv_test_cfg_rule(**rule_args)
 
 def _is_dpi_shared_lib(path):
