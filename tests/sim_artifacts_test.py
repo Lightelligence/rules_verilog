@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 import tempfile
 import unittest
+from unittest import mock
 
 from lib import sim_artifacts
 
@@ -45,6 +46,26 @@ class SimArtifactsTest(unittest.TestCase):
         self.assertEqual("#!/usr/bin/env bash\n", path.read_text(encoding="utf-8"))
         if os.name != "nt":
             self.assertTrue(path.stat().st_mode & 0o111)
+
+    def test_materialize_python_script_caches_unchanged_source_reads(self):
+        root = Path(tempfile.mkdtemp())
+        source = root / "check_test.py"
+        source.write_text("print('v1')\n", encoding="utf-8")
+        first_dest = root / "job1" / "check_test.py"
+        second_dest = root / "job2" / "check_test.py"
+        first_dest.parent.mkdir()
+        second_dest.parent.mkdir()
+
+        sim_artifacts._SCRIPT_SOURCE_CACHE.clear()
+        with mock.patch.object(Path, "read_text", wraps=Path.read_text, autospec=True) as read_text:
+            sim_artifacts.materialize_python_script(source, first_dest)
+            sim_artifacts.materialize_python_script(source, second_dest)
+            self.assertEqual(1, read_text.call_count)
+
+        self.assertEqual("print('v1')\n", second_dest.read_text(encoding="utf-8"))
+        source.write_text("print('version2')\n", encoding="utf-8")
+        sim_artifacts.materialize_python_script(source, second_dest)
+        self.assertEqual("print('version2')\n", second_dest.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

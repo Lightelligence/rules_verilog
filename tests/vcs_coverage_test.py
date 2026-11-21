@@ -748,6 +748,26 @@ class VcsCoverageTest(unittest.TestCase):
         self.assertIn("Merged coverage database is not available", completed.stderr)
         self.assertFalse(capture.exists())
 
+    def test_scan_database_matches_separate_model_and_dataset_digests(self):
+        from lib import vcs_coverage
+
+        vdb = Path(self.vcomp.cov_work_dir)
+        for index in range(4):
+            design_file = vdb / "snps/coverage/db/design" / "part_{}.xml".format(index)
+            design_file.parent.mkdir(parents=True, exist_ok=True)
+            design_file.write_text("design-{}".format(index), encoding="utf-8")
+            shape_file = vdb / "snps/coverage/db/shape" / "shape_{}.xml".format(index)
+            shape_file.parent.mkdir(parents=True, exist_ok=True)
+            shape_file.write_text("shape-{}".format(index), encoding="utf-8")
+            test_file = vdb / "snps/coverage/db/testdata" / "test_{}".format(index) / "data.xml"
+            test_file.parent.mkdir(parents=True, exist_ok=True)
+            test_file.write_text("test-{}".format(index), encoding="utf-8")
+
+        model, records = vcs_coverage.scan_database(vdb)
+
+        self.assertEqual(vcs_coverage.model_digest(vdb), model)
+        self.assertEqual(vcs_coverage.datasets(vdb), records)
+
 
 if __name__ == "__main__":
     unittest.main()

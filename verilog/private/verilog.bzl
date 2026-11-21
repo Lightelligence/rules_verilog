@@ -13,6 +13,8 @@ VerilogInfo = provider("Transitive Verilog build inputs.", fields = {
     "transitive_vcs_flists": "VCS-compatible flists. Source ordering and per-target filelist boundaries are preserved while Xcelium-only makelib markers are omitted.",
     "transitive_dpi": "Shared libraries (.so/.dll/.dylib) to link in via the DPI for testbenches.",
     "last_module": "This is a convenience accessor. The last module specified is assumed be the top module in a design. This is frequently needed by downstream tools.",
+    "direct_sources": "Optional depset of Verilog/SystemVerilog source files owned directly by this target.",
+    "direct_vcs_flists": "Optional depset of VCS-compatible flists owned directly by this target.",
 })
 
 ShellInfo = provider("Metadata for a Verilog shell target.", fields = {
@@ -285,6 +287,38 @@ def runfiles_relative_short_path(f):
         return "external/" + short_path[3:]
     return short_path
 
+def _build_runfile_path_map(targets):
+    runfile_paths = {}
+    for target in targets:
+        for file in target[DefaultInfo].files.to_list():
+            runfile_paths[file.path] = runfiles_relative_short_path(file)
+
+    # Longest first so a path that is a prefix of another is not replaced early.
+    ordered_paths = sorted(runfile_paths.keys(), key = len, reverse = True)
+    return runfile_paths, ordered_paths
+
+def _expand_runfiles_locations_with_map(ctx, value, targets, runfile_paths, ordered_paths):
+    # Expand and normalize only actual location expressions. Literal argument
+    # text can contain execroot-like paths that must remain untouched.
+    segments = value.split("$(")
+    parts = [segments[0]]
+    for segment in segments[1:]:
+        closing = segment.find(")")
+        expression = segment[:closing] if closing >= 0 else segment
+        words = expression.strip().replace("\t", " ").split(" ")
+        if words and words[0] in ["location", "locations"]:
+            macro = "$(" + expression + (")" if closing >= 0 else "")
+            expanded = ctx.expand_location(macro, targets = targets)
+            for path in ordered_paths:
+                expanded = expanded.replace(path, runfile_paths[path])
+            parts.append(expanded)
+            if closing >= 0:
+                parts.append(segment[closing + 1:])
+        else:
+            parts.append("$(")
+            parts.append(segment)
+    return "".join(parts)
+
 def expand_runfiles_locations(ctx, value, targets):
     """Expand $(location) expressions and rewrite the results to runfiles-relative paths.
 
@@ -299,31 +333,29 @@ def expand_runfiles_locations(ctx, value, targets):
     Returns:
       The expanded string with file paths rewritten to runfiles-relative paths.
     """
-    runfile_paths = {}
-    for target in targets:
-        for file in target[DefaultInfo].files.to_list():
-            runfile_paths[file.path] = runfiles_relative_short_path(file)
+    if "$(" not in value:
+        return value
+    runfile_paths, ordered_paths = _build_runfile_path_map(targets)
+    return _expand_runfiles_locations_with_map(ctx, value, targets, runfile_paths, ordered_paths)
 
-    # Longest first so a path that is a prefix of another is not replaced early.
-    ordered_paths = sorted(runfile_paths.keys(), key = len, reverse = True)
+def expand_runfiles_locations_list(ctx, values, targets):
+    """Expand $(location) expressions across a list of strings, building path maps once.
 
-    # Expand and normalize only actual location expressions. Literal argument
-    # text can contain execroot-like paths that must remain untouched.
-    segments = value.split("$(")
-    result = segments[0]
-    for segment in segments[1:]:
-        closing = segment.find(")")
-        expression = segment[:closing] if closing >= 0 else segment
-        words = expression.strip().replace("\t", " ").split(" ")
-        if words and words[0] in ["location", "locations"]:
-            macro = "$(" + expression + (")" if closing >= 0 else "")
-            expanded = ctx.expand_location(macro, targets = targets)
-            for path in ordered_paths:
-                expanded = expanded.replace(path, runfile_paths[path])
-            result += expanded + (segment[closing + 1:] if closing >= 0 else "")
-        else:
-            result += "$(" + segment
-    return result
+    Args:
+      ctx: Rule context.
+      values: List of strings that may contain $(location ...) / $(locations ...) expressions.
+      targets: Targets that the expressions may refer to.
+
+    Returns:
+      A list of strings with any location expressions rewritten to runfiles-relative paths.
+    """
+    if not any(["$(" in value for value in values]):
+        return list(values)
+    runfile_paths, ordered_paths = _build_runfile_path_map(targets)
+    return [
+        _expand_runfiles_locations_with_map(ctx, value, targets, runfile_paths, ordered_paths) if "$(" in value else value
+        for value in values
+    ]
 
 def merge_default_runfiles(ctx, files, targets, transitive_files = None):
     """Create runfiles and merge the default runfiles of dependency targets.
@@ -449,7 +481,6 @@ def flists_to_arguments(deps, provider, field, prefix, separator = "", tool_name
 def _verilog_test_impl(ctx):
     trans_srcs = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_sources")
     trans_dpi = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_dpi")
-    srcs_list = trans_srcs.to_list()
     flists = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_flists")
     flists_list = flists.to_list()
 
@@ -481,7 +512,7 @@ def _verilog_test_impl(ctx):
     )
 
     runfile_targets = ctx.attr.shells + ctx.attr.deps + ctx.attr.data
-    runfile_files = flists_list + srcs_list + trans_dpi.to_list() + ctx.files.data
+    runfile_files = list(ctx.files.data)
     if ctx.attr.tool:
         runfile_targets.append(ctx.attr.tool)
         runfile_files.append(tool_executable)
@@ -490,6 +521,7 @@ def _verilog_test_impl(ctx):
         ctx,
         files = runfile_files,
         targets = runfile_targets,
+        transitive_files = depset(transitive = [flists, trans_srcs, trans_dpi]),
     )
 
     return [DefaultInfo(

@@ -1120,7 +1120,11 @@ before cancellation or timeout. Failures print at most the final 64 KiB and link
 the complete log; phase profiling labels merge and report output in that log.
 This report-only choice does not change compilation or simulation coverage.
 Xcelium `--coverage`
-keeps IMC generation and merge in the Xcelium adapter. Coverage switches from
+keeps IMC generation and merge in the Xcelium adapter. When `--report` is
+enabled, `merge_exec.tcl` generates the dashboard summary text files in the same
+IMC session as the merge so `simmer` does not launch a second `imc` process.
+Full IMC HTML/grading reports (`report -html -grading both`) are opt-in via
+`--xrun-imc-html`. Coverage switches from
 one backend are rejected by the other.
 The historical VCS spelling `--cm` remains a compatibility alias.
 

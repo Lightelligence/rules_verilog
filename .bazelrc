@@ -1,18 +1,11 @@
-# Cadence Xcelium requires $HOME to be set
-build --action_env=HOME
-
 # Keep local and CI Python behavior aligned with the supported Red Hat setup.
+# Only PATH is forwarded to build actions so user/license/tool environment
+# differences do not invalidate shared build and digest caches.
 build --incompatible_use_python_toolchains=false
 build --python_path=python3.12
 build --action_env=PATH
-build --action_env=VCS_HOME
-build --action_env=XCELIUMHOME
-build --action_env=VERDI_HOME
-build --action_env=SVUNIT_INSTALL
-build --action_env=LM_LICENSE_FILE
-build --action_env=SNPSLMD_LICENSE_FILE
-build --action_env=CDS_LIC_FILE
-build --action_env=LD_LIBRARY_PATH
+# Cadence Xcelium and licensed simulator tests require HOME, tool roots, and licenses.
+test --test_env=HOME
 test --test_env=PATH
 test --test_env=VCS_HOME
 test --test_env=XCELIUMHOME

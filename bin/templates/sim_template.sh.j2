@@ -51,10 +51,22 @@ SIMMER_SESSION_ID="${SOCKET_PROCESS_STAT_FIELDS[3]}"
 SOCKET_SIDECAR_STARTED_{{ loop.index }}="$SOCKET_SIDECAR_GROUPS_FILE.started.{{ loop.index }}"
  {%- endfor %}
 
+function socket_sidecar_is_registered {
+    local target_pid=$1
+    local reg_pid _
+    while read -r reg_pid _; do
+        if [ "$reg_pid" = "$target_pid" ]; then
+            return 0
+        fi
+    done < "$SOCKET_SIDECAR_GROUPS_FILE"
+    return 1
+}
+
 function socket_sidecar_group_is_owned {
     local sidecar_pid=$1
     local expected_start_time=$2
     [[ "$sidecar_pid" =~ ^[0-9]+$ && "$expected_start_time" =~ ^[0-9]+$ ]] || return 1
+    kill -0 -- "-$sidecar_pid" 2>/dev/null || return 1
     local -a SOCKET_PROCESS_STAT_FIELDS
     if read_socket_process_stat "/proc/$sidecar_pid/stat"; then
         local process_group="${SOCKET_PROCESS_STAT_FIELDS[2]}"
@@ -96,14 +108,16 @@ function terminate_socket_sidecars {
     local sidecar_pid
     local sidecar_start_time
     local -a cleanup_registrations=()
+    local cleanup_count=0
     while read -r sidecar_pid sidecar_start_time; do
         if socket_sidecar_group_is_owned "$sidecar_pid" "$sidecar_start_time"; then
             cleanup_registrations+=("$sidecar_pid $sidecar_start_time")
+            cleanup_count=$((cleanup_count + 1))
             kill -CONT -- "-$sidecar_pid" 2>/dev/null || true
             kill -TERM -- "-$sidecar_pid" 2>/dev/null || true
         fi
     done < "$SOCKET_SIDECAR_GROUPS_FILE"
-    if [ -s "$SOCKET_SIDECAR_GROUPS_FILE" ]; then
+    if [ "$cleanup_count" -gt 0 ]; then
         sleep 1
     fi
     local registration
@@ -156,7 +170,7 @@ function run_test {
     set +m
     local socket_registration_attempts=0
     local socket_registration_max_attempts=3000
-    while ! awk -v pid="$SOCKET_SIDECAR_{{ loop.index }}_PID" '$1 == pid { found = 1 } END { exit !found }' "$SOCKET_SIDECAR_GROUPS_FILE"; do
+    while ! socket_sidecar_is_registered "$SOCKET_SIDECAR_{{ loop.index }}_PID"; do
         if ! kill -0 "$SOCKET_SIDECAR_{{ loop.index }}_PID" 2>/dev/null; then
             report_wrapper_error "$(printf '%%E- ERROR: Socket wrapper %s exited before registration.' {{ socket_name|shell_quote }})"
             return 1

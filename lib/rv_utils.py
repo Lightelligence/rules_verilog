@@ -118,6 +118,8 @@ def print_summary(rcfg, vcomp_jobs, jm, trd):
     total_failed = 0
     total = 0
 
+    category_tag_sets = [(category, frozenset(config.get("tags", [])))
+                         for category, config in getattr(rcfg, "category_total_cases", {}).items()]
     last = len(rcfg.all_vcomp) - 1
     for i, (vcomp_name, (icfgs, test_list)) in enumerate(rcfg.all_vcomp.items()):
         vcomp = vcomp_jobs[vcomp_name]
@@ -158,8 +160,7 @@ def print_summary(rcfg, vcomp_jobs, jm, trd):
 
             test_target = getattr(icfg.jobs[0], "target", "")
             test_tags = set(rcfg.tests_to_tags.get(test_target, []))
-            test_category = ",".join(category for category, config in getattr(rcfg, "category_total_cases", {}).items()
-                                     if test_tags & set(config.get("tags", [])))
+            test_category = ",".join(category for category, tag_set in category_tag_sets if test_tags & tag_set)
             test_set = ("", icfg.jobs[0].name,
                         str(max_sim_time), str(len(passed)) if passed else "", str(len(skipped)) if skipped else "",
                         str(len(failed)) if failed else "", str(len(icfg.jobs)), "", test_category)
@@ -435,6 +436,7 @@ def calc_category_stats(rcfg) -> Dict[str, Dict[str, int]]:
             del stats["test_records"]
         return category_stats
 
+    category_tag_sets = {category: frozenset(config["tags"]) for category, config in rcfg.category_total_cases.items()}
     # Process all test iterations and aggregate results by full Bazel target.
     for _, (icfgs, _) in rcfg.all_vcomp.items():
         for icfg in icfgs:
@@ -451,8 +453,7 @@ def calc_category_stats(rcfg) -> Dict[str, Dict[str, int]]:
                 continue
 
             for category, stats in category_stats.items():
-                category_tags = set(rcfg.category_total_cases[category]["tags"])
-                if not (test_tags & category_tags) or test_target in stats["test_records"]:
+                if not (test_tags & category_tag_sets[category]) or test_target in stats["test_records"]:
                     continue
                 stats["test_records"].add(test_target)
                 stats["executed"] += 1

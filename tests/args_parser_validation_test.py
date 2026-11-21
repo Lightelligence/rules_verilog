@@ -196,6 +196,15 @@ class ArgsParserValidationTest(unittest.TestCase):
         self.assertTrue(options.no_bazel)
         self.assertTrue(options.no_bazel_was_explicit)
 
+    def test_xrun_imc_html_flag_tracks_xcelium_switch(self):
+        default_options = parse_args(["--simulator", "XRUN", "--coverage", "A"])
+        self.assertFalse(default_options.xrun_imc_html)
+        self.assertNotIn("--xrun-imc-html", default_options.xcelium_explicit_switches)
+
+        html_options = parse_args(["--simulator", "XRUN", "--coverage", "A", "--xrun-imc-html"])
+        self.assertTrue(html_options.xrun_imc_html)
+        self.assertIn("--xrun-imc-html", html_options.xcelium_explicit_switches)
+
 
 if __name__ == "__main__":
     unittest.main()

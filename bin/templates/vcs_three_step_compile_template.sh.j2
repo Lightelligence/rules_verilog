@@ -27,12 +27,15 @@ vlogan_project_preamble_args=()
 vlogan_project_file_args=()
 vlogan_precompile_filelist_count=0
 vlogan_project_filelist_count=0
+declare -A vlogan_include_seen=()
 declare -A vlogan_project_preamble_seen=()
 while IFS=$'\t' read -r vcs_group vcs_flist || [[ -n "${vcs_group}${vcs_flist}" ]]; do
   [[ -z "${vcs_group}" || -z "${vcs_flist}" ]] && continue
   while IFS= read -r flist_line || [[ -n "${flist_line}" ]]; do
-    [[ "${flist_line}" == +incdir+* ]] &&
+    if [[ "${flist_line}" == +incdir+* && -z "${vlogan_include_seen[${flist_line}]:-}" ]]; then
       vlogan_include_args+=("${flist_line}")
+      vlogan_include_seen["${flist_line}"]=1
+    fi
     if [[ "${vcs_group}" == precompile &&
           ( "${flist_line}" == *.vh || "${flist_line}" == *.svh ) &&
           -z "${vlogan_project_preamble_seen[${flist_line}]:-}" ]]; then

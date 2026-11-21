@@ -151,8 +151,9 @@ def xcelium_dv_unit_test_impl(ctx):
 
     runfiles = merge_default_runfiles(
         ctx,
-        files = flists_list + trans_srcs.to_list() + dpi.to_list() + [default_sim_opts],
+        files = [default_sim_opts],
         targets = ctx.attr.deps + [ctx.attr.default_sim_opts],
+        transitive_files = depset(transitive = [flists, trans_srcs, dpi]),
     )
     return [DefaultInfo(
         runfiles = runfiles,

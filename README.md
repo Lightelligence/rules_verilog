@@ -40,11 +40,9 @@ build --action_env=PATH
 ```
 
 
-Cadence Xcelium needs both `HOME` and `LM_LICENSE_FILE`; add them to your `.bazelrc` file:
+Cadence Xcelium test actions need both `HOME` and `LM_LICENSE_FILE`; pass them via `test --test_env` in your `.bazelrc` file (keeping them off `build --action_env` so shared build and digest caches are not invalidated across users or license changes):
 
 ```
-build --action_env=HOME
-build --action_env=LM_LICENSE_FILE
 test --test_env=HOME
 test --test_env=LM_LICENSE_FILE
 ```

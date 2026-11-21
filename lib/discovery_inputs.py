@@ -6,6 +6,7 @@ external labels fall back to Bazel discovery instead of guessing their inputs.
 """
 
 import ast
+import hashlib
 import os
 import stat
 import subprocess
@@ -147,11 +148,11 @@ def _literal_string(node):
     return node.value if isinstance(node, ast.Constant) and isinstance(node.value, str) else None
 
 
-def external_metadata(project_root, project_paths):
+def external_metadata(project_root, project_paths, digests=None):
     paths = set()
     reasons = []
     repositories = {}
-    parsed = []
+    external_label_refs = []
 
     def unsafe(path, detail):
         reasons.append({"kind": "incomplete_dependency_provenance", "path": path, "detail": detail})
@@ -162,11 +163,15 @@ def external_metadata(project_root, project_paths):
                 or name in ("WORKSPACE", "WORKSPACE.bazel", "MODULE.bazel")):
             if name not in (".bazelversion", ".bazelignore", ".gitmodules", "MODULE.bazel.lock"):
                 try:
-                    with open(path, encoding="utf-8") as stream:
-                        source = stream.read(MAX_FILE_BYTES + 1)
-                        if len(source) > MAX_FILE_BYTES:
-                            unsafe(path, "Bazel configuration exceeds the bounded parser size")
-                        elif "--override_repository" in source:
+                    with open(path, "rb") as stream:
+                        raw = stream.read(MAX_FILE_BYTES + 1)
+                    if len(raw) > MAX_FILE_BYTES:
+                        unsafe(path, "Bazel configuration exceeds the bounded parser size")
+                    else:
+                        if digests is not None:
+                            digests[path] = hashlib.sha256(raw).hexdigest()
+                        source = raw.decode("utf-8")
+                        if "--override_repository" in source:
                             unsafe(path, "Repository overrides require fresh Bazel discovery")
                 except FileNotFoundError:
                     pass
@@ -174,24 +179,31 @@ def external_metadata(project_root, project_paths):
                     unsafe(path, "Cannot inspect Bazel configuration")
             return
         try:
-            with open(path, encoding="utf-8") as stream:
-                source = stream.read(MAX_FILE_BYTES + 1)
-            if len(source) > MAX_FILE_BYTES:
+            with open(path, "rb") as stream:
+                raw = stream.read(MAX_FILE_BYTES + 1)
+            if len(raw) > MAX_FILE_BYTES:
                 unsafe(path, "Metadata exceeds the bounded parser size")
                 return
+            if digests is not None:
+                digests[path] = hashlib.sha256(raw).hexdigest()
+            source = raw.decode("utf-8")
             tree = ast.parse(source, filename=path)
         except (OSError, UnicodeError, SyntaxError, RecursionError) as exc:
             unsafe(path, "Cannot inspect metadata ({})".format(type(exc).__name__))
             return
-        parsed.append((path, tree, external))
         workspace = name in ("WORKSPACE", "WORKSPACE.bazel")
         top_calls = {
             id(node.value)
             for node in tree.body if isinstance(node, ast.Expr) and isinstance(node.value, ast.Call)
         }
         for node in ast.walk(tree):
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                if node.value.startswith("@") and "//" in node.value:
+                    external_label_refs.append((path, external, node.value.split("//", 1)[0][1:]))
+                continue
             if workspace and isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store) and node.id in LOCAL_RULES:
                 unsafe(path, "Repository builtin is rebound in the workspace")
+                return
             if not isinstance(node, ast.Call):
                 continue
             call = node.func
@@ -203,6 +215,7 @@ def external_metadata(project_root, project_paths):
                 bindings.extend(keyword.arg for keyword in node.keywords)
                 if LOCAL_RULES.intersection(bindings):
                     unsafe(path, "Loaded repository symbol is not a proven native builtin")
+                    return
             if function in LOCAL_RULES:
                 keywords = {keyword.arg: keyword.value for keyword in node.keywords}
                 repo_name = _literal_string(keywords.get("name"))
@@ -211,31 +224,39 @@ def external_metadata(project_root, project_paths):
                 attributes_are_literal = repo_name and repo_path is not None and None not in keywords and "repo_mapping" not in keywords
                 if not declaration_is_direct or not attributes_are_literal:
                     unsafe(path, "Local repository declaration is not directly resolvable")
-                    continue
+                    return
                 resolved = os.path.realpath(os.path.join(project_root, repo_path))
                 if repo_name in repositories and repositories[repo_name] != resolved:
                     unsafe(path, "Ambiguous local repository name")
+                    return
                 repositories[repo_name] = resolved
                 if function == "new_local_repository":
                     # Injected BUILD content can itself load metadata outside
                     # the source root. Do not infer its dependency closure.
                     unsafe(path, "Injected repository BUILD inputs require fresh Bazel discovery")
+                    return
             elif workspace and function not in ("load", "workspace"):
                 unsafe(path, "Workspace macro or repository rule requires fresh Bazel discovery")
+                return
             elif function in ("repository_rule", "module_extension", "glob"):
                 unsafe(path, "Dynamic repository or glob inputs require fresh Bazel discovery")
-            for argument in list(node.args) + [keyword.value for keyword in node.keywords]:
+                return
+            for argument in node.args:
                 if _symbol(argument) in LOCAL_RULES:
                     unsafe(path, "Wrapped repository declaration requires fresh Bazel discovery")
+                    return
+            for keyword in node.keywords:
+                if _symbol(keyword.value) in LOCAL_RULES:
+                    unsafe(path, "Wrapped repository declaration requires fresh Bazel discovery")
+                    return
         if name == "MODULE.bazel" and source.strip():
             unsafe(path, "Module repository provenance requires fresh Bazel discovery")
 
     for path in project_paths:
         parse(path)
-
-    if reasons:
-        # No amount of source-tree scanning can prove a dynamic declaration.
-        return [], reasons[0]
+        if reasons:
+            # No amount of source-tree scanning can prove a dynamic declaration.
+            return [], reasons[0]
 
     entries = 0
     visited = set()
@@ -249,7 +270,7 @@ def external_metadata(project_root, project_paths):
             visited.add(real)
             if depth > MAX_DEPTH:
                 unsafe(directory, "External metadata directory depth limit exceeded")
-                break
+                return sorted(paths), reasons[0]
             try:
                 with os.scandir(directory) as children:
                     for entry in children:
@@ -262,6 +283,7 @@ def external_metadata(project_root, project_paths):
                                 pending.append((entry.path, depth + 1))
                         elif entry.is_symlink() and entry.is_dir():
                             unsafe(entry.path, "External directory symlink requires fresh Bazel discovery")
+                            return sorted(paths), reasons[0]
                         elif entry.name.startswith("BUILD") or entry.name.endswith(".bzl") or entry.name in (
                                 "WORKSPACE", "WORKSPACE.bazel", "MODULE.bazel"):
                             paths.add(entry.path)
@@ -269,14 +291,14 @@ def external_metadata(project_root, project_paths):
                                 unsafe(directory, "External metadata file limit exceeded")
                                 return sorted(paths), reasons[0]
                             parse(entry.path, external=True)
+                            if reasons:
+                                return sorted(paths), reasons[0]
             except OSError:
                 unsafe(directory, "External repository cannot be completely inspected")
+                return sorted(paths), reasons[0]
 
-    for path, tree, external in parsed:
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Constant) and isinstance(node.value,
-                                                             str) and node.value.startswith("@") and "//" in node.value:
-                repository = node.value.split("//", 1)[0][1:]
-                if external or repository not in repositories:
-                    unsafe(path, "External label has no proven local repository provenance")
+    for path, external, repository in external_label_refs:
+        if external or repository not in repositories:
+            unsafe(path, "External label has no proven local repository provenance")
+            break
     return sorted(paths), reasons[0] if reasons else None

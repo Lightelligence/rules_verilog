@@ -266,13 +266,26 @@ def discover_filelist_inputs(filelist_path, working_directory):
             return value[1:-1]
         return value
 
+    isfile_cache = {}
+
+    def is_file(path):
+        cached = isfile_cache.get(path)
+        if cached is None:
+            cached = os.path.isfile(path)
+            isfile_cache[path] = cached
+        return cached
+
     def resolve(path, base_directory):
-        expanded = os.path.expanduser(os.path.expandvars(unquote(path)))
-        return os.path.abspath(expanded if os.path.isabs(expanded) else os.path.join(base_directory, expanded))
+        cleaned = unquote(path)
+        if "$" in cleaned or "%" in cleaned:
+            cleaned = os.path.expandvars(cleaned)
+        if "~" in cleaned:
+            cleaned = os.path.expanduser(cleaned)
+        return os.path.abspath(cleaned if os.path.isabs(cleaned) else os.path.join(base_directory, cleaned))
 
     def add_path(path, base_directory, include_directory=False):
         resolved = resolve(path, base_directory)
-        if os.path.isfile(resolved):
+        if is_file(resolved):
             discovered.add(resolved)
         elif include_directory and os.path.isdir(resolved):
             discovered.update(directory_inputs(resolved))
@@ -388,27 +401,32 @@ def discover_filelist_inputs(filelist_path, working_directory):
     include_tokens = re.compile(
         r'//[^\r\n]*|/\*.*?\*/|"(?:\\.|[^"\\])*"|(?:`include|\#\s*include)(?:\s|/\*.*?\*/)*"([^"\r\n]+)"'
         r'|\#\s*include(?:\s|/\*.*?\*/)*<([^>\r\n]+)>', re.DOTALL)
+    sorted_angle_bases = tuple(sorted(compiler_include_directories))
+    static_quoted_bases = compiler_include_directories | include_directories | {working_directory}
+    sorted_static_quoted_bases = tuple(sorted(static_quoted_bases))
     pending_sources = list(source_paths)
     parsed_sources = set()
     while pending_sources:
         source_path = pending_sources.pop()
-        if source_path in parsed_sources or not os.path.isfile(source_path):
+        if source_path in parsed_sources or not is_file(source_path):
             continue
         parsed_sources.add(source_path)
         with open(source_path, "r", encoding="utf-8", errors="surrogateescape") as source_file:
             text = source_file.read()
+        source_dir = os.path.dirname(source_path)
+        quoted_bases = (sorted_static_quoted_bases if source_dir in static_quoted_bases else
+                        (source_dir, ) + sorted_static_quoted_bases)
         for match in include_tokens.finditer(text):
             quoted_header, angle_header = match.groups()
             if quoted_header is None and angle_header is None:
                 continue
             # Compiler include paths resolve named dependencies only. Walking
             # them recursively would inventory unrelated SDK/system headers.
-            bases = compiler_include_directories
-            if quoted_header is not None:
-                bases = bases | include_directories | {os.path.dirname(source_path), working_directory}
-            for base in sorted(bases):
-                header = add_path(quoted_header or angle_header, base)
-                if os.path.isfile(header):
+            target_header = quoted_header or angle_header
+            bases = quoted_bases if quoted_header is not None else sorted_angle_bases
+            for base in bases:
+                header = add_path(target_header, base)
+                if is_file(header) and header not in parsed_sources:
                     pending_sources.append(header)
 
     return sorted(discovered)

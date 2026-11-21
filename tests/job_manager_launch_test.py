@@ -1633,11 +1633,23 @@ class JobManagerLaunchTest(unittest.TestCase):
         runner = SubprocessJobRunner.__new__(SubprocessJobRunner)
         runner._process_group_id = 456
 
-        with mock.patch.object(runner, "_process_group_has_live_member", return_value=False), \
+        with mock.patch.object(runner, "_process_group_has_live_member", return_value=False) as scan_proc, \
              mock.patch("lib.job_lib.os.killpg") as kill_group:
             self.assertFalse(runner._process_group_exists())
 
-        kill_group.assert_not_called()
+        kill_group.assert_called_once_with(456, 0)
+        scan_proc.assert_called_once_with(456)
+
+    def test_exited_process_group_skips_proc_scan(self):
+        runner = SubprocessJobRunner.__new__(SubprocessJobRunner)
+        runner._process_group_id = 456
+
+        with mock.patch.object(runner, "_process_group_has_live_member") as scan_proc, \
+             mock.patch("lib.job_lib.os.killpg", side_effect=ProcessLookupError) as kill_group:
+            self.assertFalse(runner._process_group_exists())
+
+        kill_group.assert_called_once_with(456, 0)
+        scan_proc.assert_not_called()
 
     def test_successful_shell_with_background_processes_is_failed_and_reaped(self):
         runner = SubprocessJobRunner.__new__(SubprocessJobRunner)
@@ -2009,6 +2021,48 @@ class JobManagerLaunchTest(unittest.TestCase):
                     header = rv_utils.get_report_header(rcfg)
                 self.assertEqual("bench", header["project_name"])
                 self.assertEqual(expected, header["commit"])
+
+    def test_add_jobs_batch_preserves_priority_order(self):
+        rcfg = SimpleNamespace(options=SimpleNamespace(timeout=1), log=_Logger())
+        manager = JobManager.__new__(JobManager)
+        manager.log = _Logger()
+        manager._condition = threading.Condition()
+        manager._todo = []
+        manager._skipped = []
+        manager._done_grace_exit = False
+        manager._run_jobs_thread_active = True
+        low, high, mid = [Job(rcfg, name) for name in ("low", "high", "mid")]
+        low.priority = 1
+        high.priority = 10
+        mid.priority = 5
+        manager.add_jobs([high, low, mid])
+        self.assertEqual([low, mid, high], manager._todo)
+
+    def test_dynamic_args_caches_parsed_file_and_returns_isolated_copies(self):
+        with tempfile.TemporaryDirectory() as directory:
+            proj_dir = Path(directory)
+            args_file = proj_dir / "bazel-bin" / "pkg" / "my_test_dynamic_args.py"
+            args_file.parent.mkdir(parents=True)
+            args_file.write_text("{'sim_opts': {'+A': '1'}}", encoding="utf-8")
+            job = BazelTestCfgJob.__new__(BazelTestCfgJob)
+            job.rcfg = SimpleNamespace(proj_dir=str(proj_dir))
+            job.bazel_target = "//pkg:my_test"
+
+            original_open = open
+            open_calls = []
+
+            def counting_open(path, *args, **kwargs):
+                if str(path) == str(args_file):
+                    open_calls.append(path)
+                return original_open(path, *args, **kwargs)
+
+            with mock.patch("builtins.open", side_effect=counting_open):
+                first = job.dynamic_args("//pkg:my_test")
+                first["sim_opts"]["+MUTATED"] = "2"
+                second = job.dynamic_args("//pkg:my_test")
+
+            self.assertEqual(1, len(open_calls))
+            self.assertEqual({"+A": "1"}, second["sim_opts"])
 
 
 if __name__ == "__main__":

@@ -21,9 +21,17 @@ trap _unit_test_on_exit EXIT
 work_dir="${TEST_TMPDIR:-${TMPDIR:-/tmp}}/rules_verilog_${BASHPID}"
 mkdir -p "$work_dir"
 
+vcs_make_jobs="${LSB_DJOB_NUMPROC:-${SLURM_CPUS_PER_TASK:-$(nproc 2>/dev/null || echo 1)}}"
+vcs_job_args=()
+if [[ "$vcs_make_jobs" =~ ^[0-9]+$ ]] && (( vcs_make_jobs > 1 )); then
+    (( vcs_make_jobs > 4 )) && vcs_make_jobs=4
+    vcs_job_args=("-j${vcs_make_jobs}")
+fi
+
 simv="$work_dir/simv"
 {SIMULATOR_COMMAND} \
     -full64 \
+    "${vcs_job_args[@]}" \
     -file "{COMPILE_ARGS_FILE}" \
     -debug_access+r+w+f \
     -Mdir="$work_dir/csrc" \

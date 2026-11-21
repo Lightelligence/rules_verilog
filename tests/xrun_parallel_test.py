@@ -209,6 +209,67 @@ class XrunParallelTest(unittest.TestCase):
         paths = [call.args[0] for call in job.acquire_shared_runtime_lock.call_args_list]
         self.assertIn(os.path.normcase(os.path.realpath(job.cov_work_dir)), paths)
 
+    def test_xcelium_imc_html_is_opt_in_and_report_merges_in_one_session(self):
+        from unittest.mock import patch
+        from lib.simulators.xcelium import XceliumSimulator
+
+        with tempfile.TemporaryDirectory() as root:
+            options = SimpleNamespace(
+                coverage='A',
+                report=True,
+                xrun_imc_html=False,
+                covfile='cov.ccf',
+                covfile_was_explicit=False,
+                xprop=None,
+                mce=False,
+                msie=None,
+                msie_prim=None,
+                msie_href=None,
+                msie_incr=None,
+                emulator='',
+                waves=None,
+                rtl_defines=[],
+            )
+            rcfg = SimpleNamespace(regression_dir=root, proj_dir=root, deferred_messages=[])
+            backend = XceliumSimulator(options, rcfg, None)
+            job = SimpleNamespace(
+                name='sys_tb',
+                cov_work_dir=None,
+                bazel_runfiles_main=root,
+                tb_options={},
+                acquire_shared_runtime_lock=lambda _p: None,
+            )
+            backend.generate_compile_options(job)
+            merge_tcl = Path(job.cov_work_dir, 'merge_exec.tcl').read_text(encoding='utf-8')
+            report_tcl = Path(job.cov_work_dir, 'imc_report.tcl').read_text(encoding='utf-8')
+            self.assertNotIn('report -html', report_tcl)
+            self.assertIn('coverage_code.txt', merge_tcl)
+            self.assertIn('coverage_functional.txt', merge_tcl)
+
+            def fake_merge(_cmd, **_kwargs):
+                Path(job.merged_coverage_dir).mkdir(parents=True, exist_ok=True)
+                Path(job.coverage_code_report).write_text(
+                    'Metric Overall Block Statement Branch Expression FSM Toggle Assertion\n'
+                    'Cumulative 82.00 1.00 80.00 60.00 70.00 100.00 90.00 95.00\n',
+                    encoding='utf-8',
+                )
+                Path(job.coverage_functional_report).write_text(
+                    'Metric Overall CoverGroup\nCumulative 76.00 76.00\n',
+                    encoding='utf-8',
+                )
+                return SimpleNamespace(returncode=0, stdout='', stderr='')
+
+            with patch('lib.simulators.xcelium.run_bounded_process', side_effect=fake_merge) as run:
+                self.assertFalse(backend.run_report_coverage_merge({'//pkg:sys_tb': job}))
+                metrics = backend.collect_coverage_data({'//pkg:sys_tb': job})['sys_tb']
+                self.assertEqual(1, run.call_count)
+            self.assertEqual('82.00%', metrics['vendor_score'])
+            self.assertEqual('76.00%', metrics['cf']['Overall'])
+
+            options.xrun_imc_html = True
+            backend.generate_compile_options(job)
+            self.assertIn('report -html', Path(job.cov_work_dir, 'imc_report.tcl').read_text(encoding='utf-8'))
+
 
 if __name__ == "__main__":
     unittest.main()

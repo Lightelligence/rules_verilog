@@ -1,7 +1,9 @@
 # lib/simulators/vcs.py
+from concurrent.futures import ThreadPoolExecutor
 import json
 import hashlib
 import html
+import mmap
 import os
 import stat
 import logging
@@ -36,6 +38,12 @@ _VCS_DEBUG_ACCESS_FLAGS = {
     "none": "",
 }
 _MAX_BENIGN_MAKE_CLOCK_SKEW_SECONDS = 0.1
+_MAKE_CLOCK_SKEW_PROBE_RE = re.compile(rb"(?i)modification time|clock skew")
+_FUTURE_MTIME_RE = re.compile(r"(?i)\bmake(?:\[\d+\])?:\s*warning:\s*file .+ has modification time "
+                              r"([0-9]+(?:\.[0-9]+)?)\s+s in the(?:\s+future\b|(?P<continued>\s*\\\s*$))")
+_FUTURE_MTIME_CONTINUATION_RE = re.compile(r"(?i)^\s*future\b")
+_CLOCK_SKEW_RE = re.compile(
+    r"(?i)\bmake(?:\[\d+\])?:\s*warning:\s*clock skew detected\.\s*your build may be incomplete\.")
 
 # Sentinel for "this cached value has not been resolved yet". None is a real
 # result for both partcomp and csrc job counts (meaning "do not pass a flag"),
@@ -222,8 +230,6 @@ class VcsSimulator(SimulatorInterface):
         jobs = []
         if self.options.ico:
             ico_init_job = IcoInitJob(self.rcfg, self)
-            for vcomp_job in vcomp_jobs.values():
-                ico_init_job.add_dependency(vcomp_job)
             for _, tests in self.rcfg.all_vcomp.values():
                 for test in tests:
                     test.add_dependency(ico_init_job)
@@ -869,78 +875,95 @@ class VcsSimulator(SimulatorInterface):
         vcomp_job.coverage_graded_tests = graded
         self.rcfg.deferred_messages.append("Graded VCS tests: {}".format(graded))
 
+    def _run_single_report_coverage_merge(self, label, job, incremental, signature):
+        job.coverage_merge_succeeded = False
+        job.coverage_merge_metrics = {}
+        work = job
+        started = time.perf_counter()
+        status = getattr(job, "jobstatus", None)
+        if incremental and (getattr(job, "coverage_cleanup_failed", False) or
+                            (status is not None and not status.successful)):
+            log.error("Incremental VCS coverage blocked after compilation or data cleanup failed for %s", job)
+            job.coverage_merge_metrics["coverage_total_duration_s"] = time.perf_counter() - started
+            return True, None
+        deferred_message = None
+        failed = False
+        try:
+            with vcs_coverage.merge_lock(self.rcfg.regression_dir, str(job.name)):
+                if incremental:
+                    with vcs_coverage.CoverageUpdate(job, self.rcfg.regression_dir, signature) as update:
+                        work = update.job
+                        prepare_duration = time.perf_counter() - started
+                        if update.reuse:
+                            log.info("No new VCS coverage datasets for %s; retaining the previous generation", job.name)
+                            work.coverage_merge_succeeded = True
+                        else:
+                            self._render_coverage_merge(work)
+                            merge_failed = self._run_coverage_merges({label: work})
+                            work.coverage_merge_metrics["coverage_state_prepare_duration_s"] = prepare_duration
+                            if merge_failed:
+                                job.coverage_merge_metrics = work.coverage_merge_metrics
+                                return True, None
+                            with self._coverage_phase(work, "coverage_publish_duration_s"):
+                                vcs_coverage.write_json(vcs_coverage.history_path(work), work.coverage_history_data)
+                                update.publish()
+                        work.coverage_merge_metrics["coverage_state_prepare_duration_s"] = prepare_duration
+                        job.coverage_merge_metrics = work.coverage_merge_metrics
+                        job.coverage_merge_metrics.update(
+                            added_dataset_count=len(work.coverage_history_data["added_tests"])
+                            if not update.reuse else 0,
+                            duplicate_dataset_count=len(update.current["datasets"]) -
+                            (len(work.coverage_history_data["added_tests"]) if not update.reuse else 0))
+                        job.coverage_view_script_path = os.path.join(self.rcfg.regression_dir,
+                                                                     "{}__run_coverage.sh".format(job.name))
+                else:
+                    history_path = vcs_coverage.history_path(job) if getattr(job, "merged_coverage_dir", None) else None
+                    if history_path and os.path.lexists(history_path):
+                        os.unlink(history_path)
+                    if self._run_coverage_merges({label: job}):
+                        return True, None
+                    with self._coverage_phase(job, "coverage_history_write_duration_s"):
+                        history = vcs_coverage.make_history(job, signature)
+                        if history is not None and history_path:
+                            vcs_coverage.write_json(history_path, history)
+                job.coverage_merge_succeeded = True
+                deferred_message = "Open VCS coverage: {} (report: {} --report)".format(
+                    job.coverage_view_script_path, job.coverage_view_script_path)
+        except (OSError, ValueError, TypeError, subprocess.TimeoutExpired) as exc:
+            job.coverage_merge_succeeded = False
+            job.coverage_merge_metrics = work.coverage_merge_metrics
+            log.error("VCS coverage update failed for %s: %s", job.name, exc)
+            failed = True
+        finally:
+            job.coverage_merge_metrics["coverage_total_duration_s"] = time.perf_counter() - started
+        return failed, deferred_message
+
     def run_report_coverage_merge(self, vcomp_jobs):
         if not self.options.cm:
             return False
-        failed = False
         incremental = getattr(self.options, "vcs_coverage_incremental", False)
         signature = {
             key: getattr(self.options, key, None)
             for key in ("cm", "vcs_cm_line", "vcs_cm_report", "vcs_cm_cond", "vcs_cm_tgl")
         }
-        for label, job in vcomp_jobs.items():
-            job.coverage_merge_succeeded = False
-            job.coverage_merge_metrics = {}
-            work = job
-            started = time.perf_counter()
-            status = getattr(job, "jobstatus", None)
-            if incremental and (getattr(job, "coverage_cleanup_failed", False) or
-                                (status is not None and not status.successful)):
-                log.error("Incremental VCS coverage blocked after compilation or data cleanup failed for %s", job)
+        items = list(vcomp_jobs.items())
+        if len(items) <= 1:
+            results = [
+                self._run_single_report_coverage_merge(label, job, incremental, signature) for label, job in items
+            ]
+        else:
+            workers = min(len(items), max(1, os.cpu_count() or 1))
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                results = list(
+                    pool.map(
+                        lambda item: self._run_single_report_coverage_merge(item[0], item[1], incremental, signature),
+                        items))
+        failed = False
+        for item_failed, message in results:
+            if item_failed:
                 failed = True
-                continue
-            try:
-                with vcs_coverage.merge_lock(self.rcfg.regression_dir, str(job.name)):
-                    if incremental:
-                        with vcs_coverage.CoverageUpdate(job, self.rcfg.regression_dir, signature) as update:
-                            work = update.job
-                            prepare_duration = time.perf_counter() - started
-                            if update.reuse:
-                                log.info("No new VCS coverage datasets for %s; retaining the previous generation",
-                                         job.name)
-                                work.coverage_merge_succeeded = True
-                            else:
-                                self._render_coverage_merge(work)
-                                merge_failed = self._run_coverage_merges({label: work})
-                                work.coverage_merge_metrics["coverage_state_prepare_duration_s"] = prepare_duration
-                                if merge_failed:
-                                    failed = True
-                                    job.coverage_merge_metrics = work.coverage_merge_metrics
-                                    continue
-                                with self._coverage_phase(work, "coverage_publish_duration_s"):
-                                    vcs_coverage.write_json(vcs_coverage.history_path(work), work.coverage_history_data)
-                                    update.publish()
-                            work.coverage_merge_metrics["coverage_state_prepare_duration_s"] = prepare_duration
-                            job.coverage_merge_metrics = work.coverage_merge_metrics
-                            job.coverage_merge_metrics.update(
-                                added_dataset_count=len(work.coverage_history_data["added_tests"])
-                                if not update.reuse else 0,
-                                duplicate_dataset_count=len(update.current["datasets"]) -
-                                (len(work.coverage_history_data["added_tests"]) if not update.reuse else 0))
-                            job.coverage_view_script_path = os.path.join(self.rcfg.regression_dir,
-                                                                         "{}__run_coverage.sh".format(job.name))
-                    else:
-                        history_path = vcs_coverage.history_path(job) if getattr(job, "merged_coverage_dir",
-                                                                                 None) else None
-                        if history_path and os.path.lexists(history_path):
-                            os.unlink(history_path)
-                        if self._run_coverage_merges({label: job}):
-                            failed = True
-                            continue
-                        with self._coverage_phase(job, "coverage_history_write_duration_s"):
-                            history = vcs_coverage.make_history(job, signature)
-                            if history is not None and history_path:
-                                vcs_coverage.write_json(history_path, history)
-                    job.coverage_merge_succeeded = True
-                    self.rcfg.deferred_messages.append("Open VCS coverage: {} (report: {} --report)".format(
-                        job.coverage_view_script_path, job.coverage_view_script_path))
-            except (OSError, ValueError, TypeError, subprocess.TimeoutExpired) as exc:
-                job.coverage_merge_succeeded = False
-                job.coverage_merge_metrics = work.coverage_merge_metrics
-                log.error("VCS coverage update failed for %s: %s", job.name, exc)
-                failed = True
-            finally:
-                job.coverage_merge_metrics["coverage_total_duration_s"] = time.perf_counter() - started
+            if message:
+                self.rcfg.deferred_messages.append(message)
         return failed
 
     def _run_coverage_merges(self, vcomp_jobs):
@@ -993,6 +1016,7 @@ class VcsSimulator(SimulatorInterface):
                     vcomp_job.coverage_merge_log = merge_log
                     # Stream tool output to disk so cancellation keeps diagnostics
                     # and large reports do not accumulate console output in RAM.
+                    model_validated = False
                     with self._coverage_phase(vcomp_job, "urg_duration_s"), open(merge_log, "w",
                                                                                  encoding="utf-8") as output:
                         if profile == "phases" or report_format == "none":
@@ -1008,15 +1032,18 @@ class VcsSimulator(SimulatorInterface):
                                 if result.returncode != 0:
                                     break
                                 if phase == "merge":
-                                    self._validate_coverage_model(getattr(vcomp_job, "merged_coverage_dir", None))
+                                    with self._coverage_phase(vcomp_job, "model_validation_duration_s"):
+                                        self._validate_coverage_model(getattr(vcomp_job, "merged_coverage_dir", None))
+                                    model_validated = True
                         else:
                             result = run_bounded_process(["bash", merge_script],
                                                          stdout=output,
                                                          stderr=subprocess.STDOUT,
                                                          text=True)
                     if result.returncode == 0:
-                        with self._coverage_phase(vcomp_job, "model_validation_duration_s"):
-                            self._validate_coverage_model(getattr(vcomp_job, "merged_coverage_dir", None))
+                        if not model_validated:
+                            with self._coverage_phase(vcomp_job, "model_validation_duration_s"):
+                                self._validate_coverage_model(getattr(vcomp_job, "merged_coverage_dir", None))
                         if report_format != "none":
                             with self._coverage_phase(vcomp_job, "dashboard_parse_duration_s"):
                                 report_dir = getattr(vcomp_job, "coverage_report_dir", None)
@@ -1309,22 +1336,17 @@ source annotation and hierarchy details.</p></html>
         return {'warning_regex': r"(?i)^(?:\s*(?:Warning|Error)(?:-|\s*:)|.+:\s*(?:warning|error):).*"}
 
     def get_ignored_compile_warning_line_numbers(self, log_path):
-        # Pre-screen with cheap substring checks: the common case (no make
-        # clock-skew warnings) avoids the full regex pass and early-exits.
+        # Pre-screen with a zero-copy mmap probe for specific make clock-skew
+        # markers so large VCS logs skip decoding and line-by-line regex scans.
         try:
             with open(log_path, 'rb') as probe:
-                content = probe.read()
+                if os.fstat(probe.fileno()).st_size == 0:
+                    return set()
+                with mmap.mmap(probe.fileno(), 0, access=mmap.ACCESS_READ) as data:
+                    if _MAKE_CLOCK_SKEW_PROBE_RE.search(data) is None:
+                        return set()
         except (OSError, IOError):
             return set()
-        content = content.lower()
-        if b"make" not in content or b"warning" not in content:
-            return set()
-        # At least one "make" and one "warning" → run the regex pass.
-        future_mtime_regex = re.compile(r"(?i)\bmake(?:\[\d+\])?:\s*warning:\s*file .+ has modification time "
-                                        r"([0-9]+(?:\.[0-9]+)?)\s+s in the(?:\s+future\b|(?P<continued>\s*\\\s*$))")
-        future_mtime_continuation_regex = re.compile(r"(?i)^\s*future\b")
-        clock_skew_regex = re.compile(r"(?i)\bmake(?:\[\d+\])?:\s*warning:\s*clock skew detected\.\s*"
-                                      r"your build may be incomplete\.")
         benign_future_mtime_lines = set()
         clock_skew_summary_lines = set()
         non_benign_future_mtime = False
@@ -1334,14 +1356,14 @@ source annotation and hierarchy details.</p></html>
             for line_number, line in enumerate(logp, start=1):
                 if continued_future_mtime is not None:
                     warning_line_number, skew_seconds = continued_future_mtime
-                    if future_mtime_continuation_regex.search(line):
+                    if _FUTURE_MTIME_CONTINUATION_RE.search(line):
                         if skew_seconds < _MAX_BENIGN_MAKE_CLOCK_SKEW_SECONDS:
                             benign_future_mtime_lines.add(warning_line_number)
                         else:
                             non_benign_future_mtime = True
                     continued_future_mtime = None
 
-                match = future_mtime_regex.search(line)
+                match = _FUTURE_MTIME_RE.search(line)
                 if match:
                     skew_seconds = float(match.group(1))
                     if match.group("continued") is not None:
@@ -1350,7 +1372,7 @@ source annotation and hierarchy details.</p></html>
                         benign_future_mtime_lines.add(line_number)
                     else:
                         non_benign_future_mtime = True
-                if clock_skew_regex.search(line):
+                if _CLOCK_SKEW_RE.search(line):
                     clock_skew_summary_lines.add(line_number)
 
         if not benign_future_mtime_lines:

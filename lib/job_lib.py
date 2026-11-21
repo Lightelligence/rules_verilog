@@ -3,8 +3,9 @@
 
 ################################################################################
 # standard lib imports
-import bisect
 import ast
+import bisect
+import copy
 import datetime
 import enum
 import heapq
@@ -447,6 +448,12 @@ class SubprocessJobRunner(JobRunner):
                 return True
         except (OSError, ValueError, IndexError):
             pass
+        try:
+            os.killpg(group_id, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            pass
         return bool(self._process_group_has_live_member(group_id, self._process_group_id))
 
     def _signal_sidecar_process_groups(self, sig):
@@ -466,13 +473,15 @@ class SubprocessJobRunner(JobRunner):
         return False
 
     def _process_group_exists(self):
-        live_member = self._process_group_has_live_member(self._process_group_id)
-        if live_member is not None:
-            return live_member
         try:
             os.killpg(self._process_group_id, 0)
         except ProcessLookupError:
             return False
+        except PermissionError:
+            pass
+        live_member = self._process_group_has_live_member(self._process_group_id)
+        if live_member is not None:
+            return live_member
         return True
 
     def _managed_process_groups_exist(self):
@@ -483,11 +492,12 @@ class SubprocessJobRunner(JobRunner):
             time.sleep(0.05)
         return not self._managed_process_groups_exist()
 
-    def _close_output_streams(self):
+    def _close_output_streams(self, sidecars_verified_absent=False):
         stderr_fp = getattr(self, "stderr_fp", None)
         if stderr_fp and not stderr_fp.closed:
             stderr_fp.close()
-        if not getattr(self, "shutdown_incomplete", False) and not self._sidecar_process_group_exists():
+        if not getattr(self, "shutdown_incomplete", False) and (sidecars_verified_absent
+                                                                or not self._sidecar_process_group_exists()):
             path = getattr(self.job, "sidecar_process_groups_path", None)
             if path:
                 try:
@@ -583,7 +593,7 @@ class SubprocessJobRunner(JobRunner):
         if self._p.poll() is not None:
             now = datetime.datetime.now()
             if not self._managed_process_groups_exist():
-                self._close_output_streams()
+                self._close_output_streams(sidecars_verified_absent=True)
                 return True
             if not self._timed_out and not self._orphaned_process_group:
                 self._orphaned_process_group = True
@@ -878,25 +888,21 @@ class JobManager():
                 self._launch_job(job_to_launch)
                 continue
 
-            completed_job = None
-            for job in active_jobs:
-                if job.job_lib.check_for_done():
-                    completed_job = job
-                    break
-
-            if completed_job is not None:
-                if getattr(completed_job.job_lib, "shutdown_incomplete", False):
-                    self._record_incomplete_shutdown(completed_job)
-                    continue
-                with self._condition:
-                    if not self._run_jobs_thread_active:
-                        return
-                    if completed_job not in self._active:
+            completed_jobs = [job for job in active_jobs if job.job_lib.check_for_done()]
+            if completed_jobs:
+                for completed_job in completed_jobs:
+                    if getattr(completed_job.job_lib, "shutdown_incomplete", False):
+                        self._record_incomplete_shutdown(completed_job)
                         continue
-                    self._active.remove(completed_job)
-                    self._finalizing.append(completed_job)
-                    self._condition.notify_all()
-                self._complete_job(completed_job)
+                    with self._condition:
+                        if not self._run_jobs_thread_active:
+                            return
+                        if completed_job not in self._active:
+                            continue
+                        self._active.remove(completed_job)
+                        self._finalizing.append(completed_job)
+                        self._condition.notify_all()
+                    self._complete_job(completed_job)
                 continue
 
             now = datetime.datetime.now()
@@ -929,24 +935,22 @@ class JobManager():
 
     def _move_todo_to_ready_locked(self):
         self._print_debug_state_locked()
-        jobs_that_advanced_state = []
+        if not self._todo:
+            return
+        remaining_todo = []
         newly_ready = []
-        for i, job in enumerate(self._todo):
-            if len(job._dependencies) == 0:
+        for job in self._todo:
+            if not job._dependencies:
                 # There are no dependencies
                 newly_ready.append(job)
-                jobs_that_advanced_state.append(i)
             else:
-                all_dependencies_are_done = all([dep.jobstatus.completed for dep in job._dependencies])
-                if not all_dependencies_are_done:
+                if not all(dep.jobstatus.completed for dep in job._dependencies):
+                    remaining_todo.append(job)
                     continue
-                all_dependencies_passed = all([dep.jobstatus.successful for dep in job._dependencies])
-                if all_dependencies_passed:
+                if all(dep.jobstatus.successful for dep in job._dependencies):
                     newly_ready.append(job)
-                    jobs_that_advanced_state.append(i)
                 else:
                     self.log.error("Skipping job %s due dependency failure", job)
-                    jobs_that_advanced_state.append(i)
                     self._skipped.append(job)
                     job.jobstatus = JobStatus.SKIPPED
 
@@ -957,9 +961,8 @@ class JobManager():
             incoming = sorted(reversed(newly_ready), key=lambda queued: -queued.priority)
             self._ready = list(heapq.merge(incoming, self._ready, key=lambda queued: -queued.priority))
 
-        # Can't iterate and remove in list at the same time easily
-        for i in reversed(jobs_that_advanced_state):
-            self._todo.pop(i)
+        if len(remaining_todo) != len(self._todo):
+            self._todo = remaining_todo
 
     def _can_launch_locked(self, job):
         running_jobs = [active for active in self._active + self._launching if active is not job]
@@ -982,14 +985,60 @@ class JobManager():
 
     def _take_ready_job_locked(self):
         self._print_debug_state_locked()
-        if self._paused:
+        if self._paused or not self._ready:
             return None
+        has_preparation = False
+        compute_count = 0
+        has_non_parallel_compute = False
+        active_resources = set()
+        for active in self._active:
+            if active.exclusive_resource is not None:
+                active_resources.add(active.exclusive_resource)
+            if active.execution_mode == "preparation":
+                has_preparation = True
+            else:
+                compute_count += 1
+                if active.execution_mode != "parallel":
+                    has_non_parallel_compute = True
+        for active in self._launching:
+            if active.exclusive_resource is not None:
+                active_resources.add(active.exclusive_resource)
+            if active.execution_mode == "preparation":
+                has_preparation = True
+            else:
+                compute_count += 1
+                if active.execution_mode != "parallel":
+                    has_non_parallel_compute = True
+        for active in self._finalizing:
+            if active.exclusive_resource is not None:
+                active_resources.add(active.exclusive_resource)
+
+        can_launch_preparation = not has_preparation
+        can_launch_exclusive = compute_count == 0
+        can_launch_parallel = not has_non_parallel_compute and compute_count < self.active_job_limit
+        if not (can_launch_preparation or can_launch_exclusive or can_launch_parallel):
+            return None
+
         for index in range(len(self._ready) - 1, -1, -1):
             job = self._ready[index]
-            if self._can_launch_locked(job):
-                self._ready.pop(index)
-                self._launching.append(job)
-                return job
+            resource = job.exclusive_resource
+            if resource is not None and resource in active_resources:
+                continue
+            mode = job.execution_mode
+            if mode == "preparation":
+                if not can_launch_preparation:
+                    continue
+            elif mode == "exclusive":
+                if not can_launch_exclusive:
+                    continue
+            elif mode == "parallel":
+                if not can_launch_parallel:
+                    continue
+            else:
+                raise ValueError("Unknown execution mode '{}'".format(mode))
+            self._ready.pop(index)
+            self._launching.append(job)
+            return job
         return None
 
     def _queue_ready_job_locked(self, job):
@@ -1186,6 +1235,23 @@ class JobManager():
                 bisect.insort_right(self._todo, job)
             else:
                 self._skipped.append(job)
+            self._condition.notify_all()
+
+    def add_jobs(self, jobs):
+        jobs = list(jobs)
+        for job in jobs:
+            if not isinstance(job, Job):
+                raise ValueError("Tried to add a non-Job job {} of type {}".format(job, type(job)))
+        if not jobs:
+            return
+        with self._condition:
+            if not self._done_grace_exit and self._run_jobs_thread_active:
+                if not self._todo:
+                    self._todo = sorted(jobs)
+                else:
+                    self._todo = list(heapq.merge(self._todo, sorted(jobs)))
+            else:
+                self._skipped.extend(jobs)
             self._condition.notify_all()
 
     def wait(self):
@@ -1492,13 +1558,23 @@ class BazelTestCfgJob(Job):
 
     def dynamic_args(self, target=None):
         """Additional arugmuents to specific to each simulation"""
-        path, target = (target or self.bazel_target).split(":")
+        target_label = target or self.bazel_target
+        cache = getattr(self, "_dynamic_args_cache", None)
+        if cache is None:
+            cache = {}
+            self._dynamic_args_cache = cache
+        cached = cache.get(target_label)
+        if cached is not None:
+            return copy.deepcopy(cached)
+        path, name = target_label.split(":")
         path_to_dynamic_args_files = os.path.join(self.rcfg.proj_dir, "bazel-bin", path[2:],
-                                                  "{}_dynamic_args.py".format(target))
+                                                  "{}_dynamic_args.py".format(name))
         with open(path_to_dynamic_args_files, 'r') as filep:
             content = filep.read()
             dynamic_args = ast.literal_eval(content)
-        return normalize_test_runtime_options(dynamic_args)
+        normalized = normalize_test_runtime_options(dynamic_args)
+        cache[target_label] = normalized
+        return copy.deepcopy(normalized)
 
     def __repr__(self):
         return 'Bazel({} test cfgs)'.format(len(self.bazel_targets))

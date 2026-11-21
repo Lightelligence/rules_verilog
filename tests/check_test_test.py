@@ -216,6 +216,25 @@ class CheckTestFastPathTest(unittest.TestCase):
         self.assertEqual([], errors)
         self.assertTrue(finished)
 
+    def test_get_file_tail_seeks_across_multiple_chunks(self):
+        lines = ["line {:06d} {}".format(index, "x" * 80) + "\n" for index in range(2500)]
+        path = self._log("".join(lines))
+
+        tail = list(check_test.get_file_tail(path, 15))
+
+        self.assertEqual(lines[-15:], tail)
+        self.assertEqual([], list(check_test.get_file_tail(self._log(""), 15)))
+
+    def test_pattern_set_matches_combines_safe_patterns_and_keeps_inline_flags(self):
+        patterns = check_test.compile_patterns([r"ALPHA", r"BETA", r"(?i)gamma", r"^(PASS) \1$"])
+
+        self.assertEqual(3, len(patterns._fast_patterns))
+        self.assertTrue(patterns.matches("contains ALPHA\n"))
+        self.assertTrue(patterns.matches("contains BETA\n"))
+        self.assertTrue(patterns.matches("contains GAMMA\n"))
+        self.assertTrue(patterns.matches("PASS PASS\n"))
+        self.assertFalse(patterns.matches("PASS FAIL\n"))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,4 +1,5 @@
 # lib/simulators/xcelium.py
+from concurrent.futures import ThreadPoolExecutor
 import os
 import stat
 import glob
@@ -228,8 +229,7 @@ class XceliumSimulator(SimulatorInterface):
                                "msie_incremental_deps on {} and rebuild with Bazel.".format(
                                    inputs_path, vcomp_job.bazel_vcomp_target))
 
-        digest = hashlib.sha256()
-        count = 0
+        entries = []
         with open(inputs_path, "r", encoding="utf-8") as filep:
             for line in filep:
                 kind, _, relative_path = line.rstrip("\n").partition("\t")
@@ -239,14 +239,22 @@ class XceliumSimulator(SimulatorInterface):
                     vcomp_job.bazel_runfiles_main, relative_path)
                 if not os.path.isfile(path):
                     raise RuntimeError("MSIE primary input is missing: {}".format(path))
-                digest.update(kind.encode("utf-8"))
-                digest.update(b"\0")
-                digest.update(relative_path.encode("utf-8"))
-                digest.update(b"\0")
-                digest.update((_sha256_file(path) or "missing").encode("ascii"))
-                digest.update(b"\0")
-                count += 1
-        return digest.hexdigest(), count
+                entries.append((kind, relative_path, path))
+        if len(entries) > 1:
+            workers = min(8, len(entries))
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                file_hashes = list(pool.map(_sha256_file, (entry[2] for entry in entries)))
+        else:
+            file_hashes = [_sha256_file(entry[2]) for entry in entries]
+        digest = hashlib.sha256()
+        for (kind, relative_path, _path), file_hash in zip(entries, file_hashes):
+            digest.update(kind.encode("utf-8"))
+            digest.update(b"\0")
+            digest.update(relative_path.encode("utf-8"))
+            digest.update(b"\0")
+            digest.update((file_hash or "missing").encode("ascii"))
+            digest.update(b"\0")
+        return digest.hexdigest(), len(entries)
 
     def _effective_covfile(self, vcomp_job):
         if not self.options.coverage:
@@ -304,7 +312,9 @@ class XceliumSimulator(SimulatorInterface):
                     path))
         with open(path, "r", encoding="utf-8") as filep:
             actual = json.load(filep)
-        expected = self._msie_identity(vcomp_job)
+        expected = getattr(vcomp_job, "msie_manifest_identity", None)
+        if expected is None:
+            expected = self._msie_identity(vcomp_job)
         if actual != expected:
             changed = sorted(key for key in set(actual) | set(expected) if actual.get(key) != expected.get(key))
             raise RuntimeError("MSIE primary is incompatible with this incremental build; changed identity fields: {}. "
@@ -466,19 +476,27 @@ class XceliumSimulator(SimulatorInterface):
             merge_exec_tcl = os.path.join(vcomp_job.cov_work_dir, "merge_exec.tcl")
             imc_report_tcl = os.path.join(vcomp_job.cov_work_dir, "imc_report.tcl")
             merged_output = os.path.join(vcomp_job.cov_work_dir, "merged_db")
-            with open(merge_exec_tcl, 'w') as filep:
-                filep.write("merge -initial_model union_all -out {} -overwrite {}".format(
-                    _tcl_quote(merged_output), _tcl_quote(os.path.join(vcomp_job.cov_work_dir, "scope", "*"))))
             report_output = os.path.join(vcomp_job.cov_work_dir, "imc_report")
             code_report = os.path.join(vcomp_job.cov_work_dir, "coverage_code.txt")
             functional_report = os.path.join(vcomp_job.cov_work_dir, "coverage_functional.txt")
+            report_commands = [
+                "load {}\n".format(_tcl_quote(merged_output)),
+                "report -summary -metrics all -all -cumulative on -out {}\n".format(_tcl_quote(code_report)),
+                "report -summary -metrics covergroup -type -all -out {}\n".format(_tcl_quote(functional_report)),
+            ]
+            if getattr(self.options, "xrun_imc_html", False):
+                report_commands.append("report -html -out {} -grading both -overwrite\n".format(
+                    _tcl_quote(report_output)))
+            merge_commands = [
+                "merge -initial_model union_all -out {} -overwrite {}\n".format(
+                    _tcl_quote(merged_output), _tcl_quote(os.path.join(vcomp_job.cov_work_dir, "scope", "*"))),
+            ]
+            if getattr(self.options, "report", False):
+                merge_commands.extend(report_commands)
+            with open(merge_exec_tcl, 'w') as filep:
+                filep.write("".join(merge_commands))
             with open(imc_report_tcl, 'w') as filep:
-                filep.write("".join([
-                    "load {}\n".format(_tcl_quote(merged_output)),
-                    "report -summary -metrics all -all -cumulative on -out {}\n".format(_tcl_quote(code_report)),
-                    "report -summary -metrics covergroup -type -all -out {}\n".format(_tcl_quote(functional_report)),
-                    "report -html -out {} -grading both -overwrite\n".format(_tcl_quote(report_output)),
-                ]))
+                filep.write("".join(report_commands))
             merge_sh = os.path.join(vcomp_job.cov_work_dir, "merge.sh")
             with open(merge_sh, 'w') as filep:
                 filep.write("".join([
@@ -667,68 +685,90 @@ class XceliumSimulator(SimulatorInterface):
         # The merge script setup is already done within generate_compile_options for XRUN/IMC
         pass
 
+    def _run_single_coverage_merge(self, vcomp):
+        vcomp.coverage_reports_generated_in_merge = False
+        log.info("Before merge: Vcomp {}.".format(vcomp))
+        cov_work_dir = getattr(vcomp, "cov_work_dir", None)
+        if not cov_work_dir:
+            log.error("XRUN coverage merge skipped for %s: coverage work directory is unavailable", vcomp)
+            return True
+        merge_exec_tcl = os.path.join(cov_work_dir, "merge_exec.tcl")
+        try:
+            result = run_bounded_process(
+                ["imc", "-exec", merge_exec_tcl, "-verbose"],
+                capture_output=True,
+                text=True,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            log.error("XRUN coverage merge could not start for %s: %s", vcomp, exc)
+            return True
+        if result.returncode != 0:
+            log.error("XRUN coverage merge failed for %s:\n%s\n%s", vcomp, result.stdout, result.stderr)
+            return True
+        if getattr(self.options, "report", False):
+            vcomp.coverage_reports_generated_in_merge = True
+        return False
+
     def run_report_coverage_merge(self, vcomp_jobs):
         if not self.options.coverage:
             return False
-        failed = False
-        for vcomp in vcomp_jobs.values():
-            log.info("Before merge: Vcomp {}.".format(vcomp))
-            cov_work_dir = getattr(vcomp, "cov_work_dir", None)
-            if not cov_work_dir:
-                log.error("XRUN coverage merge skipped for %s: coverage work directory is unavailable", vcomp)
-                failed = True
-                continue
-            merge_exec_tcl = os.path.join(cov_work_dir, "merge_exec.tcl")
-            try:
-                result = run_bounded_process(
-                    ["imc", "-exec", merge_exec_tcl, "-verbose"],
-                    capture_output=True,
-                    text=True,
-                )
-            except (OSError, subprocess.TimeoutExpired) as exc:
-                log.error("XRUN coverage merge could not start for %s: %s", vcomp, exc)
-                failed = True
-                continue
-            if result.returncode != 0:
-                log.error("XRUN coverage merge failed for %s:\n%s\n%s", vcomp, result.stdout, result.stderr)
-                failed = True
-        return failed
+        jobs = list(vcomp_jobs.values())
+        if len(jobs) <= 1:
+            return any(self._run_single_coverage_merge(vcomp) for vcomp in jobs)
+        workers = min(len(jobs), max(1, os.cpu_count() or 1))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            return any(pool.map(self._run_single_coverage_merge, jobs))
 
     def cleanup_test_coverage(self, test_job):
         path = getattr(test_job, "coverage_db_path", None)
         if path:
             shutil.rmtree(path, ignore_errors=True)
 
+    @staticmethod
+    def _collect_single_coverage_data(item):
+        vcomp, job = item
+        name = vcomp.split(":")[-1]
+        report_tcl = getattr(job, "coverage_report_tcl", None)
+        merged_coverage_dir = getattr(job, "merged_coverage_dir", None)
+        if not report_tcl or not merged_coverage_dir or not os.path.exists(merged_coverage_dir):
+            return name, aggregate_coverage_metrics({})
+        code_report = getattr(job, "coverage_code_report", None)
+        functional_report = getattr(job, "coverage_functional_report", None)
+        if (getattr(job, "coverage_reports_generated_in_merge", False) and code_report and functional_report
+                and os.path.isfile(code_report) and os.path.isfile(functional_report)):
+            metrics = parse_coverage_summary(code_report)
+            functional = parse_coverage_summary(functional_report)
+            if "CoverGroup" in functional:
+                metrics["CoverGroup"] = functional["CoverGroup"]
+            return name, aggregate_coverage_metrics(metrics)
+        try:
+            result = run_bounded_process(
+                ["imc", "-exec", report_tcl, "-verbose"],
+                capture_output=True,
+                text=True,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            log.error("IMC report generation could not start for %s: %s", job, exc)
+            return name, aggregate_coverage_metrics({})
+        if result.returncode != 0:
+            log.error("IMC report generation failed:\n%s", result.stderr)
+            metrics = {}
+        else:
+            metrics = parse_coverage_summary(code_report)
+            functional = parse_coverage_summary(functional_report)
+            if "CoverGroup" in functional:
+                metrics["CoverGroup"] = functional["CoverGroup"]
+        return name, aggregate_coverage_metrics(metrics)
+
     def collect_coverage_data(self, vcomp_jobs):
-        coverage = {}
         if not self.options.coverage:
             return {vcomp.split(":")[-1]: aggregate_coverage_metrics({}) for vcomp in vcomp_jobs}
-        for vcomp, job in vcomp_jobs.items():
-            report_tcl = getattr(job, "coverage_report_tcl", None)
-            merged_coverage_dir = getattr(job, "merged_coverage_dir", None)
-            if not report_tcl or not merged_coverage_dir or not os.path.exists(merged_coverage_dir):
-                coverage[vcomp.split(":")[-1]] = aggregate_coverage_metrics({})
-                continue
-            try:
-                result = run_bounded_process(
-                    ["imc", "-exec", report_tcl, "-verbose"],
-                    capture_output=True,
-                    text=True,
-                )
-            except (OSError, subprocess.TimeoutExpired) as exc:
-                log.error("IMC report generation could not start for %s: %s", job, exc)
-                coverage[vcomp.split(":")[-1]] = aggregate_coverage_metrics({})
-                continue
-            if result.returncode != 0:
-                log.error("IMC report generation failed:\n%s", result.stderr)
-                metrics = {}
-            else:
-                metrics = parse_coverage_summary(job.coverage_code_report)
-                functional = parse_coverage_summary(job.coverage_functional_report)
-                if "CoverGroup" in functional:
-                    metrics["CoverGroup"] = functional["CoverGroup"]
-            coverage[vcomp.split(":")[-1]] = aggregate_coverage_metrics(metrics)
-        return coverage
+        items = list(vcomp_jobs.items())
+        if len(items) <= 1:
+            return dict(self._collect_single_coverage_data(item) for item in items)
+        workers = min(len(items), max(1, os.cpu_count() or 1))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            return dict(pool.map(self._collect_single_coverage_data, items))
 
     def get_log_parsing_info(self):
         return {'warning_regex': r"\*W.*"}
