@@ -108,6 +108,24 @@ simmer -t 'sys_tb:smoke_test@1' --simulator VCS --no-compile
 simmer -t 'sys_tb:smoke_test@1' --simulator VCS --no-compile --no-bazel
 simmer -t 'sys_tb:smoke_test@1' --simulator VCS --recompile
 simmer -t 'sys_tb:*@10' --simulator VCS --simmer-profile --vcs-profile
+# Runtime time/memory profiling (run separately; writes profrpt_time / profrpt_mem)
+simmer -t 'sys_tb:smoke_test@1' --simulator VCS --vcs-simprofile time
+simmer -t 'sys_tb:smoke_test@1' --simulator VCS --vcs-simprofile mem
+```
+
+VCS Fine-Grained Parallelism (FGP):
+
+```bash
+# Auto-size FGP from LSF/Slurm allocation and test count (safe for both 1 test and sys_tb:*)
+bsub -Is -n 8 -R "span[hosts=1]" -q syn \
+  simmer -t 'sys_tb:long_test@1' --simulator VCS --fgp auto
+# Batch FGP (-fgp=num_threads:4)
+simmer -t 'sys_tb:long_test@1' --simulator VCS --fgp 4
+# FGP + FSDB waves (defaults num_fsdb_threads to N: -fgp=num_threads:4,num_fsdb_threads:4)
+simmer -t 'sys_tb:long_test@1' --simulator VCS --fgp 4 --waves hdl_top.dut
+# Override FSDB threads and enable PLI scheduling / shared-host fallback
+simmer -t 'sys_tb:long_test@1' --simulator VCS --fgp 4 --waves hdl_top.dut \
+  --fgp-fsdb-threads 2 --fgp-schedpli --fgp-allow-less-cores
 ```
 
 Wave and debug runs:
@@ -943,8 +961,29 @@ For quiet normal runs, avoid `--tool-debug`; it prints scheduler polling noise.
   `extra_runtime_runfiles`; they remain in the test runfiles but do not enter
   the compile-input fingerprint, so changing a runtime-only asset does not
   trigger VCS recompilation. Keep compile-referenced files in `extra_runfiles`.
-- Use `--fgp N` for runtime threading only after profiling; simmer reduces the
-  number of concurrent tests to account for those threads.
+- Profile simulation runtime before tuning with `--vcs-simprofile time` or
+  `--vcs-simprofile mem` (run separately so timing and memory measurements do
+  not skew each other). Simmer compiles with `-simprofile`, passes
+  `-simprofile time|mem` to `simv`, and automatically runs
+  `profrpt -view time_all|mem_all simprofile_dir -output <job_dir>/profrpt_<mode>`
+  after simulation.
+- Use `--fgp N` (or `--fgp auto`) for runtime threading only after profiling;
+  simmer reduces the number of concurrent tests to account for those threads.
+  `--fgp auto` inspects the LSF/Slurm/affinity CPU allocation and selected test
+  count: when fewer tests than allocated CPUs are run, it caps each test to at
+  most 8 cores (so `bsub -n 16` still compiles across 16 cores while a single
+  test caps at 8 cores and 2 tests run at 8 cores each; use explicit `--fgp N`
+  to override), reserves 1 core for the FGP master, sizes simulation (and
+  `--waves` FSDB) threads to fit the per-test core budget, and enables
+  `allow_less_cores`; when total tests >= allocated CPUs (e.g., `sys_tb:*` on
+  `bsub -n 8`), it disables FGP so all slots run single-core tests in parallel.
+  `--fgp` cannot be
+  combined with `--gui` (`-debug_access+reverse`). When combined with `--waves`,
+  simmer passes `num_fsdb_threads:N` by default (override with
+  `--fgp-fsdb-threads M`) and includes FSDB threads in the per-test thread
+  budget. Use `--fgp-schedpli` for PLI/DPI-heavy workloads and
+  `--fgp-allow-less-cores` on shared hosts where `N + 1` free cores may not
+  always be available.
 - Avoid waves, VPI and SmartLog in throughput regressions. The baseline
   `-debug_access+r+w+f` remains enabled because it is required by UVM HDL and
   DUT memory backdoor behavior; measure its cost on representative workloads

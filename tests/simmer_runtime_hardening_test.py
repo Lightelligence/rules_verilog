@@ -1566,5 +1566,205 @@ class SimmerRuntimeHardeningTest(unittest.TestCase):
             self.assertTrue(os.path.isfile(simmer._symlink_lock_path(job_link_path)))
 
 
+class VcsSimprofileAndFgpTest(unittest.TestCase):
+
+    def _validated(self, argv):
+        from bin.args_parser import parse_args
+        from lib.simulators.vcs_options import validate_vcs_runtime_options
+
+        options = parse_args(argv)
+        parser = SimpleNamespace(error=mock.Mock(side_effect=ValueError))
+        validate_vcs_runtime_options(options, parser)
+        return options
+
+    def _simulator(self, argv, root):
+        import jinja2
+        from lib.simulators.vcs import VcsSimulator
+
+        options = self._validated(argv)
+        rcfg = SimpleNamespace(
+            proj_dir=str(root),
+            regression_dir=str(root),
+            deferred_messages=[],
+            options=options,
+        )
+        env = jinja2.Environment(loader=jinja2.FileSystemLoader(str(REPO_ROOT / "bin" / "templates")))
+        env.filters["shell_quote"] = shlex.quote
+        return VcsSimulator(options, rcfg, env)
+
+    def test_fgp_validation_rejects_gui_and_orphan_detail_flags(self):
+        with self.assertRaises(ValueError):
+            self._validated(["--simulator", "VCS", "--fgp", "4", "--gui"])
+        with self.assertRaises(ValueError):
+            self._validated(["--simulator", "VCS", "--fgp-fsdb-threads", "2", "--waves"])
+        with self.assertRaises(ValueError):
+            self._validated(["--simulator", "VCS", "--fgp", "4", "--fgp-fsdb-threads", "2"])
+        with self.assertRaises(ValueError):
+            self._validated(["--simulator", "VCS", "--fgp", "4", "--waves", "--fgp-fsdb-threads", "0"])
+        with self.assertRaises(ValueError):
+            self._validated(["--simulator", "VCS", "--fgp-schedpli"])
+        with self.assertRaises(ValueError):
+            self._validated(["--simulator", "VCS", "--fgp-allow-less-cores"])
+
+    def test_fgp_runtime_options_and_thread_budget_cover_fsdb_schedpli_and_allow_less_cores(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            test_job = SimpleNamespace(name="smoke", target="//tb:smoke", iteration=1, job_dir=str(root / "run"))
+
+            plain = self._simulator(["--simulator", "VCS", "--fgp", "4"], root)
+            self.assertEqual(4, plain.get_scheduler_threads_per_test())
+            self.assertIn("-fgp=num_threads:4", shlex.split(plain.generate_sim_options(test_job, 7)))
+
+            with_waves = self._simulator(["--simulator", "VCS", "--fgp", "4", "--waves"], root)
+            self.assertEqual(8, with_waves.get_scheduler_threads_per_test())
+            self.assertIn("-fgp=num_threads:4,num_fsdb_threads:4",
+                          shlex.split(with_waves.generate_sim_options(test_job, 7)))
+
+            tuned = self._simulator([
+                "--simulator",
+                "VCS",
+                "--fgp",
+                "4",
+                "--waves",
+                "--fgp-fsdb-threads",
+                "3",
+                "--fgp-schedpli",
+                "--fgp-allow-less-cores",
+            ], root)
+            self.assertEqual(7, tuned.get_scheduler_threads_per_test())
+            self.assertIn("-fgp=num_threads:4,num_fsdb_threads:3,schedpli,allow_less_cores",
+                          shlex.split(tuned.generate_sim_options(test_job, 7)))
+
+    def test_fgp_auto_sizes_from_lsf_allocation_and_disables_for_wide_regressions(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            test_job = SimpleNamespace(name="smoke", target="//tb:smoke", iteration=1, job_dir=str(root / "run"))
+
+            def make_auto(argv, slots, total_tests):
+                sim = self._simulator(argv, root)
+                sim.rcfg.all_vcomp = {"//tb:tb": {"//tb:t": total_tests}}
+                sim._allocation_and_source = (slots, "LSB_MCPU_HOSTS")
+                return sim
+
+            # bsub -n 8 with 1 test -> 7 worker threads + 1 master = 8 cores.
+            single = make_auto(["--simulator", "VCS", "--fgp", "auto"], slots=8, total_tests=1)
+            self.assertTrue(single.is_fgp_enabled())
+            self.assertEqual(8, single.get_scheduler_threads_per_test())
+            self.assertIn("-fgp=num_threads:7,allow_less_cores", shlex.split(single.generate_sim_options(test_job, 7)))
+
+            # bsub -n 8 with 1 test + --waves -> 5 sim + 2 FSDB + 1 master = 8 cores.
+            single_waves = make_auto(["--simulator", "VCS", "--fgp", "auto", "--waves"], slots=8, total_tests=1)
+            self.assertTrue(single_waves.is_fgp_enabled())
+            self.assertEqual(8, single_waves.get_scheduler_threads_per_test())
+            self.assertIn("-fgp=num_threads:5,num_fsdb_threads:2,allow_less_cores",
+                          shlex.split(single_waves.generate_sim_options(test_job, 7)))
+
+            # bsub -n 8 with 2 tests -> 4-core budget per test: 3 worker + 1 master.
+            pair = make_auto(["--simulator", "VCS", "--fgp", "auto"], slots=8, total_tests=2)
+            self.assertTrue(pair.is_fgp_enabled())
+            self.assertEqual(4, pair.get_scheduler_threads_per_test())
+            self.assertIn("-fgp=num_threads:3,allow_less_cores", shlex.split(pair.generate_sim_options(test_job, 7)))
+
+            # bsub -n 16 with 1 test -> capped at 8 cores per test (7 worker + 1 master).
+            large_single = make_auto(["--simulator", "VCS", "--fgp", "auto"], slots=16, total_tests=1)
+            self.assertTrue(large_single.is_fgp_enabled())
+            self.assertEqual(8, large_single.get_scheduler_threads_per_test())
+            self.assertIn("-fgp=num_threads:7,allow_less_cores",
+                          shlex.split(large_single.generate_sim_options(test_job, 7)))
+
+            # bsub -n 16 with 1 test + --waves -> capped at 8 cores (5 sim + 2 FSDB + 1 master).
+            large_single_waves = make_auto(["--simulator", "VCS", "--fgp", "auto", "--waves"], slots=16, total_tests=1)
+            self.assertTrue(large_single_waves.is_fgp_enabled())
+            self.assertEqual(8, large_single_waves.get_scheduler_threads_per_test())
+            self.assertIn("-fgp=num_threads:5,num_fsdb_threads:2,allow_less_cores",
+                          shlex.split(large_single_waves.generate_sim_options(test_job, 7)))
+
+            # bsub -n 16 with 2 tests -> 8-core budget per test (2 x 8 = 16 cores).
+            large_pair = make_auto(["--simulator", "VCS", "--fgp", "auto"], slots=16, total_tests=2)
+            self.assertTrue(large_pair.is_fgp_enabled())
+            self.assertEqual(8, large_pair.get_scheduler_threads_per_test())
+            self.assertIn("-fgp=num_threads:7,allow_less_cores",
+                          shlex.split(large_pair.generate_sim_options(test_job, 7)))
+
+            # bsub -n 8 with 8+ tests (sys_tb:*) -> FGP disabled so 8 single-core tests run in parallel.
+            wide = make_auto(["--simulator", "VCS", "--fgp", "auto"], slots=8, total_tests=8)
+            self.assertFalse(wide.is_fgp_enabled())
+            self.assertEqual(1, wide.get_scheduler_threads_per_test())
+            self.assertFalse(
+                any(token.startswith("-fgp=") for token in shlex.split(wide.generate_sim_options(test_job, 7))))
+            vcomp_job = SimpleNamespace(name="tb", job_dir=str(root / "vcomp"), tb_options={}, compile_fingerprint={})
+            rendered = wide.env.get_template("vcs_compile_template.sh.j2").render(
+                VCOMP_DIR=str(root / "vcomp"),
+                bazel_runfiles_main=str(root),
+                bazel_compile_args=str(root / "compile.f"),
+                options=wide.options,
+                partcomp_opts="",
+                make_jobs_opts="",
+                additional_defines=[],
+                debug_mode="default",
+                xprop_cmd="",
+                cov_opts="",
+                **wide.get_compile_template_context(vcomp_job),
+            )
+            self.assertNotIn("-fgp", rendered)
+
+    def test_vcs_simprofile_compile_runtime_post_sim_and_manifest(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for mode, expected_view in (("time", "time_all"), ("mem", "mem_all")):
+                with self.subTest(mode=mode):
+                    sim = self._simulator(["--simulator", "VCS", "--vcs-simprofile", mode], root)
+                    vcomp_job = SimpleNamespace(
+                        name="tb",
+                        job_dir=str(root / "vcomp"),
+                        tb_options={},
+                        compile_fingerprint={},
+                    )
+                    test_job = SimpleNamespace(name="smoke",
+                                               target="//tb:smoke",
+                                               iteration=1,
+                                               job_dir=str(root / "run"))
+
+                    sim_tokens = shlex.split(sim.generate_sim_options(test_job, 11))
+                    self.assertIn("-simprofile", sim_tokens)
+                    self.assertEqual(mode, sim_tokens[sim_tokens.index("-simprofile") + 1])
+
+                    post_cmds = sim.get_post_sim_commands(test_job)
+                    self.assertEqual(1, len(post_cmds))
+                    self.assertIn("if [ -d simprofile_dir ]; then", post_cmds[0])
+                    self.assertIn("profrpt", post_cmds[0])
+                    self.assertIn("-view {}".format(expected_view), post_cmds[0])
+                    self.assertIn("simprofile_dir -output", post_cmds[0])
+                    self.assertIn("profrpt_{}".format(mode), post_cmds[0])
+
+                    context = {
+                        "VCOMP_DIR": str(root / "vcomp"),
+                        "bazel_runfiles_main": str(root),
+                        "bazel_compile_args": str(root / "compile.f"),
+                        "options": sim.options,
+                        "partcomp_opts": "",
+                        "make_jobs_opts": "",
+                        "additional_defines": [],
+                        "debug_mode": "default",
+                        "xprop_cmd": "",
+                        "cov_opts": "",
+                        "vcs_home": "/vcs",
+                        "vcs_analysis_work_dir": str(root / "work"),
+                        "vcs_setup_file": str(root / "synopsys_sim.setup"),
+                        "vcs_vlogan_args": str(root / "vlogan.f"),
+                        "vcs_vlogan_filelists": str(root / "flists.txt"),
+                        "vcs_incr_vlogan_ignore_env": "-vts_ignore_env=HOST",
+                        "vcs_elab_args": str(root / "elab.f"),
+                    }
+                    context.update(sim.get_compile_template_context(vcomp_job))
+                    for tpl_name in ("vcs_compile_template.sh.j2", "vcs_three_step_compile_template.sh.j2"):
+                        rendered = sim.env.get_template(tpl_name).render(**context)
+                        self.assertIn("-simprofile", rendered)
+
+                    with mock.patch.object(sim, "get_tool_identity", return_value="vcs-test-id"):
+                        manifest = sim._partcomp_manifest_identity(vcomp_job)
+                    self.assertTrue(manifest["configuration"]["simprofile"])
+
+
 if __name__ == "__main__":
     unittest.main()

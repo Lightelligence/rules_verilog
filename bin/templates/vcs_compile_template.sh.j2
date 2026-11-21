@@ -10,11 +10,14 @@ cd {{ bazel_runfiles_main|shell_quote }}
   -full64 \
   -Mdir={{ (VCOMP_DIR ~ '/csrc')|shell_quote }} \
   -Mlib={{ (VCOMP_DIR ~ '/csrc')|shell_quote }} \
-  {% if options.fgp is not none -%}
+  {% if vcs_fgp_enabled|default(options.fgp is not none) -%}
     -fgp \
   {% endif -%}
   {% if options.vcs_profile -%}
     -pcmakeprof -reportstats \
+  {% endif -%}
+  {% if options.vcs_simprofile|default(none) -%}
+    -simprofile \
   {% endif -%}
   {% if partcomp_opts -%}
     {{ partcomp_opts }} \

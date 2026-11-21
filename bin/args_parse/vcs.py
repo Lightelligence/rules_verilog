@@ -148,6 +148,14 @@ def add_vcs_arguments(parser):
                       action='store_true',
                       help=('Add -pcmakeprof -reportstats and write phase/partition timing statistics to cmp.log. '
                             'Use this when comparing scratch, incremental, or Partition Compile performance.'))
+    gvcs.add_argument('--vcs-simprofile',
+                      choices=['time', 'mem'],
+                      default=None,
+                      metavar='MODE',
+                      help=('Enable VCS runtime simulation profiling (time or mem, mutually exclusive). '
+                            'Compiles with -simprofile, runs simv with -simprofile MODE, and runs '
+                            'profrpt -view time_all|mem_all into <job_dir>/profrpt_MODE after simulation. '
+                            'Run time and memory profiling separately so results stay accurate.'))
     partcomp_control = gvcs.add_mutually_exclusive_group()
     partcomp_control.add_argument(
         '--vcs-partcomp',
@@ -259,10 +267,40 @@ def add_vcs_arguments(parser):
                             'access. none cannot be combined with --waves or --gui. Overrides the testbench '
                             'vcs_debug_access setting; --gui always uses its own full debug flags.'))
     gvcs.add_argument('--fgp',
-                      type=int,
+                      type=_job_count,
                       default=None,
+                      metavar='N|auto',
                       help=('Enable VCS Fine-Grained Parallelism at compile time and pass -fgp=num_threads:N '
-                            'at runtime. N must be positive; simmer reduces concurrent test jobs to account for it.'))
+                            'at runtime. Accepts a positive integer N or auto. auto inspects the LSF/Slurm/affinity '
+                            'CPU allocation and selected test count: it sizes threads to fit within the per-test '
+                            'core budget (capped at 8 cores per test, reserving 1 core for the FGP master, splitting '
+                            'FSDB threads under --waves, and adding allow_less_cores) and automatically disables FGP '
+                            'when total tests >= allocated CPUs so batch regressions keep full single-core throughput. '
+                            'Pass an explicit integer N to exceed the 8-core auto cap. Incompatible with --gui '
+                            '(-debug_access+reverse). With an explicit N and --waves, num_fsdb_threads defaults to N '
+                            'unless --fgp-fsdb-threads is specified.'))
+    add_child_argument(gvcs,
+                       '--fgp-fsdb-threads',
+                       parent='--fgp',
+                       type=int,
+                       default=None,
+                       metavar='M',
+                       help=('Override the dedicated FSDB dump thread count passed as num_fsdb_threads:M to -fgp= '
+                             '(default: N from --fgp N). Requires --fgp and --waves; simmer adds M to the per-test '
+                             'thread budget.'))
+    add_child_argument(gvcs,
+                       '--fgp-schedpli',
+                       parent='--fgp',
+                       default=False,
+                       action='store_true',
+                       help=('Append schedpli to -fgp= for workloads with heavy PLI/DPI callbacks. Requires --fgp.'))
+    add_child_argument(gvcs,
+                       '--fgp-allow-less-cores',
+                       parent='--fgp',
+                       default=False,
+                       action='store_true',
+                       help=('Append allow_less_cores to -fgp= so VCS degrades gracefully instead of aborting '
+                             'when fewer than N+1 free cores are available on a shared host. Requires --fgp.'))
     gvcs.add_argument('--vcs-xprop',
                       dest='xprop',
                       default=argparse.SUPPRESS,

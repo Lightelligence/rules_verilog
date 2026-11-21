@@ -278,6 +278,50 @@ the frozen group. Analysis and elaboration arguments must be split between
 [three-step incremental analysis
 workflow](docs/simmer_vcs_xcelium.md#vcs-three-step-incremental-analysis).
 
+### VCS runtime profiling and FGP
+
+Measure runtime bottlenecks before tuning with `--vcs-simprofile time` or
+`--vcs-simprofile mem` (run time and memory profiling separately so results do
+not skew each other; both modes share the same `-simprofile` compiled `simv`
+through the compile cache and automatically run `profrpt` into
+`<job_dir>/profrpt_<mode>`):
+
+```bash
+# 1) Runtime hotspot profiling (writes <job_dir>/profrpt_time)
+simmer -t 'sys_tb:smoke_test@1' --simulator VCS --vcs-simprofile time
+
+# 2) Memory profiling (reuses the -simprofile build; writes <job_dir>/profrpt_mem)
+simmer -t 'sys_tb:smoke_test@1' --simulator VCS --vcs-simprofile mem
+```
+
+When profiling shows CPU-bound simulation that benefits from multi-threading,
+enable VCS Fine-Grained Parallelism (`--fgp N`). With `--waves`, simmer
+automatically passes `num_fsdb_threads:N` (override with
+`--fgp-fsdb-threads M`) and accounts for both simulation and FSDB threads in
+its job scheduler:
+
+```bash
+# Auto-size FGP from LSF/Slurm CPU allocation and test count (capped at 8 cores
+# per test so bsub -n 16 compiles at 16 cores while 1 test caps at 8 cores:
+# 1 test -> num_threads:7,allow_less_cores; 1 test + --waves -> 5 + 2 FSDB;
+# 8+ tests on -n 8 -> disables FGP to keep full single-core parallel throughput)
+bsub -Is -n 8 -R "span[hosts=1]" -q syn \
+  simmer -t 'sys_tb:long_test@1' --simulator VCS --fgp auto
+
+# Explicit batch multi-threaded simulation (-fgp=num_threads:4)
+simmer -t 'sys_tb:long_test@1' --simulator VCS --fgp 4
+
+# Explicit FGP with FSDB waves (automatically passes -fgp=num_threads:4,num_fsdb_threads:4)
+simmer -t 'sys_tb:long_test@1' --simulator VCS --fgp 4 --waves hdl_top.dut
+
+# Tune FSDB dump threads, heavy PLI/DPI scheduling, and shared-host fallback
+simmer -t 'sys_tb:long_test@1' --simulator VCS --fgp 4 --waves hdl_top.dut \
+  --fgp-fsdb-threads 2 --fgp-schedpli --fgp-allow-less-cores
+```
+
+`--fgp` cannot be combined with `--gui` because `--gui` enables
+`-debug_access+all+reverse`.
+
 ### VCS ICO and VSO.ai
 
 ICO, VSO.ai CSO and VSO.ai Coverage Directed Solver are separate opt-in flows:
