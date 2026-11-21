@@ -267,12 +267,17 @@ def add_vcs_arguments(parser):
                             'access. none cannot be combined with --waves or --gui. Overrides the testbench '
                             'vcs_debug_access setting; --gui always uses its own full debug flags.'))
     gvcs.add_argument('--fgp',
-                      type=int,
+                      type=_job_count,
                       default=None,
+                      metavar='N|auto',
                       help=('Enable VCS Fine-Grained Parallelism at compile time and pass -fgp=num_threads:N '
-                            'at runtime. N must be positive; simmer reduces concurrent test jobs to account for it. '
-                            'Incompatible with --gui (-debug_access+reverse). When combined with --waves, '
-                            'num_fsdb_threads defaults to N unless --fgp-fsdb-threads is specified.'))
+                            'at runtime. Accepts a positive integer N or auto. auto inspects the LSF/Slurm/affinity '
+                            'CPU allocation and selected test count: it sizes threads to fit within the per-test '
+                            'core budget (reserving 1 core for the FGP master, splitting FSDB threads under --waves, '
+                            'and adding allow_less_cores) and automatically disables FGP when total tests >= allocated '
+                            'CPUs so batch regressions keep full single-core throughput. Incompatible with --gui '
+                            '(-debug_access+reverse). With an explicit N and --waves, num_fsdb_threads defaults to N '
+                            'unless --fgp-fsdb-threads is specified.'))
     add_child_argument(gvcs,
                        '--fgp-fsdb-threads',
                        parent='--fgp',

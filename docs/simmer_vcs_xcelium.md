@@ -116,6 +116,9 @@ simmer -t 'sys_tb:smoke_test@1' --simulator VCS --vcs-simprofile mem
 VCS Fine-Grained Parallelism (FGP):
 
 ```bash
+# Auto-size FGP from LSF/Slurm allocation and test count (safe for both 1 test and sys_tb:*)
+bsub -Is -n 8 -R "span[hosts=1]" -q syn \
+  simmer -t 'sys_tb:long_test@1' --simulator VCS --fgp auto
 # Batch FGP (-fgp=num_threads:4)
 simmer -t 'sys_tb:long_test@1' --simulator VCS --fgp 4
 # FGP + FSDB waves (defaults num_fsdb_threads to N: -fgp=num_threads:4,num_fsdb_threads:4)
@@ -964,8 +967,14 @@ For quiet normal runs, avoid `--tool-debug`; it prints scheduler polling noise.
   `-simprofile time|mem` to `simv`, and automatically runs
   `profrpt -view time_all|mem_all simprofile_dir -output <job_dir>/profrpt_<mode>`
   after simulation.
-- Use `--fgp N` for runtime threading only after profiling; simmer reduces the
-  number of concurrent tests to account for those threads. `--fgp` cannot be
+- Use `--fgp N` (or `--fgp auto`) for runtime threading only after profiling;
+  simmer reduces the number of concurrent tests to account for those threads.
+  `--fgp auto` inspects the LSF/Slurm/affinity CPU allocation and selected test
+  count: when fewer tests than allocated CPUs are run, it reserves 1 core for
+  the FGP master, sizes simulation (and `--waves` FSDB) threads to fit the
+  per-test core budget, and enables `allow_less_cores`; when total tests >= 
+  allocated CPUs (e.g., `sys_tb:*` on `bsub -n 8`), it disables FGP so all
+  slots run single-core tests in parallel. `--fgp` cannot be
   combined with `--gui` (`-debug_access+reverse`). When combined with `--waves`,
   simmer passes `num_fsdb_threads:N` by default (override with
   `--fgp-fsdb-threads M`) and includes FSDB threads in the per-test thread

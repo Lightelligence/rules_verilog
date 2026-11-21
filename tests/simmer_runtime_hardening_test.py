@@ -1635,6 +1635,58 @@ class VcsSimprofileAndFgpTest(unittest.TestCase):
             self.assertIn("-fgp=num_threads:4,num_fsdb_threads:3,schedpli,allow_less_cores",
                           shlex.split(tuned.generate_sim_options(test_job, 7)))
 
+    def test_fgp_auto_sizes_from_lsf_allocation_and_disables_for_wide_regressions(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            test_job = SimpleNamespace(name="smoke", target="//tb:smoke", iteration=1, job_dir=str(root / "run"))
+
+            def make_auto(argv, slots, total_tests):
+                sim = self._simulator(argv, root)
+                sim.rcfg.all_vcomp = {"//tb:tb": {"//tb:t": total_tests}}
+                sim._allocation_and_source = (slots, "LSB_MCPU_HOSTS")
+                return sim
+
+            # bsub -n 8 with 1 test -> 7 worker threads + 1 master = 8 cores.
+            single = make_auto(["--simulator", "VCS", "--fgp", "auto"], slots=8, total_tests=1)
+            self.assertTrue(single.is_fgp_enabled())
+            self.assertEqual(8, single.get_scheduler_threads_per_test())
+            self.assertIn("-fgp=num_threads:7,allow_less_cores", shlex.split(single.generate_sim_options(test_job, 7)))
+
+            # bsub -n 8 with 1 test + --waves -> 5 sim + 2 FSDB + 1 master = 8 cores.
+            single_waves = make_auto(["--simulator", "VCS", "--fgp", "auto", "--waves"], slots=8, total_tests=1)
+            self.assertTrue(single_waves.is_fgp_enabled())
+            self.assertEqual(8, single_waves.get_scheduler_threads_per_test())
+            self.assertIn("-fgp=num_threads:5,num_fsdb_threads:2,allow_less_cores",
+                          shlex.split(single_waves.generate_sim_options(test_job, 7)))
+
+            # bsub -n 8 with 2 tests -> 4-core budget per test: 3 worker + 1 master.
+            pair = make_auto(["--simulator", "VCS", "--fgp", "auto"], slots=8, total_tests=2)
+            self.assertTrue(pair.is_fgp_enabled())
+            self.assertEqual(4, pair.get_scheduler_threads_per_test())
+            self.assertIn("-fgp=num_threads:3,allow_less_cores", shlex.split(pair.generate_sim_options(test_job, 7)))
+
+            # bsub -n 8 with 8+ tests (sys_tb:*) -> FGP disabled so 8 single-core tests run in parallel.
+            wide = make_auto(["--simulator", "VCS", "--fgp", "auto"], slots=8, total_tests=8)
+            self.assertFalse(wide.is_fgp_enabled())
+            self.assertEqual(1, wide.get_scheduler_threads_per_test())
+            self.assertFalse(
+                any(token.startswith("-fgp=") for token in shlex.split(wide.generate_sim_options(test_job, 7))))
+            vcomp_job = SimpleNamespace(name="tb", job_dir=str(root / "vcomp"), tb_options={}, compile_fingerprint={})
+            rendered = wide.env.get_template("vcs_compile_template.sh.j2").render(
+                VCOMP_DIR=str(root / "vcomp"),
+                bazel_runfiles_main=str(root),
+                bazel_compile_args=str(root / "compile.f"),
+                options=wide.options,
+                partcomp_opts="",
+                make_jobs_opts="",
+                additional_defines=[],
+                debug_mode="default",
+                xprop_cmd="",
+                cov_opts="",
+                **wide.get_compile_template_context(vcomp_job),
+            )
+            self.assertNotIn("-fgp", rendered)
+
     def test_vcs_simprofile_compile_runtime_post_sim_and_manifest(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

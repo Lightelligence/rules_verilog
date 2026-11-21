@@ -301,10 +301,16 @@ automatically passes `num_fsdb_threads:N` (override with
 its job scheduler:
 
 ```bash
-# Batch multi-threaded simulation (-fgp=num_threads:4)
+# Auto-size FGP from LSF/Slurm CPU allocation and test count (e.g. bsub -n 8:
+# 1 test -> num_threads:7,allow_less_cores; 1 test + --waves -> 5 + 2 FSDB;
+# 8+ tests -> disables FGP to keep full single-core parallel throughput)
+bsub -Is -n 8 -R "span[hosts=1]" -q syn \
+  simmer -t 'sys_tb:long_test@1' --simulator VCS --fgp auto
+
+# Explicit batch multi-threaded simulation (-fgp=num_threads:4)
 simmer -t 'sys_tb:long_test@1' --simulator VCS --fgp 4
 
-# FGP with FSDB waves (automatically passes -fgp=num_threads:4,num_fsdb_threads:4)
+# Explicit FGP with FSDB waves (automatically passes -fgp=num_threads:4,num_fsdb_threads:4)
 simmer -t 'sys_tb:long_test@1' --simulator VCS --fgp 4 --waves hdl_top.dut
 
 # Tune FSDB dump threads, heavy PLI/DPI scheduling, and shared-host fallback

@@ -121,6 +121,7 @@ class VcsSimulator(SimulatorInterface):
         self._vso_ask_job = None
         self._resolved_partcomp_jobs = _UNRESOLVED
         self._resolved_make_jobs = _UNRESOLVED
+        self._resolved_fgp_plan = _UNRESOLVED
         self._allocation_and_source = None
         self._vcs_tool_identity = None
         self._vcs_home = None
@@ -288,6 +289,7 @@ class VcsSimulator(SimulatorInterface):
         context = {
             'vcs_runner': self.get_tool_runner(),
             'vcs_debug_access_opt': _VCS_DEBUG_ACCESS_FLAGS[self.get_debug_access(vcomp_job)],
+            'vcs_fgp_enabled': self.is_fgp_enabled(),
             'vso_build_name': self.vso_workflow.build_name(vcomp_job) if self.options.vso else '',
             'vso_workdir': vso_workdir,
         }
@@ -352,17 +354,99 @@ class VcsSimulator(SimulatorInterface):
     def should_auto_reuse_compile(self):
         return self.options.vcs_auto_compile_cache
 
+    def _planned_test_count(self):
+        all_vcomp = getattr(self.rcfg, "all_vcomp", None)
+        if not all_vcomp:
+            return 1
+        total = 0
+        for value in all_vcomp.values():
+            if isinstance(value, dict):
+                total += sum(value.values())
+            elif isinstance(value, tuple) and len(value) == 2:
+                icfgs, _tests = value
+                total += sum(icfg.target for icfg in icfgs)
+        return max(1, total)
+
+    def get_fgp_plan(self):
+        """Resolve (sim_threads, fsdb_threads, allow_less_cores) for VCS FGP."""
+        if self._resolved_fgp_plan is not _UNRESOLVED:
+            return self._resolved_fgp_plan
+        fgp = self.options.fgp
+        if fgp is None:
+            self._resolved_fgp_plan = (None, None, False)
+            return self._resolved_fgp_plan
+        explicit_fsdb = getattr(self.options, "fgp_fsdb_threads", None)
+        if fgp != 'auto':
+            fsdb_threads = (
+                explicit_fsdb if explicit_fsdb is not None else fgp) if self.options.waves is not None else None
+            self._resolved_fgp_plan = (fgp, fsdb_threads, bool(getattr(self.options, "fgp_allow_less_cores", False)))
+            return self._resolved_fgp_plan
+
+        slots, source = self.get_allocation_and_source()
+        total_tests = self._planned_test_count()
+        if total_tests >= slots or slots < 3:
+            log.info(
+                "VCS FGP auto disabled: %d test(s) across %d allocated CPU(s) (%s); "
+                "running single-threaded tests in parallel",
+                total_tests,
+                slots,
+                source,
+            )
+            self._resolved_fgp_plan = (None, None, False)
+            return self._resolved_fgp_plan
+
+        budget = slots // total_tests
+        usable = budget - 1 # Reserve 1 core for the VCS FGP master thread.
+        if self.options.waves is not None:
+            if explicit_fsdb is not None:
+                fsdb_threads = explicit_fsdb
+                sim_threads = usable - fsdb_threads
+            elif usable < 3:
+                sim_threads = 0
+                fsdb_threads = None
+            else:
+                fsdb_threads = max(1, usable // 3)
+                sim_threads = usable - fsdb_threads
+        else:
+            fsdb_threads = None
+            sim_threads = usable
+
+        if sim_threads < 2:
+            log.info(
+                "VCS FGP auto disabled: per-test budget %d core(s) (%d CPU(s) from %s / %d test(s)) "
+                "is too small for multi-threaded FGP",
+                budget,
+                slots,
+                source,
+                total_tests,
+            )
+            self._resolved_fgp_plan = (None, None, False)
+            return self._resolved_fgp_plan
+
+        log.info(
+            "VCS FGP auto enabled: num_threads=%d%s, allow_less_cores=True (%d test(s), %d CPU(s) from %s)",
+            sim_threads,
+            ", num_fsdb_threads={}".format(fsdb_threads) if fsdb_threads is not None else "",
+            total_tests,
+            slots,
+            source,
+        )
+        self._resolved_fgp_plan = (sim_threads, fsdb_threads, True)
+        return self._resolved_fgp_plan
+
+    def is_fgp_enabled(self):
+        return self.get_fgp_plan()[0] is not None
+
     def get_fgp_fsdb_threads(self):
-        if self.options.fgp is None or self.options.waves is None:
-            return None
-        explicit = getattr(self.options, "fgp_fsdb_threads", None)
-        return explicit if explicit is not None else self.options.fgp
+        return self.get_fgp_plan()[1]
 
     def get_scheduler_threads_per_test(self):
-        if self.options.fgp is None:
+        sim_threads, fsdb_threads, _allow_less = self.get_fgp_plan()
+        if sim_threads is None:
             return 1
-        fsdb_threads = self.get_fgp_fsdb_threads() or 0
-        return self.options.fgp + fsdb_threads
+        if self.options.fgp == 'auto':
+            return sim_threads + (fsdb_threads or 0) + 1
+        return sim_threads + (fsdb_threads or 0)
 
     def use_smartlog(self):
         return self.options.smartlog
@@ -728,14 +812,14 @@ class VcsSimulator(SimulatorInterface):
             # Capture force/release/deposit metadata for FSDB waves.
             sim_args.append("+fsdb+force")
         sim_args.extend(["+ntb_random_seed={}".format(seed), "-xlrm", "hier_inst_seed", "-assert", "nopostproc"])
-        if self.options.fgp is not None:
-            fgp_parts = ["num_threads:{}".format(self.options.fgp)]
-            fsdb_threads = self.get_fgp_fsdb_threads()
-            if fsdb_threads is not None:
-                fgp_parts.append("num_fsdb_threads:{}".format(fsdb_threads))
+        fgp_sim_threads, fgp_fsdb_threads, fgp_allow_less_cores = self.get_fgp_plan()
+        if fgp_sim_threads is not None:
+            fgp_parts = ["num_threads:{}".format(fgp_sim_threads)]
+            if fgp_fsdb_threads is not None:
+                fgp_parts.append("num_fsdb_threads:{}".format(fgp_fsdb_threads))
             if getattr(self.options, "fgp_schedpli", False):
                 fgp_parts.append("schedpli")
-            if getattr(self.options, "fgp_allow_less_cores", False):
+            if fgp_allow_less_cores:
                 fgp_parts.append("allow_less_cores")
             sim_args.append("-fgp={}".format(",".join(fgp_parts)))
         simprofile_mode = getattr(self.options, "vcs_simprofile", None)
@@ -1437,7 +1521,7 @@ source annotation and hierarchy details.</p></html>
                 "coverage_report": self.options.vcs_cm_report or [],
                 "coverage_cond": self.options.vcs_cm_cond,
                 "coverage_tgl": self.options.vcs_cm_tgl,
-                "fgp": self.options.fgp is not None,
+                "fgp": self.is_fgp_enabled(),
                 "simprofile": bool(getattr(self.options, "vcs_simprofile", None)),
                 "smartlog": self.use_smartlog(),
                 "xprop": self.options.xprop if self.options.xprop_was_explicit else None,

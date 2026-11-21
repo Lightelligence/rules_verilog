@@ -94,8 +94,8 @@ def validate_vcs_runtime_options(options, parser):
     ]):
         parser.error("VCS xprop helper switches require '--vcs-xprop F' or '--vcs-xprop C'. "
                      "Do not combine them with '--vcs-xprop D'. Stopping before Bazel starts.")
-    if options.fgp is not None and options.fgp < 1:
-        parser.error("--fgp must be a positive integer thread count. Stopping before Bazel starts.")
+    if options.fgp not in (None, 'auto') and options.fgp < 1:
+        parser.error("--fgp must be 'auto' or a positive integer thread count. Stopping before Bazel starts.")
     fgp_fsdb_threads = getattr(options, 'fgp_fsdb_threads', None)
     fgp_schedpli = getattr(options, 'fgp_schedpli', False)
     fgp_allow_less_cores = getattr(options, 'fgp_allow_less_cores', False)

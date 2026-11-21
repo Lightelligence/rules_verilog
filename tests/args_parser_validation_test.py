@@ -228,6 +228,9 @@ class ArgsParserValidationTest(unittest.TestCase):
         for switch in ("--vcs-simprofile", "--fgp", "--fgp-fsdb-threads", "--fgp-schedpli", "--fgp-allow-less-cores"):
             self.assertIn(switch, options.vcs_explicit_switches)
         self.assert_parse_error(["--simulator", "VCS", "--vcs-simprofile", "both"])
+        auto_options = parse_args(["--simulator", "VCS", "--fgp", "auto"])
+        self.assertEqual("auto", auto_options.fgp)
+        self.assertIn("--fgp", auto_options.vcs_explicit_switches)
 
 
 if __name__ == "__main__":
