@@ -943,8 +943,20 @@ For quiet normal runs, avoid `--tool-debug`; it prints scheduler polling noise.
   `extra_runtime_runfiles`; they remain in the test runfiles but do not enter
   the compile-input fingerprint, so changing a runtime-only asset does not
   trigger VCS recompilation. Keep compile-referenced files in `extra_runfiles`.
+- Profile simulation runtime before tuning with `--vcs-simprofile time` or
+  `--vcs-simprofile mem` (run separately so timing and memory measurements do
+  not skew each other). Simmer compiles with `-simprofile`, passes
+  `-simprofile time|mem` to `simv`, and automatically runs
+  `profrpt -view time_all|mem_all simprofile_dir -output <job_dir>/profrpt_<mode>`
+  after simulation.
 - Use `--fgp N` for runtime threading only after profiling; simmer reduces the
-  number of concurrent tests to account for those threads.
+  number of concurrent tests to account for those threads. `--fgp` cannot be
+  combined with `--gui` (`-debug_access+reverse`). When combined with `--waves`,
+  simmer passes `num_fsdb_threads:1` by default (override with
+  `--fgp-fsdb-threads M`) and includes FSDB threads in the per-test thread
+  budget. Use `--fgp-schedpli` for PLI/DPI-heavy workloads and
+  `--fgp-allow-less-cores` on shared hosts where `N + 1` free cores may not
+  always be available.
 - Avoid waves, VPI and SmartLog in throughput regressions. The baseline
   `-debug_access+r+w+f` remains enabled because it is required by UVM HDL and
   DUT memory backdoor behavior; measure its cost on representative workloads

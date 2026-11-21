@@ -148,6 +148,14 @@ def add_vcs_arguments(parser):
                       action='store_true',
                       help=('Add -pcmakeprof -reportstats and write phase/partition timing statistics to cmp.log. '
                             'Use this when comparing scratch, incremental, or Partition Compile performance.'))
+    gvcs.add_argument('--vcs-simprofile',
+                      choices=['time', 'mem'],
+                      default=None,
+                      metavar='MODE',
+                      help=('Enable VCS runtime simulation profiling (time or mem, mutually exclusive). '
+                            'Compiles with -simprofile, runs simv with -simprofile MODE, and runs '
+                            'profrpt -view time_all|mem_all into <job_dir>/profrpt_MODE after simulation. '
+                            'Run time and memory profiling separately so results stay accurate.'))
     partcomp_control = gvcs.add_mutually_exclusive_group()
     partcomp_control.add_argument(
         '--vcs-partcomp',
@@ -262,7 +270,30 @@ def add_vcs_arguments(parser):
                       type=int,
                       default=None,
                       help=('Enable VCS Fine-Grained Parallelism at compile time and pass -fgp=num_threads:N '
-                            'at runtime. N must be positive; simmer reduces concurrent test jobs to account for it.'))
+                            'at runtime. N must be positive; simmer reduces concurrent test jobs to account for it. '
+                            'Incompatible with --gui (-debug_access+reverse). When combined with --waves, '
+                            'num_fsdb_threads defaults to 1 unless --fgp-fsdb-threads is specified.'))
+    add_child_argument(gvcs,
+                       '--fgp-fsdb-threads',
+                       parent='--fgp',
+                       type=int,
+                       default=None,
+                       metavar='M',
+                       help=('Set the dedicated FSDB dump thread count passed as num_fsdb_threads:M to -fgp=. '
+                             'Requires --fgp and --waves; simmer adds M to the per-test thread budget.'))
+    add_child_argument(gvcs,
+                       '--fgp-schedpli',
+                       parent='--fgp',
+                       default=False,
+                       action='store_true',
+                       help=('Append schedpli to -fgp= for workloads with heavy PLI/DPI callbacks. Requires --fgp.'))
+    add_child_argument(gvcs,
+                       '--fgp-allow-less-cores',
+                       parent='--fgp',
+                       default=False,
+                       action='store_true',
+                       help=('Append allow_less_cores to -fgp= so VCS degrades gracefully instead of aborting '
+                             'when fewer than N+1 free cores are available on a shared host. Requires --fgp.'))
     gvcs.add_argument('--vcs-xprop',
                       dest='xprop',
                       default=argparse.SUPPRESS,

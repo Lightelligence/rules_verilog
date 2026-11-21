@@ -131,6 +131,9 @@ run_vlogan_group \
   {% if options.vcs_profile -%}
     -pcmakeprof -reportstats \
   {% endif -%}
+  {% if options.vcs_simprofile|default(none) -%}
+    -simprofile \
+  {% endif -%}
   {% if partcomp_opts -%}
     {{ partcomp_opts }} \
   {% endif -%}

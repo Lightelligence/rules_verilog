@@ -352,8 +352,17 @@ class VcsSimulator(SimulatorInterface):
     def should_auto_reuse_compile(self):
         return self.options.vcs_auto_compile_cache
 
+    def get_fgp_fsdb_threads(self):
+        if self.options.fgp is None or self.options.waves is None:
+            return None
+        explicit = getattr(self.options, "fgp_fsdb_threads", None)
+        return explicit if explicit is not None else 1
+
     def get_scheduler_threads_per_test(self):
-        return self.options.fgp if self.options.fgp is not None else 1
+        if self.options.fgp is None:
+            return 1
+        fsdb_threads = self.get_fgp_fsdb_threads() or 0
+        return self.options.fgp + fsdb_threads
 
     def use_smartlog(self):
         return self.options.smartlog
@@ -720,7 +729,18 @@ class VcsSimulator(SimulatorInterface):
             sim_args.append("+fsdb+force")
         sim_args.extend(["+ntb_random_seed={}".format(seed), "-xlrm", "hier_inst_seed", "-assert", "nopostproc"])
         if self.options.fgp is not None:
-            sim_args.append("-fgp=num_threads:{}".format(self.options.fgp))
+            fgp_parts = ["num_threads:{}".format(self.options.fgp)]
+            fsdb_threads = self.get_fgp_fsdb_threads()
+            if fsdb_threads is not None:
+                fgp_parts.append("num_fsdb_threads:{}".format(fsdb_threads))
+            if getattr(self.options, "fgp_schedpli", False):
+                fgp_parts.append("schedpli")
+            if getattr(self.options, "fgp_allow_less_cores", False):
+                fgp_parts.append("allow_less_cores")
+            sim_args.append("-fgp={}".format(",".join(fgp_parts)))
+        simprofile_mode = getattr(self.options, "vcs_simprofile", None)
+        if simprofile_mode:
+            sim_args.extend(["-simprofile", simprofile_mode])
         if self.options.vcs_xprop_banner:
             sim_args.append("-xprop=banner")
         if self.options.vcs_xprop_report:
@@ -1418,6 +1438,7 @@ source annotation and hierarchy details.</p></html>
                 "coverage_cond": self.options.vcs_cm_cond,
                 "coverage_tgl": self.options.vcs_cm_tgl,
                 "fgp": self.options.fgp is not None,
+                "simprofile": bool(getattr(self.options, "vcs_simprofile", None)),
                 "smartlog": self.use_smartlog(),
                 "xprop": self.options.xprop if self.options.xprop_was_explicit else None,
                 "xprop_flowctrl": self.options.vcs_xprop_flowctrl,
@@ -1550,4 +1571,14 @@ source annotation and hierarchy details.</p></html>
         return []
 
     def get_post_sim_commands(self, test_job):
-        return []
+        simprofile_mode = getattr(self.options, "vcs_simprofile", None)
+        if not simprofile_mode:
+            return []
+        view = "time_all" if simprofile_mode == "time" else "mem_all"
+        output_dir = os.path.join(test_job.job_dir, "profrpt_{}".format(simprofile_mode))
+        profrpt_cmd = "{} -view {} simprofile_dir -output {}".format(
+            self.get_tool_command("profrpt"),
+            shlex.quote(view),
+            shlex.quote(output_dir),
+        )
+        return ["if [ -d simprofile_dir ]; then {}; fi".format(profrpt_cmd)]

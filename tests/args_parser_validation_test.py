@@ -205,6 +205,30 @@ class ArgsParserValidationTest(unittest.TestCase):
         self.assertTrue(html_options.xrun_imc_html)
         self.assertIn("--xrun-imc-html", html_options.xcelium_explicit_switches)
 
+    def test_vcs_simprofile_and_fgp_detail_switches_are_tracked(self):
+        options = parse_args([
+            "--simulator",
+            "VCS",
+            "--vcs-simprofile",
+            "time",
+            "--waves",
+            "--fgp",
+            "4",
+            "--fgp-fsdb-threads",
+            "2",
+            "--fgp-schedpli",
+            "--fgp-allow-less-cores",
+        ])
+
+        self.assertEqual("time", options.vcs_simprofile)
+        self.assertEqual(4, options.fgp)
+        self.assertEqual(2, options.fgp_fsdb_threads)
+        self.assertTrue(options.fgp_schedpli)
+        self.assertTrue(options.fgp_allow_less_cores)
+        for switch in ("--vcs-simprofile", "--fgp", "--fgp-fsdb-threads", "--fgp-schedpli", "--fgp-allow-less-cores"):
+            self.assertIn(switch, options.vcs_explicit_switches)
+        self.assert_parse_error(["--simulator", "VCS", "--vcs-simprofile", "both"])
+
 
 if __name__ == "__main__":
     unittest.main()
