@@ -356,7 +356,7 @@ class VcsSimulator(SimulatorInterface):
         if self.options.fgp is None or self.options.waves is None:
             return None
         explicit = getattr(self.options, "fgp_fsdb_threads", None)
-        return explicit if explicit is not None else 1
+        return explicit if explicit is not None else self.options.fgp
 
     def get_scheduler_threads_per_test(self):
         if self.options.fgp is None:

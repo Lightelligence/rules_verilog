@@ -108,6 +108,21 @@ simmer -t 'sys_tb:smoke_test@1' --simulator VCS --no-compile
 simmer -t 'sys_tb:smoke_test@1' --simulator VCS --no-compile --no-bazel
 simmer -t 'sys_tb:smoke_test@1' --simulator VCS --recompile
 simmer -t 'sys_tb:*@10' --simulator VCS --simmer-profile --vcs-profile
+# Runtime time/memory profiling (run separately; writes profrpt_time / profrpt_mem)
+simmer -t 'sys_tb:smoke_test@1' --simulator VCS --vcs-simprofile time
+simmer -t 'sys_tb:smoke_test@1' --simulator VCS --vcs-simprofile mem
+```
+
+VCS Fine-Grained Parallelism (FGP):
+
+```bash
+# Batch FGP (-fgp=num_threads:4)
+simmer -t 'sys_tb:long_test@1' --simulator VCS --fgp 4
+# FGP + FSDB waves (defaults num_fsdb_threads to N: -fgp=num_threads:4,num_fsdb_threads:4)
+simmer -t 'sys_tb:long_test@1' --simulator VCS --fgp 4 --waves hdl_top.dut
+# Override FSDB threads and enable PLI scheduling / shared-host fallback
+simmer -t 'sys_tb:long_test@1' --simulator VCS --fgp 4 --waves hdl_top.dut \
+  --fgp-fsdb-threads 2 --fgp-schedpli --fgp-allow-less-cores
 ```
 
 Wave and debug runs:
@@ -952,7 +967,7 @@ For quiet normal runs, avoid `--tool-debug`; it prints scheduler polling noise.
 - Use `--fgp N` for runtime threading only after profiling; simmer reduces the
   number of concurrent tests to account for those threads. `--fgp` cannot be
   combined with `--gui` (`-debug_access+reverse`). When combined with `--waves`,
-  simmer passes `num_fsdb_threads:1` by default (override with
+  simmer passes `num_fsdb_threads:N` by default (override with
   `--fgp-fsdb-threads M`) and includes FSDB threads in the per-test thread
   budget. Use `--fgp-schedpli` for PLI/DPI-heavy workloads and
   `--fgp-allow-less-cores` on shared hosts where `N + 1` free cores may not

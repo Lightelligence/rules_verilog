@@ -1616,8 +1616,8 @@ class VcsSimprofileAndFgpTest(unittest.TestCase):
             self.assertIn("-fgp=num_threads:4", shlex.split(plain.generate_sim_options(test_job, 7)))
 
             with_waves = self._simulator(["--simulator", "VCS", "--fgp", "4", "--waves"], root)
-            self.assertEqual(5, with_waves.get_scheduler_threads_per_test())
-            self.assertIn("-fgp=num_threads:4,num_fsdb_threads:1",
+            self.assertEqual(8, with_waves.get_scheduler_threads_per_test())
+            self.assertIn("-fgp=num_threads:4,num_fsdb_threads:4",
                           shlex.split(with_waves.generate_sim_options(test_job, 7)))
 
             tuned = self._simulator([

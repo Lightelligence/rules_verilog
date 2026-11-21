@@ -272,15 +272,16 @@ def add_vcs_arguments(parser):
                       help=('Enable VCS Fine-Grained Parallelism at compile time and pass -fgp=num_threads:N '
                             'at runtime. N must be positive; simmer reduces concurrent test jobs to account for it. '
                             'Incompatible with --gui (-debug_access+reverse). When combined with --waves, '
-                            'num_fsdb_threads defaults to 1 unless --fgp-fsdb-threads is specified.'))
+                            'num_fsdb_threads defaults to N unless --fgp-fsdb-threads is specified.'))
     add_child_argument(gvcs,
                        '--fgp-fsdb-threads',
                        parent='--fgp',
                        type=int,
                        default=None,
                        metavar='M',
-                       help=('Set the dedicated FSDB dump thread count passed as num_fsdb_threads:M to -fgp=. '
-                             'Requires --fgp and --waves; simmer adds M to the per-test thread budget.'))
+                       help=('Override the dedicated FSDB dump thread count passed as num_fsdb_threads:M to -fgp= '
+                             '(default: N from --fgp N). Requires --fgp and --waves; simmer adds M to the per-test '
+                             'thread budget.'))
     add_child_argument(gvcs,
                        '--fgp-schedpli',
                        parent='--fgp',
