@@ -6,7 +6,7 @@ load(":input_digest.bzl", "VcsInputIndexInfo", "vcs_input_index")
 load(":simulators/pldm.bzl", "pldm_dv_backend")
 load(":simulators/vcs.bzl", "vcs_dv_backend", "vcs_dv_unit_test_impl")
 load(":simulators/xcelium.bzl", "xcelium_dv_backend", "xcelium_dv_unit_test_impl")
-load(":verilog.bzl", "VerilogInfo", "expand_runfiles_locations", "gather_shell_defines", "get_transitive_srcs", "merge_default_runfiles", "resolve_unit_test_simulator", "runfiles_relative_short_path", "verilog_input_manifest")
+load(":verilog.bzl", "VerilogInfo", "expand_runfiles_locations", "expand_runfiles_locations_list", "gather_shell_defines", "get_transitive_srcs", "merge_default_runfiles", "resolve_unit_test_simulator", "runfiles_relative_short_path", "verilog_input_manifest")
 
 DVTestInfo = provider("Runtime configuration for a DV test.", fields = {
     "sim_opts": "Simulation :options to carry forward.",
@@ -423,9 +423,6 @@ def _verilog_dv_library_impl(ctx):
     else:
         directories = []
 
-    # # Add output files from direct dependencies (from genrules)
-    srcs = depset(ctx.files.srcs, transitive = [dep[DefaultInfo].files for dep in ctx.attr.deps if VerilogInfo not in dep])
-
     if len(ctx.files.in_flist):
         in_flist = ctx.files.in_flist
     else:
@@ -449,8 +446,9 @@ def _verilog_dv_library_impl(ctx):
     # DPI libraries are runtime artifacts. Keep them in transitive_dpi rather
     # than transitive_sources so changing a C implementation does not
     # invalidate the SV compile-input fingerprint.
+    direct_srcs = ctx.files.srcs + ctx.files.in_flist
     trans_srcs = get_transitive_srcs(
-        depset(ctx.files.srcs + ctx.files.in_flist).to_list(),
+        direct_srcs,
         ctx.attr.deps,
         VerilogInfo,
         "transitive_sources",
@@ -479,6 +477,8 @@ def _verilog_dv_library_impl(ctx):
             transitive_vcs_flists = trans_vcs_flists,
             transitive_dpi = trans_dpi,
             last_module = None,
+            direct_sources = depset(direct_srcs),
+            direct_vcs_flists = depset([vcs_out]),
         ),
         DefaultInfo(
             files = all_files,
@@ -614,7 +614,7 @@ def _verilog_dv_tb_impl(ctx):
 
     runtime_config = backend.runtime_config(ctx)
     runtime_runfile_targets = ctx.attr.extra_runfiles + ctx.attr.extra_runtime_runfiles
-    runtime_args = [expand_runfiles_locations(ctx, arg, runtime_runfile_targets) for arg in ctx.attr.extra_runtime_args]
+    runtime_args = expand_runfiles_locations_list(ctx, ctx.attr.extra_runtime_args, runtime_runfile_targets)
     _validate_runtime_args(runtime_args, simulator)
 
     ctx.actions.expand_template(
@@ -652,9 +652,8 @@ def _verilog_dv_tb_impl(ctx):
         content = compile_input_manifest.args,
     )
     digest_arguments = [digest_manifest.path, ctx.outputs.compile_inputs_digest.path, ctx.outputs.compile_inputs.path]
-    digest_inputs = depset([digest_manifest], transitive = [compile_input_manifest.files])
     if simulator == "VCS":
-        indices = depset([dep[VcsInputIndexInfo].index for dep in all_deps])
+        indices = depset(transitive = [dep[VcsInputIndexInfo].indices for dep in all_deps])
         index_list = ctx.actions.declare_file(ctx.label.name + "_compile_input_indices.txt")
         index_args = ctx.actions.args()
         index_args.set_param_file_format("multiline")
@@ -662,6 +661,8 @@ def _verilog_dv_tb_impl(ctx):
         ctx.actions.write(output = index_list, content = index_args)
         digest_arguments = ["--merge"] + digest_arguments + [index_list.path]
         digest_inputs = depset([digest_manifest, index_list] + compile_input_files, transitive = [indices])
+    else:
+        digest_inputs = depset([digest_manifest], transitive = [compile_input_manifest.files])
     ctx.actions.run(
         executable = ctx.executable._compile_input_digest,
         arguments = digest_arguments,

@@ -1,4 +1,5 @@
 """Coverage lineage and recoverable publication for incremental URG merges."""
+from concurrent.futures import ThreadPoolExecutor
 import copy
 import hashlib
 import json
@@ -10,16 +11,34 @@ import tempfile
 import uuid
 from contextlib import contextmanager
 
+_HASH_WORKERS = 8
 
-def _digest_files(files):
+
+def _hash_single_file(path):
+    with path.open("rb") as stream:
+        return hashlib.file_digest(stream, "sha256").digest()
+
+
+def _digest_files(files, executor=None):
+    sorted_files = sorted(files)
+    if not sorted_files:
+        return None
     digest = hashlib.sha256()
-    found = False
-    for name, path in sorted(files):
-        found = True
+    if len(sorted_files) == 1:
+        name, path = sorted_files[0]
         digest.update(os.fsencode(name) + b"\0")
-        with path.open("rb") as stream:
-            digest.update(hashlib.file_digest(stream, "sha256").digest())
-    return digest.hexdigest() if found else None
+        digest.update(_hash_single_file(path))
+        return digest.hexdigest()
+    if executor is not None:
+        file_digests = list(executor.map(_hash_single_file, (path for _name, path in sorted_files)))
+    else:
+        workers = min(_HASH_WORKERS, len(sorted_files))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            file_digests = list(pool.map(_hash_single_file, (path for _name, path in sorted_files)))
+    for (name, _path), file_digest in zip(sorted_files, file_digests):
+        digest.update(os.fsencode(name) + b"\0")
+        digest.update(file_digest)
+    return digest.hexdigest()
 
 
 def _walk(root, ancestors=frozenset(), metadata=None):
@@ -69,13 +88,50 @@ def model_digest(database):
     return _digest_files(files)
 
 
+def scan_database(database):
+    """Collect static model digest and current test datasets in one tree walk."""
+    root = Path(database)
+    if not root.is_dir():
+        return None, None
+    main = root / "snps/coverage/db/testdata"
+    has_main_testdata = main.is_dir()
+    names = sorted(entry.name for entry in os.scandir(main) if entry.is_dir()) if has_main_testdata else None
+    dataset_files = {name: [] for name in names} if names is not None else None
+    model_files = []
+    for directory, path in _walk(root):
+        if directory is not None:
+            if dataset_files is not None and directory.parts[-4:] == ("snps", "coverage", "db", "testdata"):
+                for name in names:
+                    case = directory / name
+                    if not case.is_dir():
+                        continue
+                    for _subdir, case_file in _walk(case):
+                        if case_file is not None:
+                            dataset_files[name].append((str(case_file.relative_to(root)), case_file))
+        elif path is not None and path.name != "design.cv.xml":
+            rel = path.relative_to(root)
+            parts = rel.parts
+            if any(parts[index:index + 4] in (("snps", "coverage", "db", "design"), ("snps", "coverage", "db", "shape"))
+                   for index in range(len(parts) - 3)):
+                model_files.append((str(rel), path))
+    with ThreadPoolExecutor(max_workers=_HASH_WORKERS) as pool:
+        model = _digest_files(model_files, executor=pool)
+        if dataset_files is None:
+            records = None
+        else:
+            records = {name: _digest_files(entries, executor=pool) for name, entries in dataset_files.items()}
+            if any(value is None for value in records.values()):
+                raise OSError("Coverage input contains an empty test dataset")
+    return model, records
+
+
 def datasets(database):
     """Hash current input datasets only; never reopen historical case VDBs."""
     root = Path(database)
     main = root / "snps/coverage/db/testdata"
     if not main.is_dir():
         return None
-    names = sorted(entry.name for entry in main.iterdir() if entry.is_dir())
+    names = sorted(entry.name for entry in os.scandir(main) if entry.is_dir())
     files = {name: [] for name in names}
     for directory, _path in _walk(root):
         if directory is None or directory.parts[-4:] != ("snps", "coverage", "db", "testdata"):
@@ -87,7 +143,8 @@ def datasets(database):
             for _subdir, path in _walk(case):
                 if path is not None:
                     files[name].append((str(path.relative_to(root)), path))
-    result = {name: _digest_files(entries) for name, entries in files.items()}
+    with ThreadPoolExecutor(max_workers=_HASH_WORKERS) as pool:
+        result = {name: _digest_files(entries, executor=pool) for name, entries in files.items()}
     if any(value is None for value in result.values()):
         raise OSError("Coverage input contains an empty test dataset")
     return result
@@ -114,13 +171,11 @@ def write_json(path, value):
 
 
 def make_history(job, signature):
-    if not (Path(job.cov_work_dir) / "snps/coverage/db/design").is_dir():
+    root = Path(job.cov_work_dir)
+    if not (root / "snps/coverage/db/design").is_dir() or not (root / "snps/coverage/db/testdata").is_dir():
         return None
-    records = datasets(job.cov_work_dir)
-    if records is None:
-        return None
-    model = model_digest(job.cov_work_dir)
-    if model is None:
+    model, records = scan_database(job.cov_work_dir)
+    if records is None or model is None:
         return None
     return {
         "schema_version": 1,
@@ -180,15 +235,19 @@ def _filtered_view(source, destination, selected, ancestors=frozenset()):
     destination.mkdir()
     ancestors = ancestors | {resolved}
     testdata = source.parts[-4:] == ("snps", "coverage", "db", "testdata")
-    for entry in sorted(source.iterdir()):
+    with os.scandir(source) as entries:
+        children = sorted(entries, key=lambda entry: entry.name)
+    for entry in children:
         if testdata and entry.name not in selected:
             continue
+        entry_path = Path(entry.path)
         target = destination / entry.name
-        if entry.is_dir() and not testdata:
-            _filtered_view(entry, target, selected, ancestors)
+        is_dir = entry.is_dir(follow_symlinks=True)
+        if is_dir and not testdata:
+            _filtered_view(entry_path, target, selected, ancestors)
         else:
             # Absolute links also keep partition links valid after relocation.
-            target.symlink_to(entry.resolve(strict=True), target_is_directory=entry.is_dir())
+            target.symlink_to(entry_path.resolve(strict=True), target_is_directory=is_dir)
 
 
 def _relocate_links(source, destination):
@@ -367,10 +426,10 @@ class CoverageUpdate:
 
     def publish(self):
         changes = []
-        if model_digest(self.original.cov_work_dir) != self.current["model_sha256"]:
+        current_model, after = scan_database(self.original.cov_work_dir)
+        if current_model != self.current["model_sha256"]:
             changes.append("static coverage model changed")
         before = self.current["datasets"]
-        after = datasets(self.original.cov_work_dir)
         if after is None:
             changes.append("work VDB testdata directory disappeared")
         else:

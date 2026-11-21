@@ -36,11 +36,12 @@ def _resolve_label_default_file(simulator, selected_label, xrun_default_label, x
 def _shell_single_quote(value):
     return "'{}'".format(value.replace("'", "'\"'\"'"))
 
+_GUMI_VALID_CHARS = {char: True for char in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789".elems()}
+
 def _gumi_guard(short_path):
     # For one Java Starlark string element, hash(char) is its UTF-16 ordinal.
     # Encode the escape marker too, and preserve case, to keep paths distinct.
-    valid_chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
-    value = "".join([char if char in valid_chars else "_{}_".format(hash(char)) for char in short_path.elems()])
+    value = "".join([char if char in _GUMI_VALID_CHARS else "_{}_".format(hash(char)) for char in short_path.elems()])
     return "__{}__".format(value)
 
 def create_flist_content(ctx, gumi_path, allow_library_discovery, makelib = "", no_synth = False):
@@ -78,13 +79,12 @@ def create_flist_content(ctx, gumi_path, allow_library_discovery, makelib = "", 
         # A header in the root package has an empty directory; "+incdir+" alone is invalid.
         flist_content.append("+incdir+{}".format(d or "."))
 
-    # Using dirname may result in bazel-out included in path
-    libdir = depset([runfiles_relative_short_path(f)[:-len(f.basename) - 1] for f in ctx.files.modules]).to_list()
-
     flist_content.append(gumi_path)
 
     if not no_synth:
         if allow_library_discovery:
+            # Using dirname may result in bazel-out included in path
+            libdir = depset([runfiles_relative_short_path(f)[:-len(f.basename) - 1] for f in ctx.files.modules]).to_list()
             for d in libdir:
                 if d == "":
                     d = "."
@@ -174,22 +174,26 @@ def _verilog_rtl_library_impl(ctx):
         srcs = [gumi] + srcs
         gumi_path = runfiles_relative_short_path(gumi)
 
-    flist_content = create_flist_content(ctx, gumi_path = gumi_path, allow_library_discovery = False, makelib = ctx.attr.makelib)
+    base_flist_content = create_flist_content(ctx, gumi_path = gumi_path, allow_library_discovery = False)
     vcs_flist = ctx.outputs.flist
     if ctx.attr.makelib:
+        flist_content = ["-makelib", ctx.attr.makelib] + base_flist_content[:-1] + ["-endlib", ""]
         vcs_flist = ctx.actions.declare_file(ctx.label.name + "_vcs.f")
         ctx.actions.write(
             output = vcs_flist,
-            content = "\n".join(create_flist_content(ctx, gumi_path = gumi_path, allow_library_discovery = False)),
+            content = "\n".join(base_flist_content),
         )
+    else:
+        flist_content = base_flist_content
 
-    last_module = None
-    for m in ctx.files.modules:
-        last_module = m
-    for m in ctx.files.lib_files:
-        last_module = m
-    for m in ctx.files.direct:
-        last_module = m
+    if ctx.files.direct:
+        last_module = ctx.files.direct[-1]
+    elif ctx.files.lib_files:
+        last_module = ctx.files.lib_files[-1]
+    elif ctx.files.modules:
+        last_module = ctx.files.modules[-1]
+    else:
+        last_module = None
 
     ctx.actions.write(
         output = ctx.outputs.flist,
@@ -230,6 +234,8 @@ def _verilog_rtl_library_impl(ctx):
             transitive_vcs_flists = trans_vcs_flists,
             transitive_dpi = trans_dpi,
             last_module = last_module,
+            direct_sources = depset(srcs),
+            direct_vcs_flists = depset([vcs_flist]),
         ),
         DefaultInfo(
             files = all_files,
@@ -749,16 +755,22 @@ def _verilog_rtl_lint_test_impl(ctx):
     if top_path == "":
         fail("verilog_rtl_lint_test {} could not determine the top module from the target's dependencies".format(ctx.label))
 
+    flist_flag = "-file" if simulator == "VCS" else "-f"
+    flists_arg = " ".join(["{} {}".format(flist_flag, runfiles_relative_short_path(f)) for f in trans_flists.to_list()])
+    defines_arg = " ".join(defines)
+    rulefile_path = runfiles_relative_short_path(rulefile)
+    lint_parser_path = runfiles_relative_short_path(lint_parser)
+
     ctx.actions.expand_template(
         template = command_template,
         output = ctx.outputs.command_script,
         substitutions = {
-            "{RULEFILE}": runfiles_relative_short_path(rulefile),
-            "{DEFINES}": " ".join(defines),
-            "{FLISTS}": " ".join(["{} {}".format("-file" if simulator == "VCS" else "-f", runfiles_relative_short_path(f)) for f in trans_flists.to_list()]),
+            "{RULEFILE}": rulefile_path,
+            "{DEFINES}": defines_arg,
+            "{FLISTS}": flists_arg,
             "{TOP_PATH}": top_path,
             "{INST_TOP}": ctx.attr.top,
-            "{LINT_PARSER}": runfiles_relative_short_path(lint_parser),
+            "{LINT_PARSER}": lint_parser_path,
         },
     )
 
@@ -772,27 +784,18 @@ def _verilog_rtl_lint_test_impl(ctx):
         substitutions = {
             "{SIMULATOR_COMMAND}": simulator_command,
             "{COMMAND_SCRIPT}": runfiles_relative_short_path(ctx.outputs.command_script),
-            "{DEFINES}": " ".join(defines),
-            "{FLISTS}": " ".join(["{} {}".format("-file" if simulator == "VCS" else "-f", runfiles_relative_short_path(f)) for f in trans_flists.to_list()]),
+            "{DEFINES}": defines_arg,
+            "{FLISTS}": flists_arg,
             "{TOP_PATH}": top_path,
             "{DESIGN_INFO}": " ".join(["-design_info {}".format(runfiles_relative_short_path(design_info)) for design_info in ctx.files.design_info]),
-            "{RULEFILE}": runfiles_relative_short_path(rulefile),
+            "{RULEFILE}": rulefile_path,
             "{INST_TOP}": ctx.attr.top,
-            "{LINT_PARSER}": runfiles_relative_short_path(lint_parser),
+            "{LINT_PARSER}": lint_parser_path,
             "{LINT_PARSER_LIB}": runfiles_relative_short_path(ctx.files._lint_parser_lib[0])[:-len(ctx.files._lint_parser_lib[0].basename) - 1],
             "{WAIVER_DIRECT}": ctx.attr.waiver_direct,
             "{WAIVER_DIRECT_SHELL_QUOTED}": _shell_single_quote(ctx.attr.waiver_direct),
         },
         is_executable = True,
-    )
-
-    trans_flists = get_transitive_srcs(
-        [],
-        ctx.attr.shells + ctx.attr.deps,
-        VerilogInfo,
-        flist_field,
-        allow_other_outputs = False,
-        fallback_attr_name = "transitive_flists",
     )
     trans_srcs = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_sources", allow_other_outputs = True)
 
@@ -1021,8 +1024,9 @@ def _verilog_rtl_cdc_test_impl(ctx):
 
     runfiles = merge_default_runfiles(
         ctx,
-        files = [ctx.outputs.preamble_cmds, ctx.outputs.epilogue_cmds] + trans_srcs.to_list() + trans_flists.to_list() + ctx.files.cmd_files,
+        files = [ctx.outputs.preamble_cmds, ctx.outputs.epilogue_cmds] + ctx.files.cmd_files,
         targets = ctx.attr.shells + ctx.attr.deps + ctx.attr.cmd_files,
+        transitive_files = depset(transitive = [trans_srcs, trans_flists]),
     )
 
     return [

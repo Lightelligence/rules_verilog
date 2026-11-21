@@ -6,6 +6,8 @@ import json
 import re
 import sys
 
+_HEX64_RE = re.compile(r"[0-9a-f]{64}")
+
 
 def read_records(manifest_path):
     """Read internal manifest records, retaining their order and identity."""
@@ -48,11 +50,8 @@ def generate_digest(manifest_path, output_path, inventory_path=None):
 
 def file_digest(path):
     """Hash a file without retaining its contents in memory."""
-    digest = hashlib.sha256()
     with open(path, "rb") as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+        return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
 def read_indices(index_list_path):
@@ -66,9 +65,12 @@ def read_indices(index_list_path):
         with open(index_path, encoding="utf-8") as index:
             entries = json.load(index)
         for path, value in entries.items():
-            if not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{64}", value) is None:
+            existing = hashes.get(path)
+            if existing is not None and existing == value:
+                continue
+            if not isinstance(value, str) or _HEX64_RE.fullmatch(value) is None:
                 raise RuntimeError("Malformed compile input index hash: {!r}".format(path))
-            if path in hashes and hashes[path] != value:
+            if existing is not None:
                 raise RuntimeError("Conflicting compile input index hashes: {!r}".format(path))
             hashes[path] = value
     return hashes

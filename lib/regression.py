@@ -408,15 +408,18 @@ class RegressionConfig():
     def _discovery_dependency_manifest(self):
         submodule_state = self._git_submodule_state()
         project_root = os.path.realpath(self.proj_dir)
-        dependency_paths = sorted(set(self._iter_discovery_dependency_paths(submodule_state)))
+        precomputed_digests = {}
+        dependency_paths = sorted(set(self._iter_discovery_dependency_paths(submodule_state, precomputed_digests)))
         files = []
         for path in dependency_paths:
             relative_path = self._manifest_relative_path(path, project_root)
-            try:
-                with open(path, "rb") as filep:
-                    digest = hashlib.sha256(filep.read()).hexdigest()
-            except OSError:
-                digest = "missing"
+            digest = precomputed_digests.get(path)
+            if digest is None:
+                try:
+                    with open(path, "rb") as filep:
+                        digest = hashlib.file_digest(filep, "sha256").hexdigest()
+                except OSError:
+                    digest = "missing"
             files.append({"path": relative_path, "sha256": digest})
         manifest = {
             "schema_version": 7,
@@ -560,12 +563,14 @@ class RegressionConfig():
                     yield os.path.join(root, filename)
         yield from self._bazelrc_dependency_paths()
 
-    def _iter_discovery_dependency_paths(self, submodule_state=None):
+    def _iter_discovery_dependency_paths(self, submodule_state=None, digests=None):
         """Yield metadata only; incomplete discovery provenance disables reuse."""
         if submodule_state is None:
             submodule_state = self._git_submodule_state()
         project_paths = list(self._iter_project_discovery_dependency_paths(submodule_state))
-        external_paths, self._discovery_input_error = discovery_inputs.external_metadata(self.proj_dir, project_paths)
+        external_paths, self._discovery_input_error = discovery_inputs.external_metadata(self.proj_dir,
+                                                                                         project_paths,
+                                                                                         digests=digests)
         if self._discovery_input_error is None:
             self._discovery_input_error = discovery_inputs.project_directory_symlink_error(self.proj_dir)
         yield from project_paths

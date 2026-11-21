@@ -1345,6 +1345,29 @@ class RegressionDiscoveryTest(unittest.TestCase):
         self.assertEqual([], config.deferred_messages)
         self.assertEqual(0, config.current_time)
 
+    def test_external_metadata_short_circuits_and_reuses_digests(self):
+        from lib import discovery_inputs
+        import hashlib
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            first = root / "BUILD"
+            second = root / "pkg" / "BUILD"
+            second.parent.mkdir()
+            first.write_text("srcs = glob(['*.sv'])\n", encoding="utf-8")
+            second.write_text("not valid python syntax (((\n", encoding="utf-8")
+            digests = {}
+
+            external_paths, error = discovery_inputs.external_metadata(str(root), [str(first), str(second)],
+                                                                       digests=digests)
+
+            self.assertEqual([], external_paths)
+            self.assertIsNotNone(error)
+            self.assertIn("glob", error["detail"])
+            self.assertIn(str(first), digests)
+            self.assertNotIn(str(second), digests)
+            self.assertEqual(hashlib.sha256(first.read_bytes()).hexdigest(), digests[str(first)])
+
 
 if __name__ == "__main__":
     unittest.main()

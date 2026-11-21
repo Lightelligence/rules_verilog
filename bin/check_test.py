@@ -68,10 +68,36 @@ finish_regex = re.compile(r"(?:" + ")|(?:".join(finish_signatures) + r")", re.MU
 enable_regex = re.compile(r".*TEST_CHECK_ENABLE: (.*)")
 disable_regex = re.compile(r".*TEST_CHECK_DISABLE: (.*)")
 non_ascii_bytes_regex = re.compile(rb"[^\x00-\x7f]")
+_FINISH_SIGNATURE_BYTES = tuple(signature.encode('utf-8') for signature in finish_signatures)
+_DEFAULT_ERROR_REGEX = re.compile(r"(?:" + ")|(?:".join(default_error_signatures) + r")", re.MULTILINE)
+_DEFAULT_BYTE_ERROR_REGEX = re.compile(_DEFAULT_ERROR_REGEX.pattern.encode('utf-8'), re.MULTILINE)
+_UNSAFE_COMBINE_RE = re.compile(r"\(\?(?!:)|\\[1-9]")
+_TAIL_SCAN_BYTES = 65536
 
 # Global error regex placeholder
 err_regex = None
 active_signatures = list(default_error_signatures)
+
+
+def _build_fast_matchers(patterns, compiled_patterns):
+    """Combine flag/backref-free patterns into one regex for boolean matching."""
+    combinable = []
+    standalone = []
+    for raw, compiled in zip(patterns, compiled_patterns):
+        if _UNSAFE_COMBINE_RE.search(raw):
+            standalone.append(compiled)
+        else:
+            combinable.append(raw)
+    fast = []
+    if len(combinable) > 1:
+        try:
+            fast.append(re.compile(r"(?:" + ")|(?:".join(combinable) + r")", re.MULTILINE))
+        except re.error:
+            fast.extend(re.compile(raw, re.MULTILINE) for raw in combinable)
+    elif len(combinable) == 1:
+        fast.append(re.compile(combinable[0], re.MULTILINE))
+    fast.extend(standalone)
+    return tuple(fast)
 
 
 class PatternSet:
@@ -79,6 +105,10 @@ class PatternSet:
 
     def __init__(self, patterns):
         self.patterns = tuple(re.compile(pattern, re.MULTILINE) for pattern in patterns)
+        self._fast_patterns = _build_fast_matchers(patterns, self.patterns)
+
+    def matches(self, text):
+        return any(pattern.search(text) is not None for pattern in self._fast_patterns)
 
     def search(self, text):
         first_match = None
@@ -89,6 +119,12 @@ class PatternSet:
                 if match.start() == 0:
                     break
         return first_match
+
+
+def _pattern_matches(matcher, text):
+    if isinstance(matcher, PatternSet):
+        return matcher.matches(text)
+    return matcher.search(text) is not None
 
 
 def compile_patterns(patterns):
@@ -103,7 +139,7 @@ def compile_error_regex():
     global err_regex
     if active_signatures == default_error_signatures:
         # The built-in patterns contain no capturing groups or inline flags.
-        err_regex = re.compile(r"(?:" + ")|(?:".join(active_signatures) + r")", re.MULTILINE)
+        err_regex = _DEFAULT_ERROR_REGEX
     else:
         err_regex = compile_patterns(active_signatures)
 
@@ -136,10 +172,30 @@ def update_signatures(line):
 
 
 def get_file_tail(filepath, n_lines=25):
-    """Returns the last n_lines of a file using a deque."""
+    """Returns the last n_lines of a file by seeking backward from EOF."""
+    if n_lines <= 0:
+        return []
     try:
-        with open(filepath, 'r', encoding='utf-8', errors='replace') as f:
-            return deque(f, n_lines)
+        with open(filepath, 'rb') as f:
+            f.seek(0, os.SEEK_END)
+            file_size = f.tell()
+            if file_size == 0:
+                return []
+            chunk_size = 65536
+            pos = file_size
+            chunks = []
+            newline_count = 0
+            while pos > 0 and newline_count <= n_lines:
+                read_size = min(chunk_size, pos)
+                pos -= read_size
+                f.seek(pos)
+                chunk = f.read(read_size)
+                chunks.append(chunk)
+                newline_count += chunk.count(b'\n') + chunk.count(b'\r')
+            data = b''.join(reversed(chunks))
+            text = data.decode('utf-8', errors='replace').replace('\r\n', '\n').replace('\r', '\n')
+            lines = text.splitlines(keepends=True)
+            return deque(lines[-n_lines:], n_lines)
     except Exception:
         return []
 
@@ -155,12 +211,13 @@ def scan_text_log(filepath, error_limit, extra_error_regex=None, required_finish
             if "TEST_CHECK_" in line and (enable_regex.match(line) or disable_regex.match(line)):
                 update_signatures(line)
                 continue
-            if err_regex.search(line) or (extra_error_regex is not None and extra_error_regex.search(line)):
+            if _pattern_matches(err_regex, line) or (extra_error_regex is not None
+                                                     and _pattern_matches(extra_error_regex, line)):
                 error_lines.append(line)
                 if len(error_lines) >= error_limit:
                     break
-            elif not found_finish and (required_finish_regex.search(line)
-                                       if required_finish_regex is not None else finish_regex.search(line)):
+            elif not found_finish and (_pattern_matches(required_finish_regex, line)
+                                       if required_finish_regex is not None else finish_regex.search(line) is not None):
                 found_finish = True
             elif "SVSEED" in line or "random seed used" in line:
                 seed_lines.append(line)
@@ -214,7 +271,8 @@ def scan_static_log(filepath, error_limit, extra_error_regex=None, required_fini
 
             error_lines = []
             seen_line_starts = set()
-            byte_error_regex = re.compile(err_regex.pattern.encode('utf-8'), re.MULTILINE)
+            byte_error_regex = (_DEFAULT_BYTE_ERROR_REGEX if err_regex is _DEFAULT_ERROR_REGEX else re.compile(
+                err_regex.pattern.encode('utf-8'), re.MULTILINE))
             for match in byte_error_regex.finditer(search_data):
                 line_start = search_data.rfind(b'\n', 0, match.start()) + 1
                 if line_start in seen_line_starts:
@@ -227,7 +285,11 @@ def scan_static_log(filepath, error_limit, extra_error_regex=None, required_fini
                     break
             seed_lines = find_lines(search_data, [b"SVSEED", b"random seed used"])
             run_time_lines = find_lines(search_data, [b"real\t"], required_marker=b"user\t")
-            found_finish = any(search_data.find(signature.encode('utf-8')) != -1 for signature in finish_signatures)
+            tail_start = max(0, len(search_data) - _TAIL_SCAN_BYTES)
+            found_finish = any(search_data.find(sig, tail_start) != -1 for sig in _FINISH_SIGNATURE_BYTES)
+            if not found_finish and tail_start > 0:
+                found_finish = any(
+                    search_data.find(sig, 0, tail_start + len(sig)) != -1 for sig in _FINISH_SIGNATURE_BYTES)
             return error_lines, seed_lines, run_time_lines, found_finish
 
 

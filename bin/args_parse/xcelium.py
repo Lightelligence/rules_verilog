@@ -109,6 +109,15 @@ def add_xcelium_arguments(parser):
         default=COVFILE,
         help=('Pass an existing Xcelium coverage configuration file. An explicitly supplied path requires '
               '--coverage and is validated before Bazel starts; otherwise the testbench xcelium_covfile is preferred.'))
+    add_child_argument(
+        gxrun,
+        '--xrun-imc-html',
+        parent='--coverage',
+        default=False,
+        action='store_true',
+        help=('Generate the full IMC HTML coverage report with bidirectional test grading '
+              '(report -html -grading both). Disabled by default so routine --coverage --report runs '
+              'generate only the lightweight text summaries needed for the regression dashboard. Requires --coverage.'))
     gxrun.add_argument(
         '--msie',
         metavar='PRIMARY_TOP',

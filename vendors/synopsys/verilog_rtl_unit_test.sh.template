@@ -45,9 +45,17 @@ mkdir -p "$work_dir"
 # compile_wave_args=(-debug_access+all -kdb)
 # runtime_wave_args=(-ucli -do "{WAVES_RENDER_CMD_PATH}")
 
+vcs_make_jobs="${LSB_DJOB_NUMPROC:-${SLURM_CPUS_PER_TASK:-$(nproc 2>/dev/null || echo 1)}}"
+vcs_job_args=()
+if [[ "$vcs_make_jobs" =~ ^[0-9]+$ ]] && (( vcs_make_jobs > 1 )); then
+    (( vcs_make_jobs > 4 )) && vcs_make_jobs=4
+    vcs_job_args=("-j${vcs_make_jobs}")
+fi
+
 simv="$work_dir/simv"
 {SIMULATOR_COMMAND} \
     -full64 \
+    "${vcs_job_args[@]}" \
     -file "{COMPILE_ARGS_FILE}" \
     -debug_access+r+w+f \
     -Mdir="$work_dir/csrc" \

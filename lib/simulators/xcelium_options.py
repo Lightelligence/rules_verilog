@@ -37,6 +37,8 @@ def validate_xcelium_runtime_options(options, parser):
         parser.error("--wave-delta requires '--waves --wave-type shm'. Stopping before Bazel starts.")
     if options.covfile_was_explicit and not options.coverage:
         parser.error("--covfile requires --coverage. Stopping before Bazel starts.")
+    if getattr(options, 'xrun_imc_html', False) and not options.coverage:
+        parser.error("--xrun-imc-html requires --coverage. Stopping before Bazel starts.")
     if options.coverage and options.covfile_was_explicit:
         # Keep the caller's file distinct from rule-provided runfiles paths.
         options.covfile = os.path.abspath(options.covfile)

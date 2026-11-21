@@ -8,6 +8,7 @@ import json
 import hashlib
 import datetime
 from hashlib import sha1
+import mmap
 import os
 import sys
 import random
@@ -195,7 +196,7 @@ def _symlink_lock_path(link_path):
     return os.path.join(os.path.dirname(absolute_link_path), ".simmer", "locks", "{}-{}.lock".format(basename, digest))
 
 
-def replace_symlink(link_path, target_path, cancel_check=None):
+def replace_symlink(link_path, target_path, cancel_check=None, use_lock=True):
     """Atomically replace a convenience symlink shared by simmer processes."""
     absolute_link_path = os.path.abspath(link_path)
     directory = os.path.dirname(absolute_link_path)
@@ -204,13 +205,14 @@ def replace_symlink(link_path, target_path, cancel_check=None):
         ".{}.{}.{}.tmp".format(os.path.basename(link_path), os.getpid(),
                                uuid.uuid4().hex),
     )
-    link_lock = compile_cache.CompileDirectoryLock(_symlink_lock_path(absolute_link_path))
-    if cancel_check is None:
-        link_lock.acquire()
-    else:
-        while not link_lock.acquire(blocking=False):
-            cancel_check()
-            time.sleep(0.05)
+    link_lock = compile_cache.CompileDirectoryLock(_symlink_lock_path(absolute_link_path)) if use_lock else None
+    if link_lock is not None:
+        if cancel_check is None:
+            link_lock.acquire()
+        else:
+            while not link_lock.acquire(blocking=False):
+                cancel_check()
+                time.sleep(0.05)
     try:
         if cancel_check is not None:
             cancel_check()
@@ -219,12 +221,18 @@ def replace_symlink(link_path, target_path, cancel_check=None):
     finally:
         if os.path.lexists(temporary_path):
             os.remove(temporary_path)
-        link_lock.release()
+        if link_lock is not None:
+            link_lock.release()
 
 
 def remove_symlink_if_target(link_path, target_path):
     """Remove a shared convenience symlink only when this run still owns it."""
     absolute_link_path = os.path.abspath(link_path)
+    try:
+        if os.readlink(absolute_link_path) != target_path:
+            return False
+    except (FileNotFoundError, OSError):
+        return False
     link_lock = compile_cache.CompileDirectoryLock(_symlink_lock_path(absolute_link_path))
     link_lock.acquire()
     try:
@@ -1336,6 +1344,7 @@ class TestJob(Job):
             os.path.join(self.job_dir, '.vcomp'),
             self.vcomper.job_dir,
             cancel_check=self.raise_if_cancelled,
+            use_lock=False,
         )
 
         if not self.rcfg.tidy:
@@ -1511,31 +1520,48 @@ class TestJob(Job):
     def _get_stats_from_log_file(self):
         return self._read_simulation_statistics()[:2]
 
+    _TEST_DURATION_RE = re.compile(r'Test Duration:\s*(?P<duration>[0-9]+:[0-9]{2}:[0-9]{2})')
+    _AVERAGE_CPS_RE = re.compile(r'Average cycles/sec:\s*(?P<cps>[0-9][0-9,]*(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)')
+    _SIM_DURATION_RE = re.compile(r'^%I:sim: Simulation duration: (?P<duration>[0-9]+) seconds$')
+
+    @staticmethod
+    def _find_last_stat_match(data, marker, pattern, group_name, full_line=False):
+        search_end = len(data)
+        while search_end > 0:
+            pos = data.rfind(marker, 0, search_end)
+            if pos == -1:
+                return None
+            line_start = data.rfind(b'\n', 0, pos) + 1
+            line_end = data.find(b'\n', pos)
+            if line_end == -1:
+                line_end = len(data)
+            raw_line = data[line_start:line_end].decode('utf8', errors='ignore')
+            for subline in reversed(raw_line.splitlines()):
+                match = pattern.match(subline.strip()) if full_line else pattern.search(subline)
+                if match:
+                    return match.group(group_name)
+            search_end = line_start
+        return None
+
     def _read_simulation_statistics(self):
-        """Collect all timing markers in one pass, retaining the last match."""
-        duration_re = re.compile(r'Test Duration:\s*(?P<duration>[0-9]+:[0-9]{2}:[0-9]{2})')
-        cps_re = re.compile(r'Average cycles/sec:\s*(?P<cps>[0-9][0-9,]*(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)')
-        simulation_re = re.compile(r'^%I:sim: Simulation duration: (?P<duration>[0-9]+) seconds$')
+        """Collect all timing markers from EOF backward using mmap.rfind."""
         duration = None
         cps = None
         simulation_duration = None
         try:
-            with open(self._log_path, 'r', encoding="utf8", errors='ignore') as log_file:
-                for line in log_file:
-                    # Most lines are ordinary simulator output. Skip regexes
-                    # when their required literal marker is absent.
-                    if 'Test Duration:' in line:
-                        duration_match = duration_re.search(line)
-                        if duration_match:
-                            duration = duration_match.group('duration')
-                    if 'Average cycles/sec:' in line:
-                        cps_match = cps_re.search(line)
-                        if cps_match:
-                            cps = cps_match.group('cps')
-                    if '%I:sim: Simulation duration:' in line:
-                        simulation_match = simulation_re.match(line.strip())
-                        if simulation_match:
-                            simulation_duration = int(simulation_match.group('duration'))
+            with open(self._log_path, 'rb') as log_file:
+                if os.fstat(log_file.fileno()).st_size == 0:
+                    return None, None, None
+                with mmap.mmap(log_file.fileno(), 0, access=mmap.ACCESS_READ) as data:
+                    duration = self._find_last_stat_match(data, b'Test Duration:', self._TEST_DURATION_RE, 'duration')
+                    cps = self._find_last_stat_match(data, b'Average cycles/sec:', self._AVERAGE_CPS_RE, 'cps')
+                    sim_duration_str = self._find_last_stat_match(data,
+                                                                  b'%I:sim: Simulation duration:',
+                                                                  self._SIM_DURATION_RE,
+                                                                  'duration',
+                                                                  full_line=True)
+                    if sim_duration_str is not None:
+                        simulation_duration = int(sim_duration_str)
         except OSError:
             return None, None, None
         if duration is not None:
@@ -1930,11 +1956,14 @@ def main(rcfg, options, active_run=None):
 
             [setattr(t, 'suppress_output', suppress_via_tests or suppress_via_vcomp_jobs) for t in tests]
 
+            tests_to_queue = []
             for test in tests:
                 if options.no_run:
                     test.jobstatus = JobStatus.TO_BE_BYPASSED
                 elif not dynamic_test_plan:
-                    jm.add_job(test)
+                    tests_to_queue.append(test)
+            if tests_to_queue:
+                jm.add_jobs(tests_to_queue)
 
         if active_run is not None:
             active_run.start_watching(
@@ -2021,8 +2050,10 @@ def main(rcfg, options, active_run=None):
                 rrt.render_regression_page()
             with open(index_lock_path, "w") as report_lock:
                 fcntl.flock(report_lock, fcntl.LOCK_EX)
-                rrt.render_bench_page()
-                rrt.render_home_page()
+                rrt._refresh_project_info()
+                dashboard = rrt.dashboard_data()
+                rrt.render_bench_page(dashboard=dashboard, refresh=False)
+                rrt.render_home_page(dashboard=dashboard, refresh=False)
                 rrt.write_run_launcher(os.environ.get("SIMMER_REPORT_URL"))
 
         rv_utils.print_simmer_profile(rcfg, jm)

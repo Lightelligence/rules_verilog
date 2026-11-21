@@ -25,9 +25,18 @@ def write_executable_script(path, content):
     path.chmod(path.stat().st_mode | 0o111)
 
 
+_SCRIPT_SOURCE_CACHE = {}
+
+
 def materialize_python_script(source_path, destination_path):
     """Copy an importable Python tool into a standalone generated job."""
     source_path = Path(source_path)
     destination_path = Path(destination_path)
-    write_executable_script(destination_path, source_path.read_text(encoding="utf-8"))
+    stat_result = source_path.stat()
+    cache_key = (str(source_path), stat_result.st_mtime_ns, stat_result.st_size)
+    content = _SCRIPT_SOURCE_CACHE.get(cache_key)
+    if content is None:
+        content = source_path.read_text(encoding="utf-8")
+        _SCRIPT_SOURCE_CACHE[cache_key] = content
+    write_executable_script(destination_path, content)
     return str(destination_path)

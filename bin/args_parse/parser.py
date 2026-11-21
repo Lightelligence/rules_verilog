@@ -183,6 +183,7 @@ def parse_args(argv):
             '--mce-split-max-size',
             '--coverage',
             '--covfile',
+            '--xrun-imc-html',
             '--msie',
             '--msie-href',
             '--msie-prim',

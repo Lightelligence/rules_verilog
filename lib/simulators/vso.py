@@ -1,5 +1,6 @@
 """VSO.ai CSO workflow support owned by the VCS backend."""
 
+from collections import deque
 import csv
 import json
 import os
@@ -122,7 +123,7 @@ class VsoWorkflow:
     def apply_ask_results(self, all_vcomp, log_path):
         templates = {}
         for iteration_cfg, test in self._templates(all_vcomp):
-            iteration_cfg.backend_assignments = []
+            iteration_cfg.backend_assignments = deque()
             templates[(self.build_name(test.vcomper), test.target)] = (iteration_cfg, test)
 
         planned_runs = 0
@@ -152,7 +153,8 @@ class VsoWorkflow:
     def prepare_test(self, test_job):
         if not test_job.icfg.backend_assignments:
             raise RuntimeError("No VSO.ai assignment available for {}".format(test_job.target))
-        assignment = test_job.icfg.backend_assignments.pop(0)
+        assignments = test_job.icfg.backend_assignments
+        assignment = assignments.popleft() if isinstance(assignments, deque) else assignments.pop(0)
         test_job.vso_run_id = assignment["run_id"]
         if assignment["seed"] is None:
             return None

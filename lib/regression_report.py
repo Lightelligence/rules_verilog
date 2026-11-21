@@ -304,25 +304,31 @@ class RegressionReport:
             dashboard[project_name] = project_rows
         return dashboard
 
-    def render_home_page(self):
-        self._refresh_project_info()
+    def render_home_page(self, dashboard=None, refresh=True):
+        if refresh:
+            self._refresh_project_info()
+        if dashboard is None:
+            dashboard = self.dashboard_data()
         rendered_html = self.HOME_TEMPLATE.render(
             project=self.project_info,
-            dashboard=self.dashboard_data(),
+            dashboard=dashboard,
         )
         _write_text_atomic(_contained_path(self.output_path, "index.html"), rendered_html)
 
-    def render_bench_page(self):
-        self._refresh_project_info()
+    def render_bench_page(self, dashboard=None, refresh=True):
+        if refresh:
+            self._refresh_project_info()
         project_path = _contained_path(self.output_path, self.proj_name)
         os.makedirs(project_path, exist_ok=True)
         for bench in self.bench_list:
             os.makedirs(_contained_path(project_path, bench), exist_ok=True)
         _write_json_atomic(self.project_info_path, self.project_info)
+        if dashboard is None:
+            dashboard = self.dashboard_data()
         rendered_html = self.BENCHS_TEMPLATE.render(
             project_name=self.proj_name,
             project=self.project_info,
-            bench_summaries=self.dashboard_data().get(self.proj_name, []),
+            bench_summaries=dashboard.get(self.proj_name, []),
         )
         _write_text_atomic(_contained_path(project_path, "index.html"), rendered_html)
 
