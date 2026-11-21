@@ -970,11 +970,14 @@ For quiet normal runs, avoid `--tool-debug`; it prints scheduler polling noise.
 - Use `--fgp N` (or `--fgp auto`) for runtime threading only after profiling;
   simmer reduces the number of concurrent tests to account for those threads.
   `--fgp auto` inspects the LSF/Slurm/affinity CPU allocation and selected test
-  count: when fewer tests than allocated CPUs are run, it reserves 1 core for
-  the FGP master, sizes simulation (and `--waves` FSDB) threads to fit the
-  per-test core budget, and enables `allow_less_cores`; when total tests >= 
-  allocated CPUs (e.g., `sys_tb:*` on `bsub -n 8`), it disables FGP so all
-  slots run single-core tests in parallel. `--fgp` cannot be
+  count: when fewer tests than allocated CPUs are run, it caps each test to at
+  most 8 cores (so `bsub -n 16` still compiles across 16 cores while a single
+  test caps at 8 cores and 2 tests run at 8 cores each; use explicit `--fgp N`
+  to override), reserves 1 core for the FGP master, sizes simulation (and
+  `--waves` FSDB) threads to fit the per-test core budget, and enables
+  `allow_less_cores`; when total tests >= allocated CPUs (e.g., `sys_tb:*` on
+  `bsub -n 8`), it disables FGP so all slots run single-core tests in parallel.
+  `--fgp` cannot be
   combined with `--gui` (`-debug_access+reverse`). When combined with `--waves`,
   simmer passes `num_fsdb_threads:N` by default (override with
   `--fgp-fsdb-threads M`) and includes FSDB threads in the per-test thread

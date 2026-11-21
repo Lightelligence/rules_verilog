@@ -1665,6 +1665,27 @@ class VcsSimprofileAndFgpTest(unittest.TestCase):
             self.assertEqual(4, pair.get_scheduler_threads_per_test())
             self.assertIn("-fgp=num_threads:3,allow_less_cores", shlex.split(pair.generate_sim_options(test_job, 7)))
 
+            # bsub -n 16 with 1 test -> capped at 8 cores per test (7 worker + 1 master).
+            large_single = make_auto(["--simulator", "VCS", "--fgp", "auto"], slots=16, total_tests=1)
+            self.assertTrue(large_single.is_fgp_enabled())
+            self.assertEqual(8, large_single.get_scheduler_threads_per_test())
+            self.assertIn("-fgp=num_threads:7,allow_less_cores",
+                          shlex.split(large_single.generate_sim_options(test_job, 7)))
+
+            # bsub -n 16 with 1 test + --waves -> capped at 8 cores (5 sim + 2 FSDB + 1 master).
+            large_single_waves = make_auto(["--simulator", "VCS", "--fgp", "auto", "--waves"], slots=16, total_tests=1)
+            self.assertTrue(large_single_waves.is_fgp_enabled())
+            self.assertEqual(8, large_single_waves.get_scheduler_threads_per_test())
+            self.assertIn("-fgp=num_threads:5,num_fsdb_threads:2,allow_less_cores",
+                          shlex.split(large_single_waves.generate_sim_options(test_job, 7)))
+
+            # bsub -n 16 with 2 tests -> 8-core budget per test (2 x 8 = 16 cores).
+            large_pair = make_auto(["--simulator", "VCS", "--fgp", "auto"], slots=16, total_tests=2)
+            self.assertTrue(large_pair.is_fgp_enabled())
+            self.assertEqual(8, large_pair.get_scheduler_threads_per_test())
+            self.assertIn("-fgp=num_threads:7,allow_less_cores",
+                          shlex.split(large_pair.generate_sim_options(test_job, 7)))
+
             # bsub -n 8 with 8+ tests (sys_tb:*) -> FGP disabled so 8 single-core tests run in parallel.
             wide = make_auto(["--simulator", "VCS", "--fgp", "auto"], slots=8, total_tests=8)
             self.assertFalse(wide.is_fgp_enabled())

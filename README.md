@@ -301,9 +301,10 @@ automatically passes `num_fsdb_threads:N` (override with
 its job scheduler:
 
 ```bash
-# Auto-size FGP from LSF/Slurm CPU allocation and test count (e.g. bsub -n 8:
+# Auto-size FGP from LSF/Slurm CPU allocation and test count (capped at 8 cores
+# per test so bsub -n 16 compiles at 16 cores while 1 test caps at 8 cores:
 # 1 test -> num_threads:7,allow_less_cores; 1 test + --waves -> 5 + 2 FSDB;
-# 8+ tests -> disables FGP to keep full single-core parallel throughput)
+# 8+ tests on -n 8 -> disables FGP to keep full single-core parallel throughput)
 bsub -Is -n 8 -R "span[hosts=1]" -q syn \
   simmer -t 'sys_tb:long_test@1' --simulator VCS --fgp auto
 

@@ -273,9 +273,10 @@ def add_vcs_arguments(parser):
                       help=('Enable VCS Fine-Grained Parallelism at compile time and pass -fgp=num_threads:N '
                             'at runtime. Accepts a positive integer N or auto. auto inspects the LSF/Slurm/affinity '
                             'CPU allocation and selected test count: it sizes threads to fit within the per-test '
-                            'core budget (reserving 1 core for the FGP master, splitting FSDB threads under --waves, '
-                            'and adding allow_less_cores) and automatically disables FGP when total tests >= allocated '
-                            'CPUs so batch regressions keep full single-core throughput. Incompatible with --gui '
+                            'core budget (capped at 8 cores per test, reserving 1 core for the FGP master, splitting '
+                            'FSDB threads under --waves, and adding allow_less_cores) and automatically disables FGP '
+                            'when total tests >= allocated CPUs so batch regressions keep full single-core throughput. '
+                            'Pass an explicit integer N to exceed the 8-core auto cap. Incompatible with --gui '
                             '(-debug_access+reverse). With an explicit N and --waves, num_fsdb_threads defaults to N '
                             'unless --fgp-fsdb-threads is specified.'))
     add_child_argument(gvcs,

@@ -38,6 +38,11 @@ _VCS_DEBUG_ACCESS_FLAGS = {
     "none": "",
 }
 _MAX_BENIGN_MAKE_CLOCK_SKEW_SECONDS = 0.1
+# Cap --fgp auto to 8 cores per test (master + workers + FSDB threads) so large
+# allocations like bsub -n 16 still compile at full width without wasting FGP
+# tokens or hitting diminishing returns on a single simv. Explicit --fgp N is
+# uncapped.
+_FGP_AUTO_MAX_CORES_PER_TEST = 8
 _MAKE_CLOCK_SKEW_PROBE_RE = re.compile(rb"(?i)modification time|clock skew")
 _FUTURE_MTIME_RE = re.compile(r"(?i)\bmake(?:\[\d+\])?:\s*warning:\s*file .+ has modification time "
                               r"([0-9]+(?:\.[0-9]+)?)\s+s in the(?:\s+future\b|(?P<continued>\s*\\\s*$))")
@@ -395,7 +400,7 @@ class VcsSimulator(SimulatorInterface):
             self._resolved_fgp_plan = (None, None, False)
             return self._resolved_fgp_plan
 
-        budget = slots // total_tests
+        budget = min(slots // total_tests, _FGP_AUTO_MAX_CORES_PER_TEST)
         usable = budget - 1 # Reserve 1 core for the VCS FGP master thread.
         if self.options.waves is not None:
             if explicit_fsdb is not None:
